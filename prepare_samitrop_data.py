@@ -191,6 +191,9 @@ def run(args):
             digital_signals[~np.isfinite(digital_signals)] = -2**(num_bits-1)
             digital_signals = np.asarray(digital_signals, dtype=np.int32) # We need to promote from 16-bit integers due to an error in the Python WFDB library.
 
+#             # Print the signal length
+            print(f'Exam ID: {exam_id}, Signal length: {len(digital_signals)}')
+
             # Add the exam ID, the patient ID, age, sex, Chagas label, and data source.
             age = exam_id_to_age[exam_id]
             sex = exam_id_to_sex[exam_id]
