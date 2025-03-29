@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.4.0-base-ubuntu20.04
+FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
 
 
 ## DO NOT EDIT these 3 lines.
@@ -17,10 +17,14 @@ RUN apt-get update && \
         python3-opencv \
         libglib2.0-0
 
-COPY requirements.txt requirements.txt
+COPY requirements_linux.txt requirements_linux.txt
 
 RUN python3 -m pip install --upgrade pip
 
-RUN pip3 install torch --index-url https://download.pytorch.org/whl/cu118
+RUN pip3 install -r requirements_linux.txt
 
 RUN gdown https://drive.google.com/drive/folders/1SCVc3bvU2veiS3zKuvJ-ohE9bW0ndu6B?usp=sharing --folder
+
+RUN pip3 install torch --index-url https://download.pytorch.org/whl/cu118
+
+
