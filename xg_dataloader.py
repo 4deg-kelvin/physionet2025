@@ -79,13 +79,24 @@ class ChagasIterator(xgboost.DataIter):
         if self._idx >= len(self.dataset):
             return False
         
-        X, y = self.dataset[self._idx]
-        # TODO: accomadate batch sizes greater than 1
-        X = X.reshape(1, -1)
-        y = np.array([y]).reshape(1, -1)
+        successful_iteration = False
 
-        input_data(data=X, label=y)
-        self._idx += 1
+        while not successful_iteration:
+            try:
+                X, y = self.dataset[self._idx]
+                # TODO: accomadate batch sizes greater than 1
+                X = X.reshape(1, -1)
+                y = np.array([y]).reshape(1, -1)
+
+                input_data(data=X, label=y)
+                self._idx += 1
+                successful_iteration = True
+            except Exception as e:
+                print(f"Error with training at {self._idx}, moving to next data point: {e} ")
+                self._idx += 1
+                
+                if self._idx >= len(self.dataset):
+                    return False
 
         return True
     def reset(self):

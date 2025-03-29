@@ -16,7 +16,12 @@ def train(model_folder, data_folder, output_dir = None, batch_size=1):
     if output_dir is None:
         output_dir = model_folder
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    if device == 'cuda':
+        print("Using GPU")
+    elif device == 'cpu':
+        print("Using CPU!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1")
 
     # TODO: load prna model
     prna_model = load_12ECG_model(specific_model_path=model_folder, device=device)
@@ -26,6 +31,7 @@ def train(model_folder, data_folder, output_dir = None, batch_size=1):
     # TODO: define a dataset class
     # TODO: Get the data
     records = find_records(data_folder, full_path=True)
+    print("Records found: ", len(records))
     data = ChagasDataset(records, prna_model)
 
     total_samples = len(data)
