@@ -17,3 +17,4 @@ samitrop_input/
 samitrop_output/
 holdout*
 ecg_transform.py
+*.page

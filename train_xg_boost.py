@@ -82,7 +82,7 @@ def train(model_folder, data_folder, output_dir = None, batch_size=1):
     custom_logger = ErrorHandling()
 
     evals = [(dval, 'eval')]
-    num_round = 10
+    num_round = 5
 
 
     model = xgb.train(xgb_params, dtrain, num_round, evals=evals, verbose_eval=True, callbacks=[custom_logger]) 
