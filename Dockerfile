@@ -27,4 +27,6 @@ RUN gdown https://drive.google.com/drive/folders/1SCVc3bvU2veiS3zKuvJ-ohE9bW0ndu
 
 RUN pip3 install torch --index-url https://download.pytorch.org/whl/cu118
 
+RUN ln -s $(which python3) /usr/local/bin/python
+
 
