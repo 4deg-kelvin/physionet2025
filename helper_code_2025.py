@@ -193,7 +193,6 @@ def get_signal_names(string):
             value = l.split(' ')[8]
             values.append(value)
     return values
-
 ### Evaluation functions
 
 # Compute the Challenge score.

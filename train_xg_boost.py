@@ -10,7 +10,9 @@ import numpy as np
 import argparse
 import os
 
-
+# Set a seed for reproducibility
+seed = 42
+np.random.seed(seed)
 
 def train(model_folder, data_folder, output_dir = None, batch_size=1):
     if output_dir is None:
@@ -27,12 +29,11 @@ def train(model_folder, data_folder, output_dir = None, batch_size=1):
     prna_model = load_12ECG_model(specific_model_path=model_folder, device=device)
     assert prna_model is not None, 'Model not loaded'
 
-    print(prna_model)
-    # TODO: define a dataset class
-    # TODO: Get the data
+    # print(prna_model)
     records = find_records(data_folder, full_path=True)
     print("Records found: ", len(records))
-    data = ChagasDataset(records, prna_model)
+
+    data = ChagasDataset(records, limit_ptb=True)
 
     total_samples = len(data)
     train_size = int(0.8 * total_samples)
@@ -46,8 +47,8 @@ def train(model_folder, data_folder, output_dir = None, batch_size=1):
 
     print(f"Len training data, {len(train_data)}, val data {len(val_data)}")
 
-    train_iterator = ChagasIterator(train_data)
-    val_iterator = ChagasIterator(val_data)
+    train_iterator = ChagasIterator(train_data, loaded_model=prna_model, exclude_ptb=True)
+    val_iterator = ChagasIterator(val_data, loaded_model=prna_model, exclude_ptb=False)
 
     
     dtrain = xgb.DMatrix(train_iterator)

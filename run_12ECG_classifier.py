@@ -106,7 +106,38 @@ def run_12ECG_classifier(data,
         return preds, probs, classes, wide_feats
     else:
         return preds, probs, classes
+def prepare_data_for_feat_model(data, header_data, loaded_model, is_dat=False, standarize_sampling_rate=True):
+    recording = None
+    if standardize_sampling_rate:
+        if is_dat:
+            recording = standarize_sampling_rate_dat(data, header_data)
+        else:
+            recording = standardize_sampling_rate(data, header_data)
+    else: 
+        recording = data
 
+    # Get wide features
+    feat_means = loaded_model['feat_means']
+    feat_stds = loaded_model['feat_stds']
+    feats_t = get_normalized_features(recording[ch_idx], feat_means, feat_stds)
+
+    # Apply filtering and normalization
+    recording = preprocess_signal(recording, filter_bandwidth, ch_idx=1)
+
+    # Split into random windows
+    inp_t = get_windows_padded(recording, window_size, nb_windows)
+
+    mean_age = pd.read_csv('mean_age.csv', index_col=0).age.values[0]
+    std_age = pd.read_csv('std_age.csv', index_col=0).age.values[0]
+    
+    # Get (normalized) demographic data
+    # print("hdr", hdr)
+    age_t = torch.FloatTensor((np.array([helper_code_2025.get_age(header_data)])[None].T - mean_age) / std_age)
+    sex_t = torch.FloatTensor([1. if helper_code_2025.get_sex(header_data).lower() == 'female' else 0])[None].T  
+    # Feats are in the order age, sex, then the rest of the features      
+    wide_feats = torch.cat([age_t, sex_t, feats_t.float()], dim=1).to(device)
+
+    return inp_t, wide_feats
 def get_normalized_features(recording, feat_means, feat_stds):
     ''' Get normalized wide features '''
     
@@ -293,7 +324,7 @@ def load_12ECG_model(top_level_model_dir=None, specific_model_path = None, devic
         thrs[fold] = np.loadtxt(f'{prefix_path}/fold_{fold}/thrs.txt')
 
     loaded_model = {'models' : models, 'thrs' : thrs, 'feat_means' : feat_means, 'feat_stds' : feat_stds}
-    print(loaded_model)
+    # print(loaded_model)
     return loaded_model
 
 def load_best_model(model, model_loc):
