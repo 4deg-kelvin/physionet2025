@@ -200,9 +200,6 @@ class ChagasBatchedIterator(xgboost.DataIter):
                     batch_indices = list(range(self._idx, min(self._idx + self.batch_size, len(self.dataset))))
 
                     # Get the features and labels for the batch using the indices
-
-
-
                     X, y = self.dataset[self._idx]
                     # TODO: accomadate batch sizes greater than 1
                     X = X.reshape(1, -1)
