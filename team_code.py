@@ -18,7 +18,6 @@ import train_xg_boost
 from run_12ECG_classifier import load_12ECG_model, run_12ECG_classifier
 from dataloader import load_challenge_data_dat
 import helper_code_2025
-import random
 
 import torch
 import xgboost as xgb
@@ -39,8 +38,7 @@ import pathlib
 # Train your model.
 def train_model(data_folder, model_folder, verbose):
     FEATURE_MODEL_PATH = pathlib.Path("feature_model/")
-    # train_xg_boost.train(FEATURE_MODEL_PATH, data_folder, model_folder, batch_size=32)
-    print("Trained!")
+    train_xg_boost.train(FEATURE_MODEL_PATH, data_folder, model_folder, batch_size=32)
     # # Find the data files.
     # if verbose:
     #     print('Finding the Challenge data...')
@@ -111,32 +109,27 @@ def load_model(model_folder, verbose):
                                      device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
     
     models = {'xgboost': xgb_model, 'feature_model': feature_model}
-    return None
+    return models
 
 # Run your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def run_model(record, model, verbose):
-    random_classifer = random.random()
+    # Load the model.
+    xgb_model = model['xgboost']
+    feature_model = model['feature_model']
 
-    print("Random classifier: ", random_classifer)
+    feats = extract_features(record, feature_model)
+    feats = feats.reshape(1, -1)
+    dtest = xgb.DMatrix(feats)
 
-    return 1 if random_classifer > 0.2 else 0, random_classifer
-    # # Load the model.
-    # xgb_model = model['xgboost']
-    # feature_model = model['feature_model']
+    try:
+        xgb_prob_output = xgb_model.predict(dtest)
+        xgb_binary_output = 1 if xgb_prob_output > 0.5 else 0
 
-    # feats = extract_features(record, feature_model)
-    # feats = feats.reshape(1, -1)
-    # dtest = xgb.DMatrix(feats)
-
-    # try:
-    #     xgb_prob_output = xgb_model.predict(dtest)
-    #     xgb_binary_output = 1 if xgb_prob_output > 0.5 else 0
-
-    #     return xgb_binary_output, xgb_prob_output
-    # except Exception as e:
-    #     print(e)
-    #     return None, None
+        return xgb_binary_output, xgb_prob_output
+    except Exception as e:
+        print(e)
+        return None, None
 
 
 ################################################################################
