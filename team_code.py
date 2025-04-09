@@ -21,6 +21,7 @@ import helper_code_2025
 
 import torch
 import xgboost as xgb
+import random
 
 import numpy as np
 import argparse
@@ -37,8 +38,9 @@ import pathlib
 
 # Train your model.
 def train_model(data_folder, model_folder, verbose):
-    FEATURE_MODEL_PATH = pathlib.Path("feature_model/")
-    train_xg_boost.train(FEATURE_MODEL_PATH, data_folder, model_folder, batch_size=32)
+    # FEATURE_MODEL_PATH = pathlib.Path("feature_model/")
+    # train_xg_boost.train(FEATURE_MODEL_PATH, data_folder, model_folder, batch_size=32)
+    return None
     # # Find the data files.
     # if verbose:
     #     print('Finding the Challenge data...')
@@ -95,41 +97,46 @@ def train_model(data_folder, model_folder, verbose):
 # arguments of this function. If you do not train one of the models, then you can return None for the model.
 def load_model(model_folder, verbose):
     # Load the xgboost model that we trained
-    model_filename = os.path.join(model_folder, 'xgboost_model.json')
-    if verbose:
-        print(f'Loading xgboost model from {model_filename}')
-    xgb_model = xgb.Booster()
-    xgb_model.load_model(model_filename)
+    # model_filename = os.path.join(model_folder, 'xgboost_model.json')
+    # if verbose:
+    #     print(f'Loading xgboost model from {model_filename}')
+    # xgb_model = xgb.Booster()
+    # xgb_model.load_model(model_filename)
 
-    feature_model_path = pathlib.Path("feature_model/")
-    if verbose:
-        print('Loading feature model... at ', feature_model_path)
-    # Load our pretrained feature model 
-    feature_model = load_12ECG_model(specific_model_path=feature_model_path, 
-                                     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+    # feature_model_path = pathlib.Path("feature_model/")
+    # if verbose:
+    #     print('Loading feature model... at ', feature_model_path)
+    # # Load our pretrained feature model 
+    # feature_model = load_12ECG_model(specific_model_path=feature_model_path, 
+    #                                  device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
     
-    models = {'xgboost': xgb_model, 'feature_model': feature_model}
-    return models
+    # models = {'xgboost': xgb_model, 'feature_model': feature_model}
+    return None
 
 # Run your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def run_model(record, model, verbose):
     # Load the model.
-    xgb_model = model['xgboost']
-    feature_model = model['feature_model']
+    prob = random.random()
+    if prob > 0.97:
+        return 1, prob
+    else:
+        return 0, prob
+    # xgb_model = model['xgboost']
+    # feature_model = model['feature_model']
 
-    feats = extract_features(record, feature_model)
-    feats = feats.reshape(1, -1)
-    dtest = xgb.DMatrix(feats)
+    # feats = extract_features(record, feature_model)
+    # feats = feats.reshape(1, -1)
+    # dtest = xgb.DMatrix(feats)
 
-    try:
-        xgb_prob_output = xgb_model.predict(dtest)
-        xgb_binary_output = 1 if xgb_prob_output > 0.5 else 0
+    # try:
+    #     xgb_prob_output = xgb_model.predict(dtest)
+    #     xgb_binary_output = 1 if xgb_prob_output > 0.5 else 0
 
-        return xgb_binary_output, xgb_prob_output
-    except Exception as e:
-        print(e)
-        return None, None
+    #     return xgb_binary_output, xgb_prob_output
+    # except Exception as e:
+    #     print(e)
+    #     return None, None
 
 
 ################################################################################
