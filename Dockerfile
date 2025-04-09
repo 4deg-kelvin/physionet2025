@@ -23,7 +23,7 @@ RUN python3 -m pip install --upgrade pip
 
 RUN pip3 install -r requirements_linux.txt
 
-## RUN gdown https://drive.google.com/drive/folders/1SCVc3bvU2veiS3zKuvJ-ohE9bW0ndu6B?usp=sharing --folder
+RUN gdown https://drive.google.com/drive/folders/1SCVc3bvU2veiS3zKuvJ-ohE9bW0ndu6B?usp=sharing --folder
 
 RUN pip3 install torch --index-url https://download.pytorch.org/whl/cu118
 
