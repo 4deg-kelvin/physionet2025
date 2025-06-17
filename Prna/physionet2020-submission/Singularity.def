@@ -1,0 +1,41 @@
+Bootstrap: docker
+From: noelmni/cuda:10.0-cudnn7-devel-ubuntu18.04
+
+%labels
+    Maintainer kelvinknguyen@stanford.edu
+
+%files
+    ./ /physionet
+
+%environment
+    export PATH=/usr/local/cuda/bin:$PATH
+    export WORKDIR=/physionet
+    export PYTHONUNBUFFERED=1
+    cd /physionet
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Install system packages including Python 3.6 and pip3
+    apt-get update && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        python3-dev \
+        build-essential \
+        libjpeg-dev libpng-dev \
+        ca-certificates \
+        curl wget git \
+        pkg-config automake libtool && \
+    rm -rf /var/lib/apt/lists/*
+
+    # Link python3  to python
+    ln -s /usr/bin/python3 /usr/bin/python
+    # Upgrade pip and install dependencies
+    pip3 install --upgrade pip
+    pip3 install scikit-learn
+    pip3 install --upgrade pip setuptools
+    pip3 install -r /physionet/requirements.txt
+
+%runscript
+    cd /physionet
+    exec python3 "$@"
