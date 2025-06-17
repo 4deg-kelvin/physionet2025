@@ -18,3 +18,8 @@ samitrop_output/
 holdout*
 ecg_transform.py
 *.page
+Prna/trained_model
+*.out
+*.err
+Prna/physionet2020-submission/my_container_dir
+batch*
