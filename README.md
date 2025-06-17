@@ -5,21 +5,22 @@ First, note that we have three data sources: samitrop, ptb, and code15. First, p
 
 **FOR SAMITROP AND CODE15 (NOT PTB!!!!)**
 *MAKE SURE TO HAVE -F AS MAT, NOT DAT*
+```
 python prepare_<dataset>_data.py \
     -i /path/to/signal_file_1.hdf5 /path/to/signal_file_2.hdf5 \
     -d /path/to/demographics.csv \
     -l /path/to/code15_chagas_labels.csv \
     -f mat \
     -o /path/to/output_dir/
-
+```
 **FOR PTB**
-
+```
 python prepare_ptbxl_data.py \
     -i /path/to/your/ptbxl/records500 \
     -d /path/to/your/ptbxl/ptbxl_database.csv \
     -f mat \
     -o /path/to/your/output_directory
-
+```
 Note that this will a while. go take a break. 
 
 # Directory Format
