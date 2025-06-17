@@ -23,4 +23,3 @@ Prna/trained_model
 *.err
 Prna/physionet2020-submission/my_container_dir
 batch*
-results/
