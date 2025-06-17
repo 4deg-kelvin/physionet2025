@@ -24,3 +24,4 @@ Prna/trained_model
 Prna/physionet2020-submission/my_container_dir
 batch*
 results/
+.sif*
