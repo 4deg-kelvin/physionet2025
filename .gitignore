@@ -20,5 +20,7 @@ ecg_transform.py
 *.page
 *.out
 *.err
+*.mat
 batch*
-.sif*
+*.sif
+*_prna_outputs.json
