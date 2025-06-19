@@ -16,7 +16,6 @@ all_results.pkl
 *.sav
 
 holdout*
-ecg_transform.py
 *.page
 *.out
 *.err
@@ -24,3 +23,4 @@ ecg_transform.py
 batch*
 *.sif
 *_prna_outputs.json
+notebooks/core
