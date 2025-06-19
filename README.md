@@ -24,7 +24,7 @@ python prepare_ptbxl_data.py \
     -f mat \
     -o /path/to/your/output_directory
 ```
-Note that this will a while. go take a break. 
+Note that this will a while, and your computer will be unusuable because I set it to use multiprocessing, so it'll use all you CPU resources. go take a break. 
 
 # Directory Format
 
@@ -37,7 +37,7 @@ This directory is also a dev directory, and is meant to store you physionet 2025
 ## `Prna` 
 Prna is our feature extractor -- however, this folder contains only NON-OFFICIAL code, ie, code that we won't send to submission. This is meant for dev work. It also contains training code to train Prna, as well as the singularity/docker containers required to train it. 
 
-### How to run inference on PRNA
+### How to run inference on PRNA (the feature model)
 #### Loading the Model
 The first thing you need to do is to download the `trained_model` directory, which has the pretrained weights. To do this, download the file [here](https://drive.google.com/drive/folders/1HBmXWUlKHxds9CUnM_hF-5n5XAcYlfEI?usp=sharing). When passing in the path of the model for training, just pass the path to `trained_model`. 
 #### Performing Inference
