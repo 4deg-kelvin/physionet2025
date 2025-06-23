@@ -5,6 +5,7 @@ results/
 Prna/physionet2020-submission/my_container_dir
 Prna/trained_model
 feature_model/
+custom_transformer/lightning_logs/
 *.pyc
 *.hdf5
 *.dat
