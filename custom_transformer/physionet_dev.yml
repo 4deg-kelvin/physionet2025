@@ -6,7 +6,6 @@ dependencies:
   - _libgcc_mutex=0.1=main
   - _openmp_mutex=5.1=1_gnu
   - _py-xgboost-mutex=2.0=cpu_0
-  - absl-py=2.1.0=py39h06a4308_0
   - anyio=4.9.0=pyh29332c3_0
   - argon2-cffi=25.1.0=pyhd8ed1ab_0
   - argon2-cffi-bindings=21.2.0=py39hb9d737c_2
@@ -50,7 +49,6 @@ dependencies:
   - gettext=0.21.0=hedfda30_2
   - glib=2.78.4=h6a678d5_0
   - glib-tools=2.78.4=h6a678d5_0
-  - grpcio=1.71.0=py39h6a678d5_0
   - h11=0.16.0=pyhd8ed1ab_0
   - h2=4.2.0=pyhd8ed1ab_0
   - hpack=4.1.0=pyhd8ed1ab_0
@@ -110,7 +108,6 @@ dependencies:
   - libgfortran5=13.2.0=ha4646dd_0
   - libglib=2.78.4=hdc74915_0
   - libgomp=11.2.0=h1234567_1
-  - libgrpc=1.71.0=h2d74bed_0
   - libiconv=1.17=h166bdaf_0
   - liblapack=3.9.0=31_h7ac8fdf_openblas
   - liblapacke=3.9.0=31_he2f377e_openblas
@@ -122,7 +119,6 @@ dependencies:
   - libpng=1.6.39=h5eee18b_0
   - libpq=17.4=hdbd6064_0
   - libprotobuf=5.29.3=h3cdef7c_1
-  - libre2-11=2024.07.02=h6a678d5_0
   - libsndfile=1.0.31=h9c3ff4c_1
   - libsodium=1.0.18=h36c2ea0_1
   - libssh2=1.11.1=h251f7ec_0
@@ -137,7 +133,6 @@ dependencies:
   - libxml2=2.13.8=hfdd30dd_0
   - libxslt=1.1.41=h097e994_0
   - lz4-c=1.9.4=h6a678d5_1
-  - markdown=3.8=py39h06a4308_0
   - markupsafe=2.1.1=py39hb9d737c_1
   - matplotlib=3.9.2=py39hf3d152e_2
   - matplotlib-base=3.9.2=py39hbfdbfaf_1
@@ -180,7 +175,6 @@ dependencies:
   - prometheus_client=0.22.1=pyhd8ed1ab_0
   - prompt-toolkit=3.0.51=pyha770c72_0
   - prompt_toolkit=3.0.51=hd8ed1ab_0
-  - protobuf=5.29.3=py39he621ea3_0
   - psutil=5.9.1=py39hb9d737c_0
   - pthread-stubs=0.3=h0ce48e5_1
   - ptyprocess=0.7.0=pyhd8ed1ab_1
@@ -209,7 +203,6 @@ dependencies:
   - qtwebchannel=6.7.3=h6a678d5_0
   - qtwebengine=6.7.3=h7abb84b_0
   - qtwebsockets=6.7.3=h6a678d5_0
-  - re2=2024.07.02=hdb19cb5_0
   - readline=8.2=h5eee18b_0
   - referencing=0.36.2=pyh29332c3_0
   - requests=2.32.4=pyhd8ed1ab_0
@@ -225,8 +218,6 @@ dependencies:
   - soupsieve=2.7=pyhd8ed1ab_0
   - sqlite=3.45.3=h5eee18b_0
   - stack_data=0.6.3=pyhd8ed1ab_1
-  - tensorboard=2.19.0=pyhd8ed1ab_0
-  - tensorboard-data-server=0.7.0=py39h52d8a92_1
   - terminado=0.18.1=pyh0d859eb_0
   - threadpoolctl=3.6.0=pyhecae5ae_0
   - tinycss2=1.4.0=pyhd8ed1ab_0
@@ -247,7 +238,6 @@ dependencies:
   - webcolors=24.11.1=pyhd8ed1ab_0
   - webencodings=0.5.1=pyhd8ed1ab_3
   - websocket-client=1.8.0=pyhd8ed1ab_1
-  - werkzeug=3.1.3=py39h06a4308_0
   - wfdb=4.1.2=pyhd8ed1ab_1
   - wheel=0.45.1=py39h06a4308_0
   - widgetsnbextension=4.0.14=pyhd8ed1ab_0
@@ -295,7 +285,9 @@ dependencies:
       - pytorch-lightning==2.5.2
       - sympy==1.13.3
       - torch==2.7.1+cu118
+      - torchaudio==2.7.1+cu118
       - torchmetrics==1.7.3
+      - torchvision==0.22.1+cu118
       - triton==3.3.1
       - yarl==1.20.1
 prefix: /juice2/scr2/kelvinkn/conda_envs/physionet

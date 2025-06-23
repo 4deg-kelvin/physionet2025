@@ -1,0 +1,9 @@
+model_hparams:
+  d_ff: 512
+  d_model: 128
+  deepfeat_sz: 256
+  dropout_rate: 0.1
+  nhead: 8
+  num_layers: 3
+optimizer_hparams:
+  lr: 0.0001
