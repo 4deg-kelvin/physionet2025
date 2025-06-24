@@ -9,6 +9,7 @@ import pandas as pd
 import shutil
 import sys
 import wfdb
+from tqdm import tqdm  # <--- ADDED
 
 from helper_code import find_records, get_signal_files, is_integer
 
@@ -16,8 +17,8 @@ from helper_code import find_records, get_signal_files, is_integer
 def get_parser():
     description = 'Prepare the PTB-XL database for use in the Challenge.'
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('-i', '--input_folder', type=str, required=True) # records100 or records500
-    parser.add_argument('-d', '--ptbxl_database_file', type=str, required=True) # ptbxl_database.csv
+    parser.add_argument('-i', '--input_folder', type=str, required=True)  # records100 or records500
+    parser.add_argument('-d', '--ptbxl_database_file', type=str, required=True)  # ptbxl_database.csv
     parser.add_argument('-f', '--signal_format', type=str, required=False, default='dat', choices=['dat', 'mat'])
     parser.add_argument('-o', '--output_folder', type=str, required=True)
     return parser
@@ -37,40 +38,70 @@ def suppress_stdout():
 # Convert .dat files to .mat files (optional).
 def convert_dat_to_mat(record, write_dir=None):
     import wfdb.io.convert
+    import os
 
-    # Change the current working directory; wfdb.io.convert.matlab.wfdb_to_matlab places files in the current working directory.
+    # Split record into directory + basename
+    record_dir, record_basename = os.path.split(record)
+
+    # Save current working directory
     cwd = os.getcwd()
+
     if write_dir:
-        os.chdir(write_dir)
+        # Preserve subdirectory structure!
+        output_subdir = os.path.join(write_dir, record_dir)
+        os.makedirs(output_subdir, exist_ok=True)
+        os.chdir(output_subdir)
+        record_to_convert = record_basename
+    else:
+        record_to_convert = record
 
-    # Convert the .dat file to a .mat file.
+
+    # print(f'Calling wfdb_to_mat on {record_to_convert} in {os.getcwd()}')
     with suppress_stdout():
-        wfdb.io.convert.matlab.wfdb_to_mat(record)
+        wfdb.io.convert.matlab.wfdb_to_mat(record_to_convert)
 
-    # Remove the .dat file.
-    os.remove(record + '.hea')
-    os.remove(record + '.dat')
+    # Remove .dat + .hea — use basename, since we're now in write_dir
+    try:
+        os.remove(record_to_convert + '.hea')
+        os.remove(record_to_convert + '.dat')
+    except FileNotFoundError:
+        # Sometimes the .dat or .hea may not exist — skip safely
+        pass
 
-    # Rename the .mat file.
-    os.rename(record + 'm' + '.hea', record + '.hea')
-    os.rename(record + 'm' + '.mat', record + '.mat')
+    # Rename .hea if present — note: PTB-XL often skips writing hrm.hea
+    src_hea = record_to_convert + 'm' + '.hea'
+    dst_hea = record_to_convert + '.hea'
+    if os.path.exists(src_hea):
+        os.rename(src_hea, dst_hea)
+        # print(f'Renamed {src_hea} → {dst_hea}')
+        # Fix header contents
+        with open(dst_hea, 'r') as f:
+            output_string = ''
+            for l in f:
+                if l.startswith('#Creator') or l.startswith('#Source'):
+                    pass
+                else:
+                    l = l.replace(record_to_convert + 'm', record_to_convert)
+                    output_string += l
 
-    # Update the header file with the renamed record and .mat file.
-    with open(record + '.hea', 'r') as f:
-        output_string = ''
-        for l in f:
-            if l.startswith('#Creator') or l.startswith('#Source'):
-                pass
-            else:
-                l = l.replace(record + 'm', record)
-                output_string += l
+        with open(dst_hea, 'w') as f:
+            f.write(output_string)
+    else:
+        print(f'Info: {src_hea} not created — keeping original .hea.')
 
-    with open(record + '.hea', 'w') as f:
-        f.write(output_string)
+    # Rename .mat — this should always be created
+    src_mat = record_to_convert + 'm' + '.mat'
+    dst_mat = record_to_convert + '.mat'
+    if os.path.exists(src_mat):
+        os.rename(src_mat, dst_mat)
+        # print(f'Renamed {src_mat} → {dst_mat}')
+    else:
+        print(f'WARNING: {src_mat} not created — conversion may have failed.')
 
-    # Change the current working directory back to the previous current working directory.
+    # Restore previous working directory
     if write_dir:
         os.chdir(cwd)
+
 
 # Fix the checksums from the Python WFDB library.
 def fix_checksums(record, checksums=None):
@@ -104,8 +135,8 @@ def run(args):
     records = find_records(args.input_folder)
 
     # Update the header files to include demographics data and copy the signal files unchanged.
-    for record in records:
-
+    print(f'Processing {len(records)} records...')
+    for record in tqdm(records, desc='Processing records'):
         # Extract the demographics data.
         record_path, record_basename = os.path.split(record)
         ecg_id = int(record_basename.split('_')[0])
@@ -127,14 +158,7 @@ def run(args):
         else:
             sex = 'Unknown'
 
-        height = row['height']
-        height = int(height) if is_integer(height) else float(height)
-
-        weight = row['weight']
-        weight = int(weight) if is_integer(weight) else float(weight)
-
-        # Assume that all of the patients are negative for Chagas, which is likely to be the case for every or almost every patient
-        # in the PTB-XL dataset.
+        # Assume that all of the patients are negative for Chagas disease.
         label = False
 
         # Specify the label.
@@ -161,7 +185,7 @@ def run(args):
 
         record_line = record_line.strip() + f' {time_string} {date_string} ' + '\n'
         signal_lines = signal_lines.strip() + '\n'
-        comment_lines = comment_lines.strip() + f'# Age: {age}\n# Sex: {sex}\n# Height: {height}\n# Weight: {weight}\n# Chagas label: {label}\n# Source: {source}\n'
+        comment_lines = comment_lines.strip() + f'# Age: {age}\n# Sex: {sex}\n# Chagas label: {label}\n# Source: {source}\n'
 
         output_header = record_line + signal_lines + comment_lines
 
@@ -170,21 +194,20 @@ def run(args):
 
         # Copy the signal files if the input and output folders are different.
         if os.path.normpath(args.input_folder) != os.path.normpath(args.output_folder):
-            relative_path = os.path.split(record)[0]
-
-            signal_files = get_signal_files(input_header_file)
-            for signal_file in signal_files:
-                input_signal_file = os.path.join(args.input_folder, relative_path, signal_file)
-                output_signal_file = os.path.join(args.output_folder, relative_path, signal_file)
+            signal_files = get_signal_files(input_header_file)  
+            for input_signal_file in signal_files:
+                output_signal_file = os.path.join(args.output_folder, os.path.relpath(input_signal_file, args.input_folder))
                 if os.path.isfile(input_signal_file):
                     shutil.copy2(input_signal_file, output_signal_file)
+                else:
+                    raise FileNotFoundError(f'{input_signal_file} not found.')
 
-        # Convert data from .dat files to .mat files as requested.
+        # Convert data from .dat files to .mat files, if requested.
         if args.signal_format in ('mat', '.mat'):
             convert_dat_to_mat(record, write_dir=args.output_folder)
 
         # Recompute the checksums as needed.
         fix_checksums(os.path.join(args.output_folder, record))
 
-if __name__=='__main__':
+if __name__ == '__main__':
     run(get_parser().parse_args(sys.argv[1:]))
