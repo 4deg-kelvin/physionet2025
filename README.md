@@ -1,5 +1,8 @@
 # Python Code for Physionet 2025, Edwards Lifesciences
 
+# Important Links
+[Physionet Website Link](https://moody-challenge.physionet.org/2025/)
+
 # Environment
 For development using conda, use the `physionet_dev.yml` environment. For submission, the submission has its own requirements_linux.txt for pip and a dockerfile
 
@@ -50,4 +53,10 @@ Prna inference can be done either through the `driver.py` file, or the `run_12EC
 - look into component aware transformer, a transformer that uses multiple CNN's of diff kernel sizes all at once per lead, and averages the vector at the end to be passed into a transformer (see CardioPatternFormer paper)
 - augument the transformer code
 - work on getting more features
-- use random forest classifier to see what features we can use 
+- use random forest classifier to see what features we can use
+
+# Known Issues
+- Some signal files are actually really short (this is mostly an issue in the code15 dataset). Make sure any feature selection you do which depends on a minimum input length doesn't break!
+-     All of the data is either in 400 or 500 Hz. However, ignore the length guarantees given on the datasets' website -- they're wrong
+- The environment file I made does NOT compile cleanly on macbooks/windows. It was meant for ubuntu (Linux) with a CUDA backend. I'm working on making a separate env file to handle it
+- You CANNOT download the datasets from the ONedrive link if you're not on a edwards computer. I am working on adding a google drive link as well
