@@ -7,7 +7,10 @@
 For development using conda, use the `physionet_dev.yml` environment. For submission, the submission has its own requirements_linux.txt for pip and a dockerfile
 
 # Preparing Data
-First, note that we have three data sources: samitrop, ptb, and code15. First, proceed to the `training_data` directory. You'll need to download the datasets. For Edwards employees, access it [here:](https://edwardslifesciences-my.sharepoint.com/:f:/g/personal/kelvin_nguyen_edwards_com/EiHr9xaX9A1IgaZWOjTohuoBhPT38WC3j919QldOntRQ0Q?e=N7Tgwa), I have the files on OneDrive. Unzip them, (including the inner exams_part<x> zip files for code15) then run the corresponding `prepare_<dataset>` file with the right dataset, with these parameters:
+First, note that we have three data sources: samitrop, ptb, and code15. First, proceed to the `training_data` directory. You'll need to download the datasets. 
+- For Edwards employees, access it [here:](https://edwardslifesciences-my.sharepoint.com/:f:/g/personal/kelvin_nguyen_edwards_com/EiHr9xaX9A1IgaZWOjTohuoBhPT38WC3j919QldOntRQ0Q?e=N7Tgwa),
+- If working on a personal laptop,use this gdrive [link:](https://drive.google.com/drive/folders/1s_EGSV_s6p2dUVeAnGcUHoXwb5F8EQyp?usp=sharing)
+- I have the files on OneDrive. Unzip them, (including the inner exams_part<x> zip files for code15) then run the corresponding `prepare_<dataset>` file with the right dataset, with these parameters:
 
 **FOR SAMITROP AND CODE15 (NOT PTB!!!!)**
 *MAKE SURE TO HAVE -F AS MAT, NOT DAT*
