@@ -6,6 +6,19 @@
 # Environment
 For development using conda, use the `physionet_dev.yml` environment. For submission, the submission has its own requirements_linux.txt for pip and a dockerfile
 
+### Mac Users:
+
+Set up a conda or `venv` environment, then do the following `pip install` commands:
+
+```
+pip3 install torch torchvision torchaudio # double check the official pytorch website for the exact command
+pip install numpy
+pip install neurokit2
+pip install h5py
+pip install wfdb
+pip install tqdm
+```
+
 # Preparing Data
 First, note that we have three data sources: samitrop, ptb, and code15. First, proceed to the `training_data` directory. You'll need to download the datasets. 
 - For Edwards employees, access it [here:](https://edwardslifesciences-my.sharepoint.com/:f:/g/personal/kelvin_nguyen_edwards_com/EiHr9xaX9A1IgaZWOjTohuoBhPT38WC3j919QldOntRQ0Q?e=N7Tgwa),
