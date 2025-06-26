@@ -1,6 +1,7 @@
 import numpy as np
 from wfdb import processing
 import neurokit2 as nk
+import torch
 
 
 UNIFIED_FREQUENCY = 500
@@ -242,51 +243,60 @@ def normalize(seq, smooth=1e-8):
     ''' Normalize each sequence between -1 and 1 '''
     return 2 * (seq - np.min(seq, axis=1)[None].T) / (np.max(seq, axis=1) - np.min(seq, axis=1) + smooth)[None].T - 1
 
-def compute_challenge_score(labels, outputs, fraction_capacity = 0.05, num_permutations = 10**4, seed=12345):
-    '''Compute the physionet 2025 challenge score based on the provided labels and outputs.
-    NOTE: This function is modified to work with numpy 1.26 (as the original used a new np.argsort, specifically
-    with the standalone stable keyword argument that wasn't present for versions before np 2.0))
+def compute_challenge_score(labels, outputs, fraction_capacity=0.05, num_permutations=10**4, seed=12345):
     '''
+    Compute the Physionet 2025 Challenge score using PyTorch, with support for bfloat16 and float16.
+    '''
+    # Ensure inputs are PyTorch tensors
+    if not isinstance(labels, torch.Tensor):
+        labels = torch.tensor(labels)
+    if not isinstance(outputs, torch.Tensor):
+        outputs = torch.tensor(outputs)
+
+    # Move tensors to the same device
+    device = outputs.device
+    labels = labels.to(device)
+
     # Check the data.
-    assert len(labels) == len(outputs)
+    assert len(labels) == len(outputs), "Input labels and outputs must have the same length."
     num_instances = len(labels)
     capacity = int(fraction_capacity * num_instances)
 
-    # Convert the data to NumPy arrays, as needed, for easier indexing.
-    labels = np.asarray(labels, dtype=np.float64)
-    outputs = np.asarray(outputs, dtype=np.float64)
-
-    # Permute the labels and outputs so that we can approximate the expected confusion matrix for "tied" probabilities.
-    tp = np.zeros(num_permutations)
-    fp = np.zeros(num_permutations)
-    fn = np.zeros(num_permutations)
-    tn = np.zeros(num_permutations)
+    # Permute the labels and outputs to approximate the expected confusion matrix for "tied" probabilities.
+    tp = torch.zeros(num_permutations, device=device)
+    fp = torch.zeros(num_permutations, device=device)
+    fn = torch.zeros(num_permutations, device=device)
+    tn = torch.zeros(num_permutations, device=device)
 
     if seed is not None:
-        np.random.seed(seed)
+        torch.manual_seed(seed)
 
     for i in range(num_permutations):
-        permuted_idx = np.random.permutation(np.arange(num_instances))
+        # Generate a random permutation of indices
+        permuted_idx = torch.randperm(num_instances, device=device)
         permuted_labels = labels[permuted_idx]
         permuted_outputs = outputs[permuted_idx]
 
-        ordered_idx = np.argsort(permuted_outputs, kind='stable')[::-1]
+        # Sort based on outputs in descending order. `torch.argsort` is stable by default.
+        ordered_idx = torch.argsort(permuted_outputs, stable=True, descending=True)
         ordered_labels = permuted_labels[ordered_idx]
 
-        tp[i] = np.sum(ordered_labels[:capacity] == 1)
-        fp[i] = np.sum(ordered_labels[:capacity] == 0)
-        fn[i] = np.sum(ordered_labels[capacity:] == 1)
-        tn[i] = np.sum(ordered_labels[capacity:] == 0)
+        # Calculate confusion matrix components for this permutation
+        tp[i] = torch.sum(ordered_labels[:capacity] == 1)
+        fp[i] = torch.sum(ordered_labels[:capacity] == 0)
+        fn[i] = torch.sum(ordered_labels[capacity:] == 1)
+        tn[i] = torch.sum(ordered_labels[capacity:] == 0)
 
-    tp = np.mean(tp)
-    fp = np.mean(fp)
-    fn = np.mean(fn)
-    tn = np.mean(tn)
+    # Average the results over all permutations
+    tp_mean = torch.mean(tp)
+    fp_mean = torch.mean(fp)
+    fn_mean = torch.mean(fn)
+    tn_mean = torch.mean(tn)
 
-    # Compute the true positive rate.
-    if tp + fn > 0:
-        tpr = tp / (tp + fn)
+    # Compute the true positive rate (TPR)
+    if tp_mean + fn_mean > 0:
+        tpr = tp_mean / (tp_mean + fn_mean)
     else:
         tpr = float('nan')
 
-    return tpr
+    return tpr.item()

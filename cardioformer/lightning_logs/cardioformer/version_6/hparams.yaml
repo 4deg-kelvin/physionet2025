@@ -1,0 +1,16 @@
+model_hparams:
+  d_ff: 128
+  d_model: 128
+  dropout: 0.1
+  in_channels: 12
+  n_heads: 4
+  num_layers: 2
+  patch_lengths:
+  - 8
+  - 16
+  seq_len: 5000
+optimizer_hparams:
+  lr: 2.0e-05
+  lr_end: 1.0e-07
+  warmup_steps: 700
+  weight_decay: 0.0001
