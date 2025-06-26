@@ -261,6 +261,8 @@ def get_signal_names(string):
 ### Evaluation functions
 
 # Compute the Challenge score.
+# NOTE: THIS CURRENTLY DOESNT WORK WITH OUR CODE, as the np.argsort uses a "stable" keyword that is present 
+# in np version 2.0, however, we use np version 1.26
 def compute_challenge_score(labels, outputs, fraction_capacity = 0.05, num_permutations = 10**4, seed=12345):
     # Check the data.
     assert len(labels) == len(outputs)

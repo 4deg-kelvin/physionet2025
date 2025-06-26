@@ -13,7 +13,6 @@ custom_transformer/lightning_logs/
 events.out*
 .vscode/
 all_results.pkl
-*.ipynb
 *.sav
 
 holdout*
