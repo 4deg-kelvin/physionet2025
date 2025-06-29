@@ -27,3 +27,5 @@ notebooks/core
 venv/
 *.zip
 training_data/ptbxl/
+notebooks/model_output
+training_data/to_ignore
