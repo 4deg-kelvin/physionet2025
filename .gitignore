@@ -24,3 +24,6 @@ batch*
 *.sif
 *_prna_outputs.json
 notebooks/core
+venv/
+*.zip
+training_data/ptbxl/
