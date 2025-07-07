@@ -1,7 +1,9 @@
 # Python Code for Physionet 2025, Edwards Lifesciences
 
 # Important Links
-[Physionet Website Link](https://moody-challenge.physionet.org/2025/)
+- [Physionet Website Link](https://moody-challenge.physionet.org/2025/)
+- [Data Download for PERSONAL Computers](https://drive.google.com/drive/folders/1s_EGSV_s6p2dUVeAnGcUHoXwb5F8EQyp?usp=drive_link)
+- [Data Download for EDWARDS Computers](https://edwardslifesciences-my.sharepoint.com/:f:/g/personal/kelvin_nguyen_edwards_com/EiHr9xaX9A1IgaZWOjTohuoBhPT38WC3j919QldOntRQ0Q?e=N7Tgwa)
 
 # Environment
 For development using conda, use the `physionet_dev.yml` environment. For submission, the submission has its own requirements_linux.txt for pip and a dockerfile
@@ -17,6 +19,7 @@ pip install neurokit2
 pip install h5py
 pip install wfdb
 pip install tqdm
+pip install pytorch-lightning
 ```
 
 # Preparing Data
@@ -28,7 +31,7 @@ First, note that we have three data sources: samitrop, ptb, and code15. First, p
 **FOR SAMITROP AND CODE15 (NOT PTB!!!!)**
 *MAKE SURE TO HAVE -F AS MAT, NOT DAT*
 ```
-python prepare_<dataset>_data.py \
+python prepare_<samitrop or code15>_data.py \
     -i /path/to/signal_file_1.hdf5 /path/to/signal_file_2.hdf5 \
     -d /path/to/demographics.csv \
     -l /path/to/code15_chagas_labels.csv \
