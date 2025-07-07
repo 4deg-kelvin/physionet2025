@@ -6,10 +6,11 @@ from __future__ import absolute_import, division, print_function
 
 # 3rd party imports
 import numpy as np
-import scipy as sp
-from pyentrp import entropy as ent
-import feats.pyeeg as pyeeg
 from scipy import signal
+import scipy as sp
+import pyentrp.entropy as ent
+from feats.pyeeg import ap_entropy, pfd, svd_entropy
+import feats.pyeeg as pyeeg
 import pywt
 from numpy import linalg
 
@@ -231,10 +232,10 @@ class TemplateStatistics:
 
     def check_improvement(self, rpeak_corrected, correlation_threshold):
 
-        # Before R-Peak
+        # Before R-PeAK
         a = rpeak_corrected - self.template_before_sp
 
-        # After R-Peak
+        # After R-PeAK
         b = rpeak_corrected + self.template_after_sp
 
         if a >= 0 and b < len(self.signal_filtered):
@@ -517,7 +518,7 @@ class TemplateStatistics:
             if np.isfinite(value):
                 return value
             else:
-                return np.nan()
+                return np.nan
 
         except Exception:
             return np.nan
@@ -553,8 +554,9 @@ class TemplateStatistics:
         """
         Calculate non-linear statistics
         """
+        # approximate entropy (positional args, no safe_check)
         approximate_entropy = [
-            pyeeg.ap_entropy(self.templates_good[0:start_sp, col], M=2, R=0.1*np.std(self.templates_good[0:start_sp, col]))
+            ap_entropy(self.templates_good[0:start_sp, col], 2, 0.1*np.std(self.templates_good[0:start_sp, col]))
             for col in range(self.templates_good.shape[1])
         ]
         p_wave_statistics['p_wave_approximate_entropy_median'] = np.median(approximate_entropy)
@@ -566,7 +568,7 @@ class TemplateStatistics:
                     self.templates_good[0:start_sp, col],
                     sample_length=2,
                     tolerance=0.1*np.std(self.templates_good[0:start_sp, col])
-                )[0]
+                )
             )
             for col in range(self.templates_good.shape[1])
         ]
@@ -579,7 +581,7 @@ class TemplateStatistics:
                     self.templates_good[0:start_sp, col],
                     sample_length=2,
                     tolerance=0.1*np.std(self.templates_good[0:start_sp, col])
-                )[0]
+                )
             )
             for col in range(self.templates_good.shape[1])
         ]
@@ -590,7 +592,7 @@ class TemplateStatistics:
             self.safe_check(
                 ent.permutation_entropy(
                     self.templates_good[0:start_sp, col],
-                    m=2, delay=1
+                    order=2, delay=1
                 )
             )
             for col in range(self.templates_good.shape[1])
@@ -603,7 +605,7 @@ class TemplateStatistics:
                 ent.multiscale_permutation_entropy(
                     self.templates_good[0:start_sp, col],
                     m=2, delay=1, scale=1
-                )[0]
+                )
             )
             for col in range(self.templates_good.shape[1])
         ]
@@ -611,26 +613,44 @@ class TemplateStatistics:
         p_wave_statistics['p_wave_multiscale_permutation_entropy_std'] = np.std(multiscale_permutation_entropy, ddof=1)
 
         fisher_information = [
-            fisher_info(self.templates_good[0:start_sp, col], tau=1, de=2)
+            self.safe_check(
+                fisher_info(
+                    self.templates_good[0:start_sp, col],
+                    tau=1, de=2
+                )
+            )
             for col in range(self.templates_good.shape[1])
         ]
         p_wave_statistics['p_wave_fisher_info_median'] = np.median(fisher_information)
         p_wave_statistics['p_wave_fisher_info_std'] = np.std(fisher_information, ddof=1)
 
         higuchi_fractal = [
-            hfd(self.templates_good[0:start_sp, col], k_max=10) for col in range(self.templates_good.shape[1])
+            self.safe_check(
+                hfd(
+                    self.templates_good[0:start_sp, col],
+                    k_max=10
+                )
+            )
+            for col in range(self.templates_good.shape[1])
         ]
         p_wave_statistics['p_wave_higuchi_fractal_median'] = np.median(higuchi_fractal)
         p_wave_statistics['p_wave_higuchi_fractal_std'] = np.std(higuchi_fractal, ddof=1)
 
         hurst_exponent = [
-            pfd(self.templates_good[0:start_sp, col]) for col in range(self.templates_good.shape[1])
+            self.safe_check(
+                pfd(
+                    self.templates_good[0:start_sp, col]
+                )
+            )
+            for col in range(self.templates_good.shape[1])
         ]
         p_wave_statistics['p_wave_hurst_exponent_median'] = np.median(hurst_exponent)
         p_wave_statistics['p_wave_hurst_exponent_std'] = np.std(hurst_exponent, ddof=1)
 
         svd_entr = [
-            svd_entropy(self.templates_good[0:start_sp, col], tau=2, de=2)
+            self.safe_check(
+                svd_entropy(self.templates_good[0:start_sp, col], tau=2, de=2)
+            )
             for col in range(self.templates_good.shape[1])
         ]
         p_wave_statistics['p_wave_svd_entropy_median'] = np.median(svd_entr)
@@ -707,8 +727,9 @@ class TemplateStatistics:
         """
         Calculate non-linear statistics
         """
+        # approximate entropy (positional args, no safe_check)
         approximate_entropy = [
-            pyeeg.ap_entropy(self.templates_good[end_sp:, col], M=2, R=0.1*np.std(self.templates_good[end_sp:, col]))
+            ap_entropy(self.templates_good[end_sp:, col], 2, 0.1*np.std(self.templates_good[end_sp:, col]))
             for col in range(self.templates_good.shape[1])
         ]
         t_wave_statistics['t_wave_approximate_entropy_median'] = np.median(approximate_entropy)
@@ -720,7 +741,7 @@ class TemplateStatistics:
                     self.templates_good[end_sp:, col],
                     sample_length=2,
                     tolerance=0.1*np.std(self.templates_good[end_sp:, col])
-                )[0]
+                )
             )
             for col in range(self.templates_good.shape[1])
         ]
@@ -733,7 +754,7 @@ class TemplateStatistics:
                     self.templates_good[end_sp:, col],
                     sample_length=2,
                     tolerance=0.1*np.std(self.templates_good[end_sp:, col])
-                )[0]
+                )
             )
             for col in range(self.templates_good.shape[1])
         ]
@@ -744,7 +765,7 @@ class TemplateStatistics:
             self.safe_check(
                 ent.permutation_entropy(
                     self.templates_good[end_sp:, col],
-                    m=2, delay=1
+                    order=2, delay=1
                 )
             )
             for col in range(self.templates_good.shape[1])
@@ -757,7 +778,7 @@ class TemplateStatistics:
                 ent.multiscale_permutation_entropy(
                     self.templates_good[end_sp:, col],
                     m=2, delay=1, scale=1
-                )[0]
+                )
             )
             for col in range(self.templates_good.shape[1])
         ]
@@ -765,25 +786,45 @@ class TemplateStatistics:
         t_wave_statistics['t_wave_multiscale_permutation_entropy_std'] = np.std(multiscale_permutation_entropy, ddof=1)
 
         fisher_information = [
-            fisher_info(self.templates_good[end_sp:, col], tau=1, de=2) for col in range(self.templates_good.shape[1])
+            self.safe_check(
+                fisher_info(
+                    self.templates_good[end_sp:, col],
+                    tau=1, de=2
+                )
+            )
+            for col in range(self.templates_good.shape[1])
         ]
         t_wave_statistics['t_wave_fisher_info_median'] = np.median(fisher_information)
         t_wave_statistics['t_wave_fisher_info_std'] = np.std(fisher_information, ddof=1)
 
         higuchi_fractal = [
-            hfd(self.templates_good[end_sp:, col], k_max=10) for col in range(self.templates_good.shape[1])
+            self.safe_check(
+                hfd(
+                    self.templates_good[end_sp:, col],
+                    k_max=10
+                )
+            )
+            for col in range(self.templates_good.shape[1])
         ]
         t_wave_statistics['t_wave_higuchi_fractal_median'] = np.median(higuchi_fractal)
         t_wave_statistics['t_wave_higuchi_fractal_std'] = np.std(higuchi_fractal, ddof=1)
 
         hurst_exponent = [
-            pfd(self.templates_good[end_sp:, col]) for col in range(self.templates_good.shape[1])
+            self.safe_check(
+                pfd(
+                    self.templates_good[end_sp:, col]
+                )
+            )
+            for col in range(self.templates_good.shape[1])
         ]
         t_wave_statistics['t_wave_hurst_exponent_median'] = np.median(hurst_exponent)
         t_wave_statistics['t_wave_hurst_exponent_std'] = np.std(hurst_exponent, ddof=1)
 
         svd_entr = [
-            svd_entropy(self.templates_good[end_sp:, col], tau=2, de=2) for col in range(self.templates_good.shape[1])
+            self.safe_check(
+                svd_entropy(self.templates_good[end_sp:, col], tau=2, de=2)
+            )
+            for col in range(self.templates_good.shape[1])
         ]
         t_wave_statistics['t_wave_svd_entropy_median'] = np.median(svd_entr)
         t_wave_statistics['t_wave_svd_entropy_std'] = np.std(svd_entr, ddof=1)
@@ -807,13 +848,13 @@ class TemplateStatistics:
             pqrst_wave_statistics['pr_time'] = (self.template_rpeak_sp - self.p_time_sp) * 1 / self.fs
             pqrst_wave_statistics['pr_time_std'] = np.std(pri, ddof=1)
             if self.templates_good.shape[1] > 1:
+                # approximate entropy without safe_check and positional args
                 pqrst_wave_statistics['pri_approximate_entropy'] = \
-                    self.safe_check(pyeeg.ap_entropy(pri, M=2, R=0.1*np.std(pri)))
+                    ap_entropy(pri, 2, 0.1*np.std(pri))
                 try:
                     pqrst_wave_statistics['pri_higuchi_fractal_dimension'] = hfd(pri, k_max=10)
                 except linalg.LinAlgError:
                     pqrst_wave_statistics['pri_higuchi_fractal_dimension'] = np.nan
-                
             else:
                 pqrst_wave_statistics['pri_approximate_entropy'] = np.nan
                 pqrst_wave_statistics['pri_higuchi_fractal_dimension'] = np.nan
@@ -834,7 +875,7 @@ class TemplateStatistics:
             pqrst_wave_statistics['qs_time_std'] = np.std(qsi, ddof=1)
             if self.templates_good.shape[1] > 1:
                 pqrst_wave_statistics['qsi_approximate_entropy'] = \
-                    self.safe_check(pyeeg.ap_entropy(pri, M=2, R=0.1*np.std(qsi)))
+                    ap_entropy(qsi, 2, 0.1*np.std(qsi))
                 try:
                     pqrst_wave_statistics['qsi_higuchi_fractal_dimension'] = hfd(qsi, k_max=10)
                 except linalg.LinAlgError:
@@ -883,24 +924,12 @@ class TemplateStatistics:
             pqrst_wave_statistics['qrs_energy_std'] = np.std(qrs_eng, ddof=1)
             if self.templates_good.shape[1] > 1:
                 pqrst_wave_statistics['qrs_energy_approximate_entropy'] = \
-                    self.safe_check(pyeeg.ap_entropy(qrs_eng, M=2, R=0.1*np.std(qrs_eng)))
+                    ap_entropy(qrs_eng, 2, 0.1*np.std(qrs_eng))
                 try:
                     pqrst_wave_statistics['qrs_energy_higuchi_fractal_dimension'] = hfd(qrs_eng, k_max=10)
                 except linalg.LinAlgError:
-                        pqrst_wave_statistics['qrs_energy_higuchi_fractal_dimension'] = np.nan                        
-                        
-                if len(qrs_eng[0:-2]) >= 2 and len(qrs_eng[1:-1]) >= 2:
-                    pqrst_wave_statistics['qrs_energy_pearson_coeff'], pqrst_wave_statistics['qrs_energy_pearson_p_value'] = \
-                    sp.stats.pearsonr(qrs_eng[0:-2], qrs_eng[1:-1])
-                else:
-                    pqrst_wave_statistics['qrs_energy_pearson_coeff'] = np.nan
-                    pqrst_wave_statistics['qrs_energy_pearson_p_value'] = np.nan
-                    
-            else:
-                pqrst_wave_statistics['qrs_energy_approximate_entropy'] = np.nan
-                pqrst_wave_statistics['qrs_energy_higuchi_fractal_dimension'] = np.nan
-                pqrst_wave_statistics['qrs_energy_pearson_coeff'] = np.nan
-                pqrst_wave_statistics['qrs_energy_pearson_p_value'] = np.nan
+                        pqrst_wave_statistics['qrs_energy_higuchi_fractal_dimension'] = np.nan
+        # ...existing code...
 
         else:
             pqrst_wave_statistics['pq_time'] = np.nan
@@ -985,7 +1014,7 @@ class TemplateStatistics:
                     ent.multiscale_entropy(rpeak_amplitudes, sample_length=2, tolerance=0.1*np.std(rpeak_amplitudes))[0]
                 )
             r_peak_amplitude_statistics['rpeak_permutation_entropy'] = \
-                self.safe_check(ent.permutation_entropy(rpeak_amplitudes, m=2, delay=1))
+                self.safe_check(ent.permutation_entropy(rpeak_amplitudes, order=2, delay=1))
             r_peak_amplitude_statistics['rpeak_multiscale_permutation_entropy'] = \
                 self.safe_check(ent.multiscale_permutation_entropy(rpeak_amplitudes, m=2, delay=1, scale=1)[0])
             r_peak_amplitude_statistics['rpeak_fisher_info'] = fisher_info(rpeak_amplitudes, tau=1, de=2)

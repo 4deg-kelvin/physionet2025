@@ -46,7 +46,7 @@ def _make_cmp(X, M, R, in_range_i, in_range_j):
     in_range_cmp_j = in_range_j[inrange_cmp]
     Cmp += np.bincount(in_range_cmp_j, minlength=N-M)
 
-    return Cmp.astype(np.float)
+    return Cmp.astype(float)
 
 
 def _coarse_grainning(a, tau):
@@ -83,12 +83,15 @@ def _make_cm(X, M, R):
     Cm = np.bincount(in_range_i, minlength=N-M+1)
     Cm += np.bincount(in_range_j, minlength=N-M+1)
 
-    inrange_last = np.max(np.abs(Em[:-1] - Em[-1]),1) <= R
-    Cm[inrange_last] += 1
-    # all matches + self match
-    Cm[-1] += np.sum(inrange_last) + 1
+    # Matches of Em[:-1] with last embedding Em[-1]
+    inrange_last = np.max(np.abs(Em[:-1] - Em[-1]), 1) <= R
+    idx_last = np.where(inrange_last)[0]
+    # update counts for matched sequences
+    Cm[idx_last] += 1
+    # include self-match on last index
+    Cm[-1] += 1
 
-    return Cm.astype(np.float), in_range_i, in_range_j
+    return Cm.astype(float), in_range_i, in_range_j
 
 
 def pfd(a):

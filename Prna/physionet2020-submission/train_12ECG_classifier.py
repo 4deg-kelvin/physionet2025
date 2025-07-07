@@ -23,13 +23,12 @@ from eval.evaluate_12ECG_score import evaluate_12ECG_score, compute_auc
 from eval.evaluate_12ECG_score import compute_beta_measures, load_weights, compute_challenge_metric
 
 import torch
-from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader, Dataset
 
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 from model import CTN
 from dataloader import ECGWindowAlignedDataset, ECGWindowPaddingDataset
 from optimizer import NoamOpt
@@ -137,7 +136,7 @@ def train_classifier(src_path, output_directory, tst_fold):
         scores = []
         w = load_weights(weights_file, classes)
         for thr in np.arange(0., 1., step):
-            preds = (probs > thr).astype(np.int)
+            preds = (probs > thr).astype(int)
             challenge_metric = compute_challenge_metric(w, lbls, preds, classes, normal_class)
             scores.append(challenge_metric)
         scores = np.array(scores)
@@ -145,7 +144,7 @@ def train_classifier(src_path, output_directory, tst_fold):
         # Best thrs and preds
         idxs = np.argmax(scores, axis=0)
         thrs = np.array([idxs*step])
-        preds = (probs > thrs).astype(np.int)
+        preds = (probs > thrs).astype(int)
 
         # Save
         np.savetxt(str(fold_loc/'thrs.txt'), thrs)
@@ -153,7 +152,7 @@ def train_classifier(src_path, output_directory, tst_fold):
         np.savetxt(str(fold_loc/'feat_stds.txt'), feat_stds)
     else:
         thrs = np.loadtxt(str(fold_loc/'thrs.txt'))
-        preds = (probs > thrs).astype(np.int)
+        preds = (probs > thrs).astype(int)
 
     print(thrs)
 
@@ -174,7 +173,7 @@ def train_classifier(src_path, output_directory, tst_fold):
 
     # Test
     probs, lbls = get_probs(model, tstloader)
-    preds = (probs > thrs).astype(np.int)
+    preds = (probs > thrs).astype(int)
 
     f_beta_measure, g_beta_measure = compute_beta_measures(lbls, preds, beta)
     geom_mean = np.sqrt(f_beta_measure*g_beta_measure)
@@ -349,4 +348,4 @@ def get_probs(model, dataloader):
     # Consolidate probs and labels
     lbls = np.concatenate(lbls)
     probs = np.concatenate(probs)
-    return probs, lbls    
+    return probs, lbls
