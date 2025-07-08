@@ -29,3 +29,6 @@ batch*
 *.sif
 *_prna_outputs.json
 notebooks/core
+*.wandb
+*.log
+Prna/physionet2020-submission/test_outputs/
