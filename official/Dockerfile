@@ -9,21 +9,28 @@ WORKDIR /challenge
 ## Install your dependencies here using apt install, etc.
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Update apt-get and install software-properties-common to add PPAs
 RUN apt-get update && \
-    apt-get install -y \
-        git \
-        python3-pip \
-        python3-dev \
-        python3-opencv \
-        libglib2.0-0
+    apt-get install -y --no-install-recommends software-properties-common
+
+# Add the deadsnakes PPA to get Python 3.9
+RUN add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update
+
+# Install Python 3.9 and its development headers, pip, and other tools
+RUN apt-get install -y --no-install-recommends \
+    python3.9 \
+    python3.9-pip \
+    python3.9-dev \
+    python3-opencv \
+    libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY requirements_linux.txt requirements_linux.txt
 
 RUN python3 -m pip install --upgrade pip
 
 RUN pip3 install -r requirements_linux.txt
-
-RUN gdown https://drive.google.com/drive/folders/1SCVc3bvU2veiS3zKuvJ-ohE9bW0ndu6B?usp=drive_link --folder || gdown https://drive.google.com/drive/folders/1PkjADoaXqOEDceCJxLzVgXF9Mc6oWzdV?usp=drive_link --folder  
 
 RUN pip3 install torch --index-url https://download.pytorch.org/whl/cu118
 
