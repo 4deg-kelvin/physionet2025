@@ -532,7 +532,6 @@ def train(data_dir, model_folder):
     BATCH_SIZE = 16
     SEQ_LEN = utils.UNIFIED_FREQUENCY * 10 # 5 seconds of data
     NUM_LEADS = 12
-    SPLIT_FILE = "../train_val_test_sets.csv"
     WINDOWING_METHOD = 'entire_recording'
     NUM_EPOCHS = 8
     CHECKPOINT_MONITOR_METRIC = 'val_challenge_score'
@@ -560,7 +559,6 @@ def train(data_dir, model_folder):
     record_files = helper_code.find_records_abs(DATA_DIR)
     
     print(f"Found {len(record_files)} records in '{DATA_DIR}'")
-    print(f"Using split file: {SPLIT_FILE}")
 
     model_hparams = {
         'd_model': 256,
@@ -575,7 +573,6 @@ def train(data_dir, model_folder):
         'num_leads': NUM_LEADS,
         'use_single_window': utils.USE_ONE_WINDOW,
         'num_records': len(record_files),
-        'split_file': SPLIT_FILE,
         'pos_weight': utils.POS_WEIGHT,
         'windowing_method': WINDOWING_METHOD,
         'epochs': NUM_EPOCHS,
