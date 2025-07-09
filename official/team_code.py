@@ -14,12 +14,10 @@ import numpy as np
 import os
 
 
-import train_xg_boost
 from dataloader import load_challenge_data_dat
 import transformer
 
 import torch
-import xgboost as xgb
 
 import numpy as np
 import argparse

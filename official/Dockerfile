@@ -1,39 +1,51 @@
 FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
 
+ENV DEBIAN_FRONTEND=noninteractive
 
-## DO NOT EDIT these 3 lines.
+# Install system dependencies
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+     python3 \
+     python3-pip \
+     python3-dev \
+     python3-venv \
+     curl \
+     git \
+     wget \
+     bzip2 \
+     ca-certificates \
+     libglib2.0-0 \
+     libxext6 \
+     libsm6 \
+     libxrender1 \
+     && rm -rf /var/lib/apt/lists/*
+
+
+RUN ln -s $(which python3) /usr/local/bin/python
+
+# Upgrade pip
+RUN python -m pip install --upgrade pip
+
+# # Create conda environment from YAML
+
+
+# Copy project files
 RUN mkdir /challenge
 COPY ./ /challenge
 WORKDIR /challenge
 
-## Install your dependencies here using apt install, etc.
-ENV DEBIAN_FRONTEND=noninteractive
+RUN pip install -r requirements_linux.txt
 
-# Update apt-get and install software-properties-common to add PPAs
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends software-properties-common
+# Optional: install additional pip packages
+RUN pip install torch --index-url https://download.pytorch.org/whl/cu118
 
-# Add the deadsnakes PPA to get Python 3.9
-RUN add-apt-repository ppa:deadsnakes/ppa && \
-    apt-get update
 
-# Install Python 3.9 and its development headers, pip, and other tools
-RUN apt-get install -y --no-install-recommends \
-    python3.9 \
-    python3.9-pip \
-    python3.9-dev \
-    python3-opencv \
-    libglib2.0-0 && \
-    rm -rf /var/lib/apt/lists/*
+# COPY requirements_linux.txt requirements_linux.txt
 
-COPY requirements_linux.txt requirements_linux.txt
+# RUN python3 -m pip install --upgrade pip
 
-RUN python3 -m pip install --upgrade pip
 
-RUN pip3 install -r requirements_linux.txt
 
-RUN pip3 install torch --index-url https://download.pytorch.org/whl/cu118
 
-RUN ln -s $(which python3) /usr/local/bin/python
 
 

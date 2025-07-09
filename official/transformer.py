@@ -279,26 +279,26 @@ class ECGDataset(Dataset):
             created_wide = False
             try:
                 # Continue with the uncorrected signal if polarity check fails
-                computed_features = utils.calculate_ecg_features(signal, utils.UNIFIED_FREQUENCY, utils.REFERENCE_POLARITY_LEAD_IDX)
-                # If cant compute features on this lead, try on other leads
-                if computed_features is None:
-                    for i in range(signal.shape[0]):
-                        if i != utils.REFERENCE_POLARITY_LEAD_IDX:
-                            computed_features = utils.calculate_ecg_features(signal, utils.UNIFIED_FREQUENCY, i)
-                            if computed_features is not None:
-                                break
-                if computed_features is None:
-                    tqdm.write(f"Skipping record {self.records_list[idx]} because no features could be computed.")
-                    return None
+                # computed_features = utils.calculate_ecg_features(signal, utils.UNIFIED_FREQUENCY, utils.REFERENCE_POLARITY_LEAD_IDX)
+                # # If cant compute features on this lead, try on other leads
+                # if computed_features is None:
+                #     for i in range(signal.shape[0]):
+                #         if i != utils.REFERENCE_POLARITY_LEAD_IDX:
+                #             computed_features = utils.calculate_ecg_features(signal, utils.UNIFIED_FREQUENCY, i)
+                #             if computed_features is not None:
+                #                 break
+                # if computed_features is None:
+                #     tqdm.write(f"Skipping record {self.records_list[idx]} because no features could be computed.")
+                #     return None
 
-                # Fill nan values in computed features with 0
-                computed_features = np.nan_to_num(computed_features, nan=0.0, posinf=0.0, neginf=0.0)
-                created_features = True
+                # # Fill nan values in computed features with 0
+                # computed_features = np.nan_to_num(computed_features, nan=0.0, posinf=0.0, neginf=0.0)
+                # created_features = True
 
                 wide_feats = np.array([normalized_age, numerical_sex])
                 # Append the wide features to the computed features
-                wide_feats = np.concatenate((wide_feats, computed_features), axis=0)
-                created_wide = True
+                # wide_feats = np.concatenate((wide_feats, computed_features), axis=0)
+                # created_wide = True
 
             except Exception as e:
                 tqdm.write(f"Error extracting features for record {self.records_list[idx]}: {e}")
@@ -363,15 +363,9 @@ class ECGDataModule(pl.LightningDataModule):
         print(f"Data setup complete. Train: {len(self.train_dataset)}")
     
     def train_dataloader(self):
-        # ...existing code...
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10),
                           persistent_workers=True, shuffle=True, pin_memory=True, collate_fn=collate_fn_skip_none)
 
-    {
-    # Removed/disabled validation and test dataloaders
-    # def val_dataloader(self): ...
-    # def test_dataloader(self): ...
-    }
 
 # --- 3. PyTorch Lightning Module ---
 
@@ -577,7 +571,7 @@ def train(data_dir, model_folder):
         'windowing_method': WINDOWING_METHOD,
         'epochs': NUM_EPOCHS,
         'checkpoint_monitor_metric': CHECKPOINT_MONITOR_METRIC,
-        'wide_feats_size': 2+18 # ADDED: Hyperparameter for the size of the wide feature vector (age, sex, computed features)
+        'wide_feats_size': 2
     }
     optimizer_hparams = {
         'lr': 2e-5,
@@ -619,7 +613,7 @@ def train(data_dir, model_folder):
 
     print("\n--- Training Finished ---")
 
-def load_trained_model(checkpoint_path):
+def load_model(checkpoint_path):
     """
     Load and return a trained ECGClassifierLightning from a .ckpt file.
     """
