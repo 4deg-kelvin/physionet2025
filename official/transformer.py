@@ -342,29 +342,44 @@ def collate_fn_skip_none(batch):
     return torch.utils.data.default_collate(batch)
 
 class ECGDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, records_list, batch_size=32, seq_len=utils.WINDOW_SIZE, windowing_method='qrs'):
+    def __init__(self, data_dir, records_list, split_file_path, batch_size=32, seq_len=utils.WINDOW_SIZE, windowing_method='qrs'):
         super().__init__()
         self.data_dir = data_dir
         self.records_list = records_list
-
+        self.split_file_path = split_file_path
         self.batch_size = batch_size
         self.seq_len = seq_len
         self.windowing_method = windowing_method
 
     def setup(self, stage=None):
-        # Use the entire records_list as training set, ignore splits
-        self.train_dataset = ECGDataset(
-            self.records_list,
-            self.data_dir,
-            is_training=True,
-            seq_len=self.seq_len,
-            windowing_method=self.windowing_method
-        )
-        print(f"Data setup complete. Train: {len(self.train_dataset)}")
-    
+        split_df = pd.read_csv(self.split_file_path)
+        basename_to_path = {os.path.splitext(os.path.basename(p))[0]: p for p in self.records_list}
+        train_ids = split_df[split_df['split']=='train']['exam_id'].tolist()
+        val_ids   = split_df[split_df['split']=='val']['exam_id'].tolist()
+        test_ids  = split_df[split_df['split']=='test']['exam_id'].tolist()
+        train_files = [basename_to_path[i] for i in train_ids if i in basename_to_path]
+        val_files   = [basename_to_path[i] for i in val_ids   if i in basename_to_path]
+        test_files  = [basename_to_path[i] for i in test_ids  if i in basename_to_path]
+        
+        # For official, don't actually have a test set
+        train_files = train_files + test_files
+        # Add any other unused files to the training set
+        used_ids    = set(train_ids + val_ids + test_ids)
+        unused_ids  = set(basename_to_path) - used_ids
+        train_files += [basename_to_path[i] for i in unused_ids]
+        
+        self.train_dataset = ECGDataset(train_files, self.data_dir, is_training=True, seq_len=self.seq_len, windowing_method=self.windowing_method)
+        self.val_dataset   = ECGDataset(val_files,   self.data_dir, is_training=False, seq_len=self.seq_len, windowing_method=self.windowing_method)
+        
+        print(f"Data setup complete. Train: {len(self.train_dataset)}, Val: {len(self.val_dataset)}")
+        total_records = len(train_files) + len(val_files) + len(test_files)
+        print(f"Total records processed: {total_records}, %age in a split: {total_records / len(self.records_list) * 100:.2f}%")
+
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10),
-                          persistent_workers=True, shuffle=True, pin_memory=True, collate_fn=collate_fn_skip_none)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10), persistent_workers=True, shuffle=True, pin_memory=True, collate_fn=collate_fn_skip_none)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10), persistent_workers=True, pin_memory=True, collate_fn=collate_fn_skip_none)
 
 
 # --- 3. PyTorch Lightning Module ---
@@ -524,11 +539,12 @@ def train(data_dir, model_folder):
     # --- Hyperparameters ---
     DATA_DIR = data_dir
     BATCH_SIZE = 16
-    SEQ_LEN = utils.UNIFIED_FREQUENCY * 10 # 5 seconds of data
+    SEQ_LEN = utils.UNIFIED_FREQUENCY * 10 
     NUM_LEADS = 12
     WINDOWING_METHOD = 'entire_recording'
     NUM_EPOCHS = 8
     CHECKPOINT_MONITOR_METRIC = 'val_challenge_score'
+    SPLIT_FILE_PATH = 'train_val_test_sets.csv'  # Path to the CSV file with train/val/test splits
     # PRECISION = "16-mixed"
 
     try:
@@ -581,6 +597,7 @@ def train(data_dir, model_folder):
     data_module = ECGDataModule(
         data_dir=DATA_DIR,
         records_list=record_files,
+        split_file_path=SPLIT_FILE_PATH,
         batch_size=BATCH_SIZE,
         seq_len=SEQ_LEN
     )
@@ -599,11 +616,12 @@ def train(data_dir, model_folder):
         accelerator="auto",
         devices=1,
         callbacks=[
+            # save best model by val_challenge_score
             pl.callbacks.ModelCheckpoint(
-                dirpath=checkpoint_dir,
-                filename="last",      # will save as last.ckpt
-                save_last=True
-            )
+                monitor=CHECKPOINT_MONITOR_METRIC,
+                mode='max',
+                filename='last'
+            ),
         ]
     )
 
