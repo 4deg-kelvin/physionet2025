@@ -316,7 +316,7 @@ def compute_challenge_score(labels, outputs, fraction_capacity = 0.05, num_permu
         permuted_labels = labels[permuted_idx]
         permuted_outputs = outputs[permuted_idx]
 
-        ordered_idx = np.argsort(permuted_outputs, stable=True)[::-1]
+        ordered_idx = np.argsort(permuted_outputs, kind='stable')[::-1]
         ordered_labels = permuted_labels[ordered_idx]
 
         tp[i] = np.sum(ordered_labels[:capacity] == 1)

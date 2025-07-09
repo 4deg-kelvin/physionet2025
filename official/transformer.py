@@ -454,8 +454,8 @@ class ECGClassifierLightning(pl.LightningModule):
         if self.trainer.sanity_checking or not self.validation_step_outputs:
             return
             
-        all_preds = torch.cat(self.validation_step_outputs).squeeze().cpu().numpy()
-        all_labels = torch.cat(self.validation_step_labels).squeeze().cpu().numpy()
+        all_preds = torch.cat(self.validation_step_outputs).flatten().cpu().numpy()
+        all_labels = torch.cat(self.validation_step_labels).flatten().cpu().numpy()
 
         challenge_score = utils.compute_challenge_score(all_labels, all_preds)
         self.log('val_challenge_score', challenge_score, prog_bar=True)
@@ -487,8 +487,8 @@ class ECGClassifierLightning(pl.LightningModule):
         if not self.test_step_outputs:
             print("No test outputs were generated, skipping score calculation.")
             return
-        all_preds = torch.cat(self.test_step_outputs).squeeze().cpu().numpy()
-        all_labels = torch.cat(self.test_step_labels).squeeze().cpu().numpy()
+        all_preds = torch.cat(self.validation_step_outputs).flatten().cpu().numpy()
+        all_labels = torch.cat(self.validation_step_labels).flatten().cpu().numpy()
 
         challenge_score = utils.compute_challenge_score(all_labels, all_preds)
         self.log('test_challenge_score', challenge_score, prog_bar=True)
