@@ -3,7 +3,7 @@ from wfdb import processing
 import neurokit2 as nk
 import pandas as pd
 from tqdm import tqdm 
-import helper_code
+import custom_helper_code
 from scipy.signal import resample
 
 
@@ -25,14 +25,14 @@ from biosppy.signals import ecg as biosppy_ecg
 from biosppy.signals import hrv as biosppy_hrv
 
 def preprocess_signal(record_path, windowing_method='entire_recording'):
-    signal, metadata = helper_code.load_signals(record_path)
-    header_text = helper_code.load_header(record_path)
+    signal, metadata = custom_helper_code.load_signals(record_path)
+    header_text = custom_helper_code.load_header(record_path)
     signal = signal.T  # (num_leads, num_samples)
     orig_freq = metadata['fs']
     if signal.shape[1] < orig_freq * MIN_SIGNAL_DURATION:
         return None, None
 
-    age, sex, _ = helper_code.get_patient_info(header_text, allow_missing_label=False)
+    age, sex, _ = custom_helper_code.get_patient_info(header_text, allow_missing_label=False)
     normalized_age = 0.0 if age is None or np.isnan(age) else float(age) / 100.0
     if sex is None or sex.lower() not in ['male','female']:
         numerical_sex = 0.5
@@ -59,7 +59,7 @@ def preprocess_signal(record_path, windowing_method='entire_recording'):
     wide_feats = np.array([normalized_age, numerical_sex])
 
     windows = get_windows(signal, method=windowing_method, window_size=WINDOW_SIZE)
-    if not windows:
+    if windows is None or len(windows) == 0:
         return None, None
     signal = windows[0]
     signal = normalize(signal, smooth=1e-8)
