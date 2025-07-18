@@ -343,6 +343,7 @@ if __name__ == '__main__':
     NUM_LEADS = 12
     SPLIT_FILE = "../train_val_test_sets.csv"
     WINDOWING_METHOD = 'random'
+    WINDOWING_METHOD = 'random'
     NUM_EPOCHS = 10
     CHECKPOINT_MONITOR_METRIC = 'val_challenge_score'
     PRECISION = "16-mixed"
@@ -372,20 +373,21 @@ if __name__ == '__main__':
     print(f"Using split file: {SPLIT_FILE}")
 
     model_hparams = {
+        # -e_layers 6 --batch_size 128 --d_model 128 --d_ff 256 --patch_len_list 2,4,8,8,16,16,16,16,32,32,32,32,32,32,32,32 --augmentations jitter0.2,scale0.2,drop0.5 --swa --no_inter_attn --des 'Exp' --itr 5 --learning_rate 0.0001 --train_epochs 100 --pat
         'task_name': 'classification',
         'pred_len': 1,  # Not used in classification but required by Cardioformer
         'output_attention': False,
         'enc_in': NUM_LEADS,
         'single_channel': False,
-        'patch_len_list': '2,4,8',
-        'augmentations': 'flip,shuffle,jitter',
-        'd_model': 256,
+        'patch_len_list': '2,4,8,8,16,16,16,32,32,32,32,32',#'2,4,8,8,16,16,16,16,32,32,32,32,32,32,32,32',
+        'augmentations': 'jitter0.2,scale0.2,drop0.5',
+        'd_model': 128,
         'n_heads': 8,
-        'dropout': 0.1,
+        'dropout': 0.2,
         'no_inter_attn': False,
         'activation': 'gelu',
-        'e_layers': 8,  # from num_layers
-        'd_ff': 2048,
+        'e_layers': 6,  # from num_layers
+        'd_ff': 256,
         'seq_len': SEQ_LEN,
         'num_class': 1,  # Binary classification
         'batch_size': BATCH_SIZE,
