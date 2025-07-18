@@ -22,6 +22,14 @@ import pandas as pd
 from tqdm import tqdm
 from models.Cardioformer import Model as Cardioformer
 from types import SimpleNamespace
+import wandb
+from pytorch_lightning.loggers import WandbLogger
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="Detected call of `lr_scheduler.step\\(\\) before `optimizer.step\\(\\)`.*"
+)
+
 
 
 
@@ -330,14 +338,14 @@ if __name__ == '__main__':
 
     # --- Hyperparameters ---
     DATA_DIR = "../training_data/" 
-    BATCH_SIZE = 2
-    SEQ_LEN = utils.WINDOW_SIZE
+    BATCH_SIZE = 8
+    SEQ_LEN = utils.UNIFIED_FREQUENCY * 7 
     NUM_LEADS = 12
     SPLIT_FILE = "../train_val_test_sets.csv"
-    WINDOWING_METHOD = 'entire_recording'
+    WINDOWING_METHOD = 'random'
     NUM_EPOCHS = 10
     CHECKPOINT_MONITOR_METRIC = 'val_challenge_score'
-    # PRECISION = "16-mixed"
+    PRECISION = "16-mixed"
 
     try:
         if torch.cuda.is_available():
@@ -414,11 +422,41 @@ if __name__ == '__main__':
     trainer = pl.Trainer(
         max_epochs=NUM_EPOCHS,
         accelerator="auto",
-        # precision=PRECISION,
+        precision=PRECISION,
         devices=1,
-        logger=pl.loggers.TensorBoardLogger("lightning_logs/", name="ecg_transformer_final"),
-        callbacks=[pl.callbacks.ModelCheckpoint(monitor=CHECKPOINT_MONITOR_METRIC, mode='min', filename='best-challenge-{epoch:02d}-{val_challenge_score:.4f}.ckpt'), 
-                   pl.callbacks.DeviceStatsMonitor()]
+        logger=WandbLogger(
+            project="ecg_transformer_chagas",
+            name=f"cardioformer_{WINDOWING_METHOD}"
+        ),
+        callbacks=[
+            # save best model by val_challenge_score
+            pl.callbacks.ModelCheckpoint(
+                monitor=CHECKPOINT_MONITOR_METRIC,
+                mode='max',
+                filename='best-challenge-{epoch:02d}-{val_challenge_score:.4f}'
+            ),
+            # always keep the most recent checkpoint
+            pl.callbacks.ModelCheckpoint(
+                save_last=True,
+                filename='last'
+            )
+        ]
+    )
+
+    # Initialize wandb, resume existing run if WANDB_RUN_ID is set
+    wandb.init(
+        entity="edwards_physionet",
+        project="ecg_transformer_chagas",
+        name=f"custom_transformer_{WINDOWING_METHOD}_5s",
+        config={
+            "batch_size": BATCH_SIZE,
+            "seq_len": SEQ_LEN,
+            "num_leads": NUM_LEADS,
+            "windowing_method": WINDOWING_METHOD,
+            "num_epochs": NUM_EPOCHS,
+            "data_dir": DATA_DIR,
+            "split_file": SPLIT_FILE
+        }
     )
 
     # --- Run Training and Testing ---
@@ -429,3 +467,4 @@ if __name__ == '__main__':
     print("\n--- Starting Testing ---")
     trainer.test(model, datamodule=data_module)
     print("\n--- Testing Finished ---")
+    wandb.finish()
