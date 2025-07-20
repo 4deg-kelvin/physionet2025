@@ -444,6 +444,16 @@ def main():
     df_final.drop(columns=['HRV_SDANN1', 'HRV_SDNNI1', 'HRV_SDANN2', 'HRV_SDNNI2', 'HRV_SDANN5', 'HRV_SDNNI5'], inplace=True, errors='ignore')
     df_final.fillna(df_final.median(numeric_only=True), inplace=True)
 
+    # --- NaN Tracking ---
+    nan_counts = df_features.isna().sum(axis=1)
+    nan_report = pd.DataFrame({
+        'exam_id': df_features['exam_id'],
+        'relative_path': df_features['relative_path'],
+        'num_nans': nan_counts
+    })
+    nan_report.to_csv(output_folder / 'final_nan_counts.csv', index=False)
+    print("Saved NaN counts per record to final_nan_counts.csv")
+
     # --- EDA Plotting ---
     print("Generating EDA plots...")
     # 1. Age Distribution
