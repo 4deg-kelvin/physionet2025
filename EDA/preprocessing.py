@@ -12,116 +12,17 @@ Parallel processing is performed with `joblib`. Results are saved to CSV files f
 """
 import os
 import argparse
+from datetime import datetime
 from pathlib import Path
 from typing import Union
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from helper_code import find_records, get_sampling_frequency, load_header, load_signals
+from utils import assess_ecg_quality, check_interval, st_slope, ecg_signal_features
 from joblib import Parallel, delayed
 import neurokit2 as nk
 import traceback
-
-def assess_ecg_quality(info, signals, frequency):
-    """
-    Assess ECG signal quality for HRV analysis.
-    Returns True if quality is sufficient for HRV calculation.
-    
-     checks:
-
-    Presence of R peaks in the ECG signal
-    Minimum of 5 R peaks for meaningful HRV analysis
-    R-R intervals within reasonable physiological range (300-2000 ms)
-    Sufficient R-R interval variability (>1ms standard deviation)
-    """
-    try:
-        # Check if R peaks were detected
-        if 'ECG_R_Peaks' not in info or info['ECG_R_Peaks'] is None:
-            return False
-        
-        r_peaks = info['ECG_R_Peaks']
-        
-        # Need at least 5 R peaks for meaningful HRV analysis
-        if len(r_peaks) < 5:
-            return False
-        
-        # Calculate R-R intervals in milliseconds
-        rr_intervals = np.diff(r_peaks) / frequency * 1000
-        
-        # Check for reasonable R-R interval range (300-2000 ms)
-        # This filters out obvious detection errors
-        valid_rr = rr_intervals[(rr_intervals >= 300) & (rr_intervals <= 2000)]
-        
-        # Need at least 4 valid R-R intervals (from 5 R peaks)
-        if len(valid_rr) < 4:
-            return False
-        
-        # Check if R-R intervals have reasonable variability
-        # If all intervals are identical, it's likely a detection artifact
-        if np.std(valid_rr) < 1.0:  # Less than 1ms std deviation
-            return False
-        
-        return True
-    
-    except Exception:
-        return False
-
-
-def check_interval(waves_signals: dict) -> pd.DataFrame:
-    """Creates a DataFrame from ECG wave signals and filters for valid R-R intervals."""
-    keys = ['ECG_P_Onsets', 'ECG_P_Peaks', 'ECG_P_Offsets', 'ECG_Q_Peaks', 'ECG_R_Peaks', 'ECG_S_Peaks', 'ECG_T_Onsets', 'ECG_T_Peaks', 'ECG_T_Offsets']
-    df_waves = pd.DataFrame({key: waves_signals[key] for key in keys})
-    rows = df_waves.shape[0]
-    mask = np.zeros(rows, dtype=bool)
-    for i in range(1, rows):
-        start_interval = df_waves.loc[i-1, 'ECG_R_Peaks']
-        end_interval = df_waves.loc[i, 'ECG_R_Peaks']
-        # Slice the dataframe for the current R-R interval
-        sliced_df = df_waves.iloc[i-1:i+1]
-        
-        # Condition 1: Check if there are any missing wave delineations within the interval.
-        first_condition = sliced_df.isnull().sum().sum() == 0
-        
-        # Condition 2: Check if the wave points are in the correct chronological order.
-        if first_condition:
-            sorted_points = sliced_df.iloc[0].sort_values(ascending=True)
-            second_condition = keys == sorted_points.index.tolist()
-            if second_condition:
-                mask[i-1] = True # Mark the start of the valid interval as True
-    
-    return df_waves[mask]
-
-def ecg_signal_features(row: pd.Series, frequency: int, milliseconds: bool = True) -> dict:
-    """Computes various ECG interval and duration features from a row of wave points."""
-    (ECG_P_Peaks, ECG_P_Onsets, ECG_P_Offsets, ECG_Q_Peaks, ECG_S_Peaks, 
-     ECG_T_Peaks, ECG_T_Onsets, ECG_T_Offsets, ECG_R_Peaks) = row
-     
-    P_wave_duration = (ECG_P_Offsets - ECG_P_Onsets)
-    PR_interval = (ECG_Q_Peaks - ECG_P_Onsets)
-    PR_segment = (ECG_Q_Peaks - ECG_P_Offsets)
-    QRS_duration = (ECG_S_Peaks - ECG_Q_Peaks)
-    QT_interval = (ECG_T_Offsets - ECG_Q_Peaks)
-    ST_segment = (ECG_T_Onsets - ECG_S_Peaks)
-    
-    # Convert from samples to time (milliseconds or seconds)
-    conversion_factor = 1000 / frequency if milliseconds else 1 / frequency
-    
-    return {
-        'P_wave_duration': P_wave_duration * conversion_factor,
-        'PR_interval': PR_interval * conversion_factor,
-        'PR_segment': PR_segment * conversion_factor,
-        'QRS_duration': QRS_duration * conversion_factor,
-        'QT_interval': QT_interval * conversion_factor,
-        'ST_segment': ST_segment * conversion_factor
-    }
-
-def st_slope(signal_df: pd.DataFrame, s_peak: int, t_onset: int) -> float:
-    """Calculates the slope of the ST segment, handling division by zero."""
-    # Prevent division by zero if s_peak and t_onset are the same point
-    if t_onset == s_peak:
-        return np.nan
-    return (signal_df.iloc[t_onset]['ECG_Clean'] - signal_df.iloc[s_peak]['ECG_Clean']) / (t_onset - s_peak)
-
 
 def extract_ecg_features(hea_path: str, channel: int) -> Union[pd.DataFrame, dict]:
     """
@@ -145,11 +46,21 @@ def extract_ecg_features(hea_path: str, channel: int) -> Union[pd.DataFrame, dic
         is_good_quality = assess_ecg_quality(info, signals, frequency)
         
         # Only compute HRV features for signals that pass quality checks
+        # Drop windowed HRV features (SDANN1, SDANN2, SDANN5, SDNNI1, SDNNI2, SDNNI5) as they require long recordings
+        # See documentation below for details
+        hrv_feature_names = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_RMSSD', 'HRV_SDSD', 'HRV_CVNN', 'HRV_CVSD',
+                            'HRV_MedianNN', 'HRV_MadNN', 'HRV_MCVNN', 'HRV_IQRNN', 'HRV_SDRMSSD', 'HRV_Prc20NN',
+                            'HRV_Prc80NN', 'HRV_pNN50', 'HRV_pNN20', 'HRV_MinNN', 'HRV_MaxNN', 'HRV_HTI', 'HRV_TINN']
         if is_good_quality:
-            hrv_features = nk.hrv_time(ecg_signals, sampling_rate=frequency)
+            hrv_features_full = nk.hrv_time(ecg_signals, sampling_rate=frequency)
+            # Only keep the supported features
+            hrv_features = hrv_features_full[[col for col in hrv_feature_names if col in hrv_features_full.columns]].copy()
+            # Add any missing columns as NaN
+            for col in hrv_feature_names:
+                if col not in hrv_features.columns:
+                    hrv_features[col] = np.nan
+            hrv_features = hrv_features[hrv_feature_names]
         else:
-            # Create NaN HRV features for poor quality signals using known HRV feature names
-            hrv_feature_names = ['HRV_SDNN', 'HRV_SDNNI1', 'HRV_SDNNI2', 'HRV_SDNNI5', 'HRV_RMSSD', 'HRV_SDRMSSD']
             hrv_features = pd.DataFrame({col: [np.nan] for col in hrv_feature_names})
         
         correct_waves = check_interval(info)
@@ -192,6 +103,11 @@ def extract_ecg_features(hea_path: str, channel: int) -> Union[pd.DataFrame, dic
     except Exception as e:
         return {'error': 'ProcessingError', 'exam_id': exam_id, 'path': hea_path, 'exception': str(e), 'trace': traceback.format_exc()}
 
+"""
+NOTE: Windowed HRV features (SDANN1, SDANN2, SDANN5, SDNNI1, SDNNI2, SDNNI5) are not included in the output.
+These features require long-term ECG recordings (≥1-5 minutes) and are always NaN for standard 10-second clinical ECGs.
+This is a limitation of short ECGs and not a bug in the extraction pipeline.
+"""
 def parse_metadata_from_hea(header_path):
     """Parses age, sex, Chagas label, and source from a .hea file."""
     age, sex, chagas, source = None, None, None, None
@@ -221,33 +137,39 @@ if __name__ == '__main__':
 
     samitrop_dir = Path(args.train_samitrop)
     ptbxl_dir = Path(args.train_ptbxl)
-    output_folder = Path(args.output)
+
+    # Create a unique timestamped output directory
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_folder = Path(args.output) / f'run_{timestamp}'
     output_folder.mkdir(parents=True, exist_ok=True)
 
-    # RECURSIVE SEARCH: Use glob with '**' to find all .hea files recursively.
-    samitrop_hea_files = list(samitrop_dir.glob('**/*.hea'))
-    ptbxl_hea_files = list(ptbxl_dir.glob('**/*.hea'))
-    print(f"Found {len(samitrop_hea_files)} records in SaMi-Trop and {len(ptbxl_hea_files)} records in PTB-XL.")
+    # Use find_records for both datasets
+    samitrop_rel = find_records(str(samitrop_dir))
+    ptbxl_rel = find_records(str(ptbxl_dir))
+    print(f"Found {len(samitrop_rel)} records in SaMi-Trop and {len(ptbxl_rel)} records in PTB-XL.")
 
     # Parse metadata from all found .hea files
     metadata = []
-    for hea_path in tqdm(samitrop_hea_files + ptbxl_hea_files, desc="Parsing metadata"):
-        exam_id = hea_path.stem.replace('_lr', '').replace('_hr', '')
+    for rel_path in tqdm(samitrop_rel + ptbxl_rel, desc="Parsing metadata"):
+        if rel_path in samitrop_rel:
+            hea_path = os.path.join(str(samitrop_dir), rel_path + '.hea')
+        else:
+            hea_path = os.path.join(str(ptbxl_dir), rel_path + '.hea')
+        exam_id = Path(hea_path).stem.replace('_lr', '').replace('_hr', '')
         age, is_male, chagas, source = parse_metadata_from_hea(hea_path)
         # Default the source if not specified in the header
         if source is None:
-            source = 'ptbxl' if 'ptb-xl' in str(hea_path) else 'samitrop'
-        
+            source = 'ptbxl' if 'ptb-xl' in hea_path else 'samitrop'
         metadata.append({
             'exam_id': exam_id,
             'age': age,
             'is_male': is_male,
             'chagas': chagas,
             'source': source,
-            'hea_path': str(hea_path)
+            'hea_path': hea_path
         })
-    
     df = pd.DataFrame(metadata).dropna(subset=['chagas']) # Only keep records with a valid Chagas label
+
     
     # Balance the dataset between positive and negative Chagas cases
     n_positive = df[df['chagas'] == True].shape[0]
@@ -305,6 +227,9 @@ if __name__ == '__main__':
     all_successful_results = valid_features + retried_features
     if not all_successful_results:
         print("[ERROR] No features could be extracted. Exiting.")
+        # Always write error_records.csv for debugging
+        pd.DataFrame(error_records).to_csv(output_folder / 'error_records.csv', index=False)
+        print(f"Logged {len(error_records)} initial errors to 'error_records.csv'.")
         exit()
 
     # Deduplicate: keep first occurrence of each exam_id

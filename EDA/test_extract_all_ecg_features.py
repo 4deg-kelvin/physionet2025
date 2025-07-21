@@ -11,40 +11,33 @@ import pandas as pd
 from pathlib import Path
 import argparse
 
+
 from tqdm import tqdm
 from utils import extract_all_ecg_features
+from helper_code import find_records
 
 # Set your data directory here
 DATA_DIR = './training_data/'
 
-# Find all WFDB records (without extension)
-def find_wfdb_records(data_dir):
-    if not os.path.exists(data_dir):
-        print(f"[ERROR] Data directory does not exist: {data_dir}")
-        return []
-    records = []
-    for root, dirs, files in os.walk(data_dir):
-        for file in files:
-            if file.endswith('.hea'):
-                record_path = os.path.join(root, file[:-4])
-                records.append(record_path)
-    if not records:
-        print(f"[WARN] No .hea files found in {data_dir}")
-    return records
+
+
+
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Test ECG Feature Extraction')
     parser.add_argument('--debug', action='store_true', help='Run in debug mode (only first 50 files)')
     args = parser.parse_args()
 
-    records = find_wfdb_records(DATA_DIR)
+    rel_records = find_records(DATA_DIR)
+    if not rel_records:
+        print(f"[WARN] No .hea files found in {DATA_DIR}")
+        sys.exit(1)
+    records = [os.path.join(DATA_DIR, r) for r in rel_records]
     print(f"Found {len(records)} records to test.")
     if args.debug:
         records = records[:50]
         print("Debug mode enabled: Only running on first 50 records.")
-    if not records:
-        print("No records found. Exiting.")
-        sys.exit(1)
     results = []
     nan_counts = []
     failed = 0
@@ -63,10 +56,12 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"[ERROR] Exception for {record_path}: {e}")
             failed += 1
+
     # Summary
     print(f"\nTotal records processed: {len(records)}")
     print(f"Total failed: {failed}")
     print(f"Average NaNs per record: {np.mean(nan_counts) if nan_counts else 'N/A'}")
+
     # Save NaN counts per record
     if nan_counts:
         nan_df = pd.DataFrame({
@@ -75,8 +70,28 @@ if __name__ == '__main__':
         })
         nan_df.to_csv('test_feature_extraction_nan_counts.csv', index=False)
         print("NaN counts saved to test_feature_extraction_nan_counts.csv")
-    # Optionally, save results
+
+    # Optionally, save results and detailed NaN report
     if results:
         df = pd.DataFrame(results)
         df.to_csv('test_feature_extraction_results.csv', index=False)
         print("Results saved to test_feature_extraction_results.csv")
+
+        # Detailed NaN summary
+        total = len(df)
+        feature_nan_counts = df.isna().sum()
+        feature_nan_percent = (feature_nan_counts / total * 100).round(2)
+        nan_summary = pd.DataFrame({
+            'feature': feature_nan_counts.index,
+            'num_nan': feature_nan_counts.values,
+            'percent_nan': feature_nan_percent.values
+        })
+        nan_summary = nan_summary.sort_values('num_nan', ascending=False)
+        nan_summary.to_csv('nan_feature_report.csv', index=False)
+        print("Detailed NaN feature report saved to nan_feature_report.csv")
+
+        # Print summary
+        num_with_any_nan = (df.isna().sum(axis=1) > 0).sum()
+        print(f"Records with at least one NaN: {num_with_any_nan} / {total} ({num_with_any_nan/total*100:.2f}%)")
+        print("Top features with NaNs:")
+        print(nan_summary.head(10).to_string(index=False))

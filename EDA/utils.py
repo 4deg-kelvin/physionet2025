@@ -1,3 +1,245 @@
+'''
+If you set the environment variable DEBUG=1 before running your pipeline, you will get:
+
+Full error tracebacks and raised exceptions for debugging.
+Logging at the DEBUG level for all errors and warnings.
+In normal mode (no DEBUG=1), errors and warnings are logged at the WARNING level and the pipeline continues as before.
+
+To enable debug mode, run your script like this:
+DEBUG=1 python preprocessing.py --output EDA_output
+'''
+
+
+import pandas as pd
+import numpy as np
+import os
+import logging
+
+# --- Canonical Helper Functions ---
+
+# Debug mode: set via environment variable DEBUG=1
+DEBUG = os.environ.get('DEBUG', '0') == '1'
+if DEBUG:
+    logging.basicConfig(level=logging.DEBUG)
+else:
+    logging.basicConfig(level=logging.WARNING)
+def check_interval(waves_signals: dict) -> pd.DataFrame:
+    """
+    Given a dictionary of ECG wave delineation points, validate and extract intervals where all required waves are present and in physiological order.
+    Returns a DataFrame of valid intervals for feature extraction.
+    """
+    """
+    Validates the physiological order of ECG wave components between R-peaks.
+    Enhanced version with better error handling and validation.
+    """
+    keys = ['ECG_P_Onsets', 'ECG_P_Peaks', 'ECG_P_Offsets', 'ECG_Q_Peaks', 
+            'ECG_R_Peaks', 'ECG_S_Peaks', 'ECG_T_Onsets', 'ECG_T_Peaks', 'ECG_T_Offsets']
+    # Create dataframe with available keys only
+    available_keys = [key for key in keys if key in waves_signals and waves_signals[key] is not None]
+    if len(available_keys) < 5:  # Need at least P, Q, R, S, T peaks
+        return pd.DataFrame()
+    df_waves = pd.DataFrame({key: waves_signals[key] for key in available_keys})
+    rows = df_waves.shape[0]
+    if rows < 2:
+        return pd.DataFrame()
+    mask = np.zeros(rows, dtype=bool)
+    for i in range(1, rows):
+        try:
+            start_interval = df_waves.loc[i-1, 'ECG_R_Peaks']
+            end_interval = df_waves.loc[i, 'ECG_R_Peaks']
+            # Slice the dataframe for the interval between two R-peaks
+            sliced_df = df_waves[(df_waves['ECG_R_Peaks'] >= start_interval) & 
+                               (df_waves['ECG_R_Peaks'] <= end_interval)]
+            if sliced_df.shape[0] < 2:
+                continue
+            # Check for any missing values within the interval
+            interval_points = sliced_df.iloc[0:2]
+            if interval_points.isnull().sum().sum() == 0:
+                # Check if the points are in ascending order (physiological order)
+                points_values = interval_points.iloc[0].values
+                if len(points_values) > 1 and np.all(np.diff(points_values) >= 0):
+                    mask[i-1] = True
+        except (IndexError, KeyError, ValueError):
+            continue
+    return df_waves[mask]
+
+def ecg_signal_features(row: pd.Series, frequency: int, milliseconds: bool = True) -> dict:
+    """
+    Given a row of wave delineation points, compute canonical ECG interval and duration features.
+    Converts sample indices to milliseconds (default) or seconds.
+    Returns a dict of features, or NaN if not computable.
+    """
+    """
+    Calculates durations and intervals from ECG wave points.
+    Enhanced with better error handling and validation.
+    """
+    try:
+        wave_keys = ['ECG_P_Onsets', 'ECG_P_Peaks', 'ECG_P_Offsets', 'ECG_Q_Peaks', 
+                    'ECG_R_Peaks', 'ECG_S_Peaks', 'ECG_T_Onsets', 'ECG_T_Peaks', 'ECG_T_Offsets']
+        waves = dict(zip(wave_keys, row)) if not isinstance(row, dict) else row
+        features = {}
+        # P wave duration
+        if not (pd.isna(waves['ECG_P_Offsets']) or pd.isna(waves['ECG_P_Onsets'])):
+            features['P_wave_duration'] = waves['ECG_P_Offsets'] - waves['ECG_P_Onsets']
+        else:
+            features['P_wave_duration'] = np.nan
+        # PR interval
+        if not (pd.isna(waves['ECG_Q_Peaks']) or pd.isna(waves['ECG_P_Onsets'])):
+            features['PR_interval'] = waves['ECG_Q_Peaks'] - waves['ECG_P_Onsets']
+        else:
+            features['PR_interval'] = np.nan
+        # PR segment
+        if not (pd.isna(waves['ECG_Q_Peaks']) or pd.isna(waves['ECG_P_Offsets'])):
+            features['PR_segment'] = waves['ECG_Q_Peaks'] - waves['ECG_P_Offsets']
+        else:
+            features['PR_segment'] = np.nan
+        # QRS duration
+        if not (pd.isna(waves['ECG_S_Peaks']) or pd.isna(waves['ECG_Q_Peaks'])):
+            features['QRS_duration'] = waves['ECG_S_Peaks'] - waves['ECG_Q_Peaks']
+        else:
+            features['QRS_duration'] = np.nan
+        # QT interval
+        if not (pd.isna(waves['ECG_T_Offsets']) or pd.isna(waves['ECG_Q_Peaks'])):
+            features['QT_interval'] = waves['ECG_T_Offsets'] - waves['ECG_Q_Peaks']
+        else:
+            features['QT_interval'] = np.nan
+        # ST segment
+        if not (pd.isna(waves['ECG_T_Onsets']) or pd.isna(waves['ECG_S_Peaks'])):
+            features['ST_segment'] = waves['ECG_T_Onsets'] - waves['ECG_S_Peaks']
+        else:
+            features['ST_segment'] = np.nan
+        # Convert to time units
+        scale = 1000 / frequency if milliseconds else 1 / frequency
+        for key in features:
+            if not pd.isna(features[key]):
+                features[key] = features[key] * scale
+        return features
+    except Exception:
+        return {k: np.nan for k in ['P_wave_duration','PR_interval','PR_segment','QRS_duration','QT_interval','ST_segment']}
+
+def st_slope(signal_df: pd.DataFrame, s_peak: int, t_onset: int) -> float:
+    """
+    Compute the slope of the ST segment between S peak and T onset.
+    Returns NaN if indices are invalid or identical.
+    """
+    """Calculates the slope of the ST segment, handling division by zero."""
+    if t_onset == s_peak:
+        return np.nan
+    try:
+        return (signal_df.iloc[t_onset]['ECG_Clean'] - signal_df.iloc[s_peak]['ECG_Clean']) / (t_onset - s_peak)
+    except Exception:
+        return np.nan
+
+def assess_ecg_quality(info, signals, frequency):
+    """
+    Assess ECG signal quality for HRV analysis.
+    Checks for sufficient R peaks, valid RR intervals, and physiological variability.
+    Returns True if quality is sufficient for HRV calculation, else False.
+    """
+    """
+    Assess ECG signal quality for HRV analysis.
+    Returns True if quality is sufficient for HRV calculation.
+    """
+    try:
+        if 'ECG_R_Peaks' not in info or info['ECG_R_Peaks'] is None:
+            return False
+        r_peaks = info['ECG_R_Peaks']
+        if len(r_peaks) < 5:
+            return False
+        rr_intervals = np.diff(r_peaks) / frequency * 1000
+        valid_rr = rr_intervals[(rr_intervals >= 300) & (rr_intervals <= 2000)]
+        if len(valid_rr) < 4:
+            return False
+        if np.std(valid_rr) < 1.0:
+            return False
+        return True
+    except Exception:
+        return False
+def extract_lead_features(lead_signal: np.ndarray, frequency: int) -> dict:
+    """
+    Extracts all canonical features from a single ECG lead:
+    - Morphological (intervals/durations)
+    - HRV (short-ECG supported only)
+    - Wavelet features
+    Returns a dict of features, or NaN-filled dict if extraction fails.
+    """
+    """
+    Extracts morphological, HRV, and wavelet features from a single ECG lead.
+    Returns a dict of features, or raises Exception if extraction fails.
+    """
+    import neurokit2 as nk, pywt, numpy as np, pandas as pd
+    features = {}
+    try:
+        # Process with NeuroKit2
+        ecg_signals, info = nk.ecg_process(lead_signal, sampling_rate=frequency)
+    except ZeroDivisionError:
+        msg = "[ERROR] ZeroDivisionError in nk.ecg_process; filling with NaNs."
+        if DEBUG:
+            logging.error(msg)
+        info = {}
+        ecg_signals = pd.DataFrame()
+    except Exception as e:
+        msg = f"[ERROR] Exception in nk.ecg_process: {e}; filling with NaNs."
+        if DEBUG:
+            logging.error(msg)
+        info = {}
+        ecg_signals = pd.DataFrame()
+
+    # Morphological features
+    correct_waves = check_interval(info) if info else pd.DataFrame()
+    morph_feature_keys = ['P_wave_duration', 'PR_interval', 'PR_segment', 'QRS_duration', 'QT_interval', 'ST_segment', 'ST_slope']
+    stats = ['mean', 'std', 'min', 'max']
+    if correct_waves.shape[0] == 0:
+        for key in morph_feature_keys:
+            for stat in stats:
+                features[f'{key}_{stat}'] = np.nan
+    else:
+        morph_features = correct_waves.apply(lambda x: ecg_signal_features(x, frequency), axis=1, result_type='expand')
+        morph_features['ST_slope'] = correct_waves.apply(lambda x: st_slope(ecg_signals, int(x['ECG_S_Peaks']), int(x['ECG_T_Onsets'])), axis=1)
+        agg = morph_features.aggregate(['mean', 'std', 'min', 'max']).unstack().to_frame().T
+        agg.columns = ['_'.join(col).strip() for col in agg.columns.values]
+        features.update(agg.iloc[0].to_dict())
+
+    # HRV features
+    # Only include HRV features that are supported for short ECGs (exclude windowed features)
+    hrv_feature_names = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_RMSSD', 'HRV_SDSD', 'HRV_CVNN', 'HRV_CVSD',
+                        'HRV_MedianNN', 'HRV_MadNN', 'HRV_MCVNN', 'HRV_IQRNN', 'HRV_SDRMSSD', 'HRV_Prc20NN',
+                        'HRV_Prc80NN', 'HRV_pNN50', 'HRV_pNN20', 'HRV_MinNN', 'HRV_MaxNN', 'HRV_HTI', 'HRV_TINN']
+    is_good_quality = False
+    if info and not ecg_signals.empty:
+        is_good_quality = assess_ecg_quality(info, lead_signal.reshape(-1, 1), frequency)
+    if is_good_quality:
+        hrv_features_full = nk.hrv_time(ecg_signals, sampling_rate=frequency)
+        for col in hrv_feature_names:
+            if col in hrv_features_full.columns:
+                features[col] = hrv_features_full.iloc[0][col]
+            else:
+                features[col] = np.nan
+    else:
+        for col in hrv_feature_names:
+            features[col] = np.nan
+
+    # Wavelet features
+    try:
+        coeffs = pywt.wavedec(lead_signal, 'db4', level=4)
+        cA4, cD4, cD3, cD2, cD1 = coeffs
+        features.update({
+            'wavelet_energy_d1': np.sum(np.square(cD1)),
+            'wavelet_energy_d2': np.sum(np.square(cD2)),
+            'wavelet_energy_d3': np.sum(np.square(cD3)),
+            'wavelet_energy_d4': np.sum(np.square(cD4)),
+            'wavelet_energy_a4': np.sum(np.square(cA4)),
+            'wavelet_std_d1': np.std(cD1),
+            'wavelet_std_d2': np.std(cD2),
+            'wavelet_std_d3': np.std(cD3),
+            'wavelet_std_d4': np.std(cD4),
+            'wavelet_std_a4': np.std(cA4),
+        })
+    except Exception:
+        for key in ['wavelet_energy_d1', 'wavelet_energy_d2', 'wavelet_energy_d3', 'wavelet_energy_d4', 'wavelet_energy_a4',
+                    'wavelet_std_d1', 'wavelet_std_d2', 'wavelet_std_d3', 'wavelet_std_d4', 'wavelet_std_a4']:
+            features[key] = np.nan
+    return features
 import argparse
 import math
 import os
@@ -113,16 +355,16 @@ else:
 
 def extract_all_ecg_features(record_path, header_path=None, channel_count=12):
     """
-    Extracts demographic, morphological, HRV, and wavelet features from a WFDB record.
-    Args:
-        record_path (str): Path to the record (without extension)
-        header_path (str, optional): Path to the header file. If None, uses record_path + '.hea'
-        channel_count (int): Number of ECG channels to try (default: 12)
-    Returns:
-        dict: All extracted features, or None if extraction fails
+    Loads metadata and signals for a record, then iterates through all leads, calling extract_lead_features.
+    Returns the first successful feature dict, or a NaN-filled dict if all channels fail.
+    Handles all error cases robustly and logs issues.
     """
-    import wfdb, neurokit2 as nk, pywt, numpy as np, pandas as pd, scipy.stats as stats
-    # Demographic features
+    """
+    Loads metadata and signals, then iterates through leads, calling extract_lead_features.
+    Returns the first successful feature dict, or a NaN-filled dict if all fail.
+    """
+    import numpy as np
+    # --- Load metadata and signals, robust to missing or malformed files ---
     try:
         if header_path is None:
             header_path = record_path + '.hea'
@@ -131,185 +373,64 @@ def extract_all_ecg_features(record_path, header_path=None, channel_count=12):
         is_male = 1 if get_sex(header) == 'Male' else 0
         chagas = get_label(header)
     except Exception as e:
-        print(f"[ERROR] Demographic extraction failed for {record_path}: {e}")
+        msg = f"[ERROR] Demographic extraction failed for {record_path}: {e}"
+        if DEBUG:
+            logging.error(msg, exc_info=True)
+        else:
+            logging.warning(msg)
         age, is_male, chagas = np.nan, np.nan, np.nan
-    # Load signals
     try:
         signals, _ = load_signals(record_path)
     except Exception as e:
-        print(f"[ERROR] Signal loading failed for {record_path}: {e}")
+        msg = f"[ERROR] Signal loading failed for {record_path}: {e}"
+        if DEBUG:
+            logging.error(msg, exc_info=True)
+        else:
+            logging.warning(msg)
+        if DEBUG:
+            raise
         return None
-    # Get sampling frequency
     try:
         frequency = get_sampling_frequency(header)
     except Exception as e:
-        print(f"[WARN] Sampling frequency extraction failed for {record_path}: {e}. Using default 500Hz.")
+        msg = f"[WARN] Sampling frequency extraction failed for {record_path}: {e}. Using default 500Hz."
+        if DEBUG:
+            logging.error(msg, exc_info=True)
+        else:
+            logging.warning(msg)
         frequency = 500
-    # Try all channels for feature extraction
+    # --- Try all channels, return first successful feature dict ---
     for channel in range(channel_count):
         try:
-            print(f"[DEBUG] Processing {record_path} channel {channel}")
-            try:
-                ecg_signals, info = nk.ecg_process(signals[:, channel], sampling_rate=frequency)
-                print(f"[DEBUG] nk.ecg_process succeeded for {record_path} channel {channel}")
-                print(f"[DEBUG] ecg_signals shape: {ecg_signals.shape}")
-                print(f"[DEBUG] info keys: {list(info.keys())}")
-            except Exception as e:
-                print(f"[ERROR] nk.ecg_process failed for {record_path} channel {channel}: {e}")
-                continue
-            # Morphological features
-            correct_waves = check_interval(info)
-            print(f"[DEBUG] correct_waves shape: {correct_waves.shape}")
-            if correct_waves.shape[0] == 0:
-                print(f"[WARN] No valid wave intervals for {record_path} channel {channel}")
-                # Create a DataFrame with NaNs for all expected morph features
-                morph_feature_keys = ['P_wave_duration', 'PR_interval', 'PR_segment', 'QRS_duration', 'QT_interval', 'ST_segment', 'ST_slope']
-                stats = ['mean', 'std', 'min', 'max']
-                nan_dict = {f'{key}_{stat}': [np.nan] for key in morph_feature_keys for stat in stats}
-                agg_morph_features = pd.DataFrame(nan_dict)
-            else:
-                print(f"[DEBUG] correct_waves head: {correct_waves.head()}")
-                morph_features = correct_waves.apply(lambda x: ecg_signal_features(x, frequency), axis=1, result_type='expand')
-                print(f"[DEBUG] morph_features shape: {morph_features.shape}")
-                morph_features['ST_slope'] = correct_waves.apply(lambda x: st_slope(ecg_signals, int(x['ECG_S_Peaks']), int(x['ECG_T_Onsets'])), axis=1)
-                print(f"[DEBUG] morph_features with ST_slope head: {morph_features.head()}")
-                # Only aggregate if morph_features is not empty
-                if morph_features.shape[0] == 0:
-                    morph_feature_keys = ['P_wave_duration', 'PR_interval', 'PR_segment', 'QRS_duration', 'QT_interval', 'ST_segment', 'ST_slope']
-                    stats = ['mean', 'std', 'min', 'max']
-                    nan_dict = {f'{key}_{stat}': [np.nan] for key in morph_feature_keys for stat in stats}
-                    agg_morph_features = pd.DataFrame(nan_dict)
-                else:
-                    agg_morph_features = morph_features.aggregate(['mean', 'std', 'min', 'max']).unstack().to_frame().T
-                    agg_morph_features.columns = ['_'.join(col).strip() for col in agg_morph_features.columns.values]
-            # HRV features
-            try:
-                # Assess signal quality before attempting HRV calculation
-                is_good_quality = assess_ecg_quality(info, signals, frequency)
-                
-                if is_good_quality:
-                    hrv_features = nk.hrv_time(ecg_signals, sampling_rate=frequency)
-                    print(f"[DEBUG] hrv_features shape: {hrv_features.shape}")
-                else:
-                    # Create NaN HRV features for poor quality signals
-                    hrv_feature_names = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_SDANN1', 'HRV_SDNNI1', 'HRV_SDANN2', 'HRV_SDNNI2', 
-                                       'HRV_SDANN5', 'HRV_SDNNI5', 'HRV_RMSSD', 'HRV_SDSD', 'HRV_CVNN', 'HRV_CVSD', 
-                                       'HRV_MedianNN', 'HRV_MadNN', 'HRV_MCVNN', 'HRV_IQRNN', 'HRV_SDRMSSD', 'HRV_Prc20NN', 
-                                       'HRV_Prc80NN', 'HRV_pNN50', 'HRV_pNN20', 'HRV_MinNN', 'HRV_MaxNN', 'HRV_HTI', 'HRV_TINN']
-                    hrv_features = pd.DataFrame({col: [np.nan] for col in hrv_feature_names})
-                    print(f"[DEBUG] Poor quality signal - created NaN HRV features")
-            except Exception as e:
-                print(f"[ERROR] HRV extraction failed for {record_path} channel {channel}: {e}")
-                hrv_feature_names = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_SDANN1', 'HRV_SDNNI1', 'HRV_SDANN2', 'HRV_SDNNI2', 
-                                   'HRV_SDANN5', 'HRV_SDNNI5', 'HRV_RMSSD', 'HRV_SDSD', 'HRV_CVNN', 'HRV_CVSD', 
-                                   'HRV_MedianNN', 'HRV_MadNN', 'HRV_MCVNN', 'HRV_IQRNN', 'HRV_SDRMSSD', 'HRV_Prc20NN', 
-                                   'HRV_Prc80NN', 'HRV_pNN50', 'HRV_pNN20', 'HRV_MinNN', 'HRV_MaxNN', 'HRV_HTI', 'HRV_TINN']
-                hrv_features = pd.DataFrame({col: [np.nan] for col in hrv_feature_names})
-            # Wavelet features
-            try:
-                coeffs = pywt.wavedec(signals[:, channel], 'db4', level=4)
-                print(f"[DEBUG] wavelet coeffs lengths: {[len(c) for c in coeffs]}")
-                cA4, cD4, cD3, cD2, cD1 = coeffs
-                wavelet_features = {
-                    'wavelet_energy_d1': np.sum(np.square(cD1)),
-                    'wavelet_energy_d2': np.sum(np.square(cD2)),
-                    'wavelet_energy_d3': np.sum(np.square(cD3)),
-                    'wavelet_energy_d4': np.sum(np.square(cD4)),
-                    'wavelet_energy_a4': np.sum(np.square(cA4)),
-                    'wavelet_std_d1': np.std(cD1),
-                    'wavelet_std_d2': np.std(cD2),
-                    'wavelet_std_d3': np.std(cD3),
-                    'wavelet_std_d4': np.std(cD4),
-                    'wavelet_std_a4': np.std(cA4),
-                }
-                wavelet_df = pd.DataFrame([wavelet_features])
-            except Exception as e:
-                print(f"[ERROR] Wavelet extraction failed for {record_path} channel {channel}: {e}")
-                wavelet_df = pd.DataFrame()
-            # Combine all features, fill missing with NaN
-            print(f"[DEBUG] agg_morph_features shape: {agg_morph_features.shape if 'agg_morph_features' in locals() else 'N/A'}")
-            print(f"[DEBUG] hrv_features shape: {hrv_features.shape}")
-            print(f"[DEBUG] wavelet_df shape: {wavelet_df.shape if 'wavelet_df' in locals() else 'N/A'}")
-            
-            # Ensure all DataFrames have exactly 1 row for concatenation
-            dataframes_to_concat = []
-            
-            # Reset index and take first row only to ensure single-row dataframes
-            if not agg_morph_features.empty:
-                agg_morph_features = agg_morph_features.iloc[[0]].reset_index(drop=True)
-                dataframes_to_concat.append(agg_morph_features)
-                
-            if not hrv_features.empty:
-                hrv_features = hrv_features.iloc[[0]].reset_index(drop=True) 
-                dataframes_to_concat.append(hrv_features)
-                
-            if not wavelet_df.empty:
-                wavelet_df = wavelet_df.iloc[[0]].reset_index(drop=True)
-                dataframes_to_concat.append(wavelet_df)
-            
-            # Concatenate only non-empty dataframes
-            if dataframes_to_concat:
-                if debug:
-                    for i, df in enumerate(dataframes_to_concat):
-                        print(f"[DEBUG] DataFrame {i} shape: {df.shape}")
-                        print(f"[DEBUG] DataFrame {i} head:\n{df.head()}")
-                try:
-                    combined_features = pd.concat(dataframes_to_concat, axis=1)
-                except Exception as e:
-                    if debug:
-                        print(f"[DEBUG] Concatenation error: {e}")
-                        print(f"[DEBUG] Number of dataframes: {len(dataframes_to_concat)}")
-                        for i, df in enumerate(dataframes_to_concat):
-                            print(f"[DEBUG] DataFrame {i}: shape={df.shape}, columns={list(df.columns)}")
-                    raise e
-            else:
-                combined_features = pd.DataFrame(index=[0])  # Empty dataframe with single row
-                
-            combined_features['age'] = age
-            combined_features['is_male'] = is_male
-            combined_features['chagas'] = chagas
-            combined_features['record'] = os.path.basename(record_path)
-            
-            # Add missing expected columns - but only if they don't already exist
-            morph_feature_keys = ['P_wave_duration', 'PR_interval', 'PR_segment', 'QRS_duration', 'QT_interval', 'ST_segment', 'ST_slope']
-            morph_stats = ['mean', 'std', 'min', 'max']
-            # Use the actual HRV feature names returned by neurokit2
-            hrv_keys = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_SDANN1', 'HRV_SDNNI1', 'HRV_SDANN2', 'HRV_SDNNI2', 
-                       'HRV_SDANN5', 'HRV_SDNNI5', 'HRV_RMSSD', 'HRV_SDSD', 'HRV_CVNN', 'HRV_CVSD', 
-                       'HRV_MedianNN', 'HRV_MadNN', 'HRV_MCVNN', 'HRV_IQRNN', 'HRV_SDRMSSD', 'HRV_Prc20NN', 
-                       'HRV_Prc80NN', 'HRV_pNN50', 'HRV_pNN20', 'HRV_MinNN', 'HRV_MaxNN', 'HRV_HTI', 'HRV_TINN']
-            wavelet_keys = ['wavelet_energy_d1', 'wavelet_energy_d2', 'wavelet_energy_d3', 'wavelet_energy_d4', 'wavelet_energy_a4',
-                            'wavelet_std_d1', 'wavelet_std_d2', 'wavelet_std_d3', 'wavelet_std_d4', 'wavelet_std_a4']
-            
-            # Build expected columns list - ensure no duplicates
-            expected_cols = ['age', 'is_male', 'chagas', 'record']
-            expected_cols.extend([f'{key}_{stat}' for key in morph_feature_keys for stat in morph_stats])
-            expected_cols.extend(hrv_keys)
-            expected_cols.extend(wavelet_keys)
-            
-            # Only add missing columns, avoiding duplicates
-            for col in expected_cols:
-                if col not in combined_features.columns:
-                    combined_features[col] = np.nan
-                    
-            return combined_features.iloc[0].to_dict()
+            lead_features = extract_lead_features(signals[:, channel], frequency)
+            lead_features['age'] = age
+            lead_features['is_male'] = is_male
+            lead_features['chagas'] = chagas
+            lead_features['record'] = os.path.basename(record_path)
+            return lead_features
         except Exception as e:
-            print(f"[ERROR] Feature extraction failed for {record_path} channel {channel}: {e}")
-            import traceback
-            traceback.print_exc()
+            msg = f"[ERROR] Feature extraction failed for {record_path} channel {channel}: {e}"
+            if DEBUG:
+                logging.error(msg, exc_info=True)
+                raise
+            else:
+                logging.warning(msg)
             continue
     # If all channels fail, return NaNs for all features
-    print(f"[FAIL] All channels failed for {record_path}")
+    # If all channels fail, return a NaN-filled feature dict for downstream compatibility
+    msg = f"[FAIL] All channels failed for {record_path}"
+    if DEBUG:
+        logging.error(msg)
+    else:
+        logging.warning(msg)
     nan_features = {col: np.nan for col in ['age', 'is_male', 'chagas', 'record']}
-    # Add expected morph, hrv, wavelet columns as NaN
     morph_feature_keys = ['P_wave_duration', 'PR_interval', 'PR_segment', 'QRS_duration', 'QT_interval', 'ST_segment', 'ST_slope']
     for key in morph_feature_keys:
         for stat in ['mean', 'std', 'min', 'max']:
             nan_features[f'{key}_{stat}'] = np.nan
-    # Add placeholder HRV and wavelet columns
-    hrv_keys = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_SDANN1', 'HRV_SDNNI1', 'HRV_SDANN2', 'HRV_SDNNI2', 
-               'HRV_SDANN5', 'HRV_SDNNI5', 'HRV_RMSSD', 'HRV_SDSD', 'HRV_CVNN', 'HRV_CVSD', 
-               'HRV_MedianNN', 'HRV_MadNN', 'HRV_MCVNN', 'HRV_IQRNN', 'HRV_SDRMSSD', 'HRV_Prc20NN', 
+    # Only include HRV features that are supported for short ECGs (exclude windowed features)
+    hrv_keys = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_RMSSD', 'HRV_SDSD', 'HRV_CVNN', 'HRV_CVSD',
+               'HRV_MedianNN', 'HRV_MadNN', 'HRV_MCVNN', 'HRV_IQRNN', 'HRV_SDRMSSD', 'HRV_Prc20NN',
                'HRV_Prc80NN', 'HRV_pNN50', 'HRV_pNN20', 'HRV_MinNN', 'HRV_MaxNN', 'HRV_HTI', 'HRV_TINN']
     for key in hrv_keys:
         nan_features[key] = np.nan
@@ -414,7 +535,20 @@ def ecg_signal_features(row: pd.Series, frequency: int, milliseconds: bool = Tru
 
 def st_slope(signal_df: pd.DataFrame, s_peak: int, t_onset: int) -> float:
     """Calculates the slope of the ST segment, handling division by zero."""
-    # Prevent division by zero if s_peak and t_onset are the same point
-    if t_onset == s_peak:
+    # Robustly compute ST slope, handling divide by zero, NaN, and index errors
+    try:
+        # Check for NaN or non-integer indices
+        if pd.isna(s_peak) or pd.isna(t_onset):
+            return np.nan
+        if not isinstance(s_peak, (int, np.integer)) or not isinstance(t_onset, (int, np.integer)):
+            return np.nan
+        # Prevent division by zero
+        if t_onset == s_peak:
+            return np.nan
+        # Check index bounds
+        if s_peak < 0 or t_onset < 0 or s_peak >= len(signal_df) or t_onset >= len(signal_df):
+            return np.nan
+        # Compute slope
+        return (signal_df.iloc[t_onset]['ECG_Clean'] - signal_df.iloc[s_peak]['ECG_Clean']) / (t_onset - s_peak)
+    except Exception:
         return np.nan
-    return (signal_df.iloc[t_onset]['ECG_Clean'] - signal_df.iloc[s_peak]['ECG_Clean']) / (t_onset - s_peak)
