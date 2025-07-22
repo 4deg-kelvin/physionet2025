@@ -155,7 +155,7 @@ def assess_ecg_quality(info, signals, frequency):
         return True
     except Exception:
         return False
-def extract_lead_features(lead_signal: np.ndarray, frequency: int) -> dict:
+def extract_lead_features(lead_signal: np.ndarray, frequency: int, channel=None) -> dict:
     """
     Extracts all canonical features from a single ECG lead:
     - Morphological (intervals/durations)
@@ -163,27 +163,138 @@ def extract_lead_features(lead_signal: np.ndarray, frequency: int) -> dict:
     - Wavelet features
     Returns a dict of features, or NaN-filled dict if extraction fails.
     """
-    """
-    Extracts morphological, HRV, and wavelet features from a single ECG lead.
-    Returns a dict of features, or raises Exception if extraction fails.
-    """
     import neurokit2 as nk, pywt, numpy as np, pandas as pd
     features = {}
     try:
+        msg = f"[DEBUG] extract_lead_features: channel={channel}, signal shape: {lead_signal.shape}, min: {np.min(lead_signal)}, max: {np.max(lead_signal)}, mean: {np.mean(lead_signal)}"
+        logging.debug(msg)
         # Process with NeuroKit2
-        ecg_signals, info = nk.ecg_process(lead_signal, sampling_rate=frequency)
-    except ZeroDivisionError:
-        msg = "[ERROR] ZeroDivisionError in nk.ecg_process; filling with NaNs."
-        if DEBUG:
-            logging.error(msg)
-        info = {}
-        ecg_signals = pd.DataFrame()
+        try:
+            ecg_signals, info = nk.ecg_process(lead_signal, sampling_rate=frequency)
+            # Convert binary arrays in info to lists of sample indices
+            binary_keys = [
+                'ECG_P_Peaks', 'ECG_P_Onsets', 'ECG_P_Offsets',
+                'ECG_Q_Peaks', 'ECG_R_Peaks', 'ECG_S_Peaks',
+                'ECG_T_Peaks', 'ECG_T_Onsets', 'ECG_T_Offsets',
+                'ECG_R_Onsets', 'ECG_R_Offsets'
+            ]
+            for key in binary_keys:
+                if key in info and isinstance(info[key], (np.ndarray, list, pd.Series)):
+                    arr = np.asarray(info[key])
+                    # If it's a binary array (same length as signal), convert to indices
+                    if arr.dtype in [np.int32, np.int64, np.float32, np.float64, bool] and arr.shape[0] == lead_signal.shape[0]:
+                        info[key] = np.where(arr == 1)[0]
+        except ZeroDivisionError:
+            msg = "[ERROR] ZeroDivisionError in nk.ecg_process; filling with NaNs."
+            logging.error(msg, exc_info=True)
+            import traceback
+            traceback.print_exc()
+            info = {}
+            ecg_signals = pd.DataFrame()
+        except Exception as e:
+            msg = f"[ERROR] Exception in nk.ecg_process: {e}; filling with NaNs."
+            logging.error(msg, exc_info=True)
+            import traceback
+            traceback.print_exc()
+            info = {}
+            ecg_signals = pd.DataFrame()
+
+        # Morphological features
+        try:
+            correct_waves = check_interval(info) if info else pd.DataFrame()
+            morph_feature_keys = ['P_wave_duration', 'PR_interval', 'PR_segment', 'QRS_duration', 'QT_interval', 'ST_segment', 'ST_slope']
+            stats = ['mean', 'std', 'min', 'max']
+            if correct_waves.shape[0] == 0:
+                for key in morph_feature_keys:
+                    for stat in stats:
+                        features[f'{key}_{stat}'] = np.nan
+            else:
+                morph_features = correct_waves.apply(lambda x: ecg_signal_features(x, frequency), axis=1, result_type='expand')
+                morph_features['ST_slope'] = correct_waves.apply(lambda x: st_slope(ecg_signals, int(x['ECG_S_Peaks']), int(x['ECG_T_Onsets'])), axis=1)
+                agg = morph_features.aggregate(['mean', 'std', 'min', 'max']).unstack().to_frame().T
+                agg.columns = ['_'.join(col).strip() for col in agg.columns.values]
+                features.update(agg.iloc[0].to_dict())
+        except Exception as e:
+            msg = f"[ERROR] Exception in morphological feature extraction: {e}"
+            logging.error(msg, exc_info=True)
+            import traceback
+            traceback.print_exc()
+            morph_feature_keys = ['P_wave_duration', 'PR_interval', 'PR_segment', 'QRS_duration', 'QT_interval', 'ST_segment', 'ST_slope']
+            stats = ['mean', 'std', 'min', 'max']
+            for key in morph_feature_keys:
+                for stat in stats:
+                    features[f'{key}_{stat}'] = np.nan
+
+        # HRV features
+        hrv_feature_names = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_RMSSD', 'HRV_SDSD', 'HRV_CVNN', 'HRV_CVSD',
+                            'HRV_MedianNN', 'HRV_MadNN', 'HRV_MCVNN', 'HRV_IQRNN', 'HRV_SDRMSSD', 'HRV_Prc20NN',
+                            'HRV_Prc80NN', 'HRV_pNN50', 'HRV_pNN20', 'HRV_MinNN', 'HRV_MaxNN', 'HRV_HTI', 'HRV_TINN']
+        is_good_quality = False
+        try:
+            if info and not ecg_signals.empty:
+                is_good_quality = assess_ecg_quality(info, lead_signal.reshape(-1, 1), frequency)
+            if is_good_quality:
+                hrv_features_full = nk.hrv_time(ecg_signals, sampling_rate=frequency)
+                for col in hrv_feature_names:
+                    if col in hrv_features_full.columns:
+                        features[col] = hrv_features_full.iloc[0][col]
+                    else:
+                        features[col] = np.nan
+            else:
+                for col in hrv_feature_names:
+                    features[col] = np.nan
+        except Exception as e:
+            msg = f"[ERROR] Exception in HRV feature extraction: {e}"
+            logging.error(msg, exc_info=True)
+            import traceback
+            traceback.print_exc()
+            for col in hrv_feature_names:
+                features[col] = np.nan
+
+        # Wavelet features
+        try:
+            coeffs = pywt.wavedec(lead_signal, 'db4', level=4)
+            cA4, cD4, cD3, cD2, cD1 = coeffs
+            features.update({
+                'wavelet_energy_d1': np.sum(np.square(cD1)),
+                'wavelet_energy_d2': np.sum(np.square(cD2)),
+                'wavelet_energy_d3': np.sum(np.square(cD3)),
+                'wavelet_energy_d4': np.sum(np.square(cD4)),
+                'wavelet_energy_a4': np.sum(np.square(cA4)),
+                'wavelet_std_d1': np.std(cD1),
+                'wavelet_std_d2': np.std(cD2),
+                'wavelet_std_d3': np.std(cD3),
+                'wavelet_std_d4': np.std(cD4),
+                'wavelet_std_a4': np.std(cA4),
+            })
+        except Exception as e:
+            msg = f"[ERROR] Exception in wavelet feature extraction: {e}"
+            logging.error(msg, exc_info=True)
+            import traceback
+            traceback.print_exc()
+            for key in ['wavelet_energy_d1', 'wavelet_energy_d2', 'wavelet_energy_d3', 'wavelet_energy_d4', 'wavelet_energy_a4',
+                        'wavelet_std_d1', 'wavelet_std_d2', 'wavelet_std_d3', 'wavelet_std_d4', 'wavelet_std_a4']:
+                features[key] = np.nan
     except Exception as e:
-        msg = f"[ERROR] Exception in nk.ecg_process: {e}; filling with NaNs."
-        if DEBUG:
-            logging.error(msg)
-        info = {}
-        ecg_signals = pd.DataFrame()
+        msg = f"[ERROR] Exception in extract_lead_features outer block: {e}"
+        logging.error(msg, exc_info=True)
+        import traceback
+        traceback.print_exc()
+        # Fill all features with NaN in case of catastrophic failure
+        morph_feature_keys = ['P_wave_duration', 'PR_interval', 'PR_segment', 'QRS_duration', 'QT_interval', 'ST_segment', 'ST_slope']
+        stats = ['mean', 'std', 'min', 'max']
+        for key in morph_feature_keys:
+            for stat in stats:
+                features[f'{key}_{stat}'] = np.nan
+        hrv_feature_names = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_RMSSD', 'HRV_SDSD', 'HRV_CVNN', 'HRV_CVSD',
+                            'HRV_MedianNN', 'HRV_MadNN', 'HRV_MCVNN', 'HRV_IQRNN', 'HRV_SDRMSSD', 'HRV_Prc20NN',
+                            'HRV_Prc80NN', 'HRV_pNN50', 'HRV_pNN20', 'HRV_MinNN', 'HRV_MaxNN', 'HRV_HTI', 'HRV_TINN']
+        for col in hrv_feature_names:
+            features[col] = np.nan
+        for key in ['wavelet_energy_d1', 'wavelet_energy_d2', 'wavelet_energy_d3', 'wavelet_energy_d4', 'wavelet_energy_a4',
+                    'wavelet_std_d1', 'wavelet_std_d2', 'wavelet_std_d3', 'wavelet_std_d4', 'wavelet_std_a4']:
+            features[key] = np.nan
+    return features
 
     # Morphological features
     correct_waves = check_interval(info) if info else pd.DataFrame()
@@ -259,7 +370,7 @@ import torch.nn.functional as F
 from helper_code import load_header, get_age, get_sex, get_label, load_signals, get_sampling_frequency
 
 # Parameters
-debug = False
+DEBUG = True
 patience = 10
 batch_size = 1 * torch.cuda.device_count() if torch.cuda.is_available() else 1
 assert batch_size != 0, 'Batch size is 0 (most likely due to non-detected cuda'
@@ -353,24 +464,69 @@ else:
 
 
 
-def extract_all_ecg_features(record_path, header_path=None, channel_count=12):
+def extract_all_ecg_features_from_signal(signals, frequency, age=np.nan, is_male=np.nan, chagas=np.nan, record=None, channel_count=12):
+    """
+    Extracts ECG features from a raw ECG signal array (shape: [n_samples, n_leads]) and frequency.
+    Optionally takes demographic info (age, is_male, chagas, record).
+    Returns a flat dict with single-lead and aggregated features, matching extract_all_ecg_features output.
+    """
+    feature_dicts = []
+    for channel in range(channel_count):
+        try:
+            lead_features = extract_lead_features(signals[:, channel], frequency, channel=channel)
+            feature_dicts.append(lead_features)
+        except Exception as e:
+            msg = f"[ERROR] Feature extraction failed for channel {channel}: {e}"
+            if DEBUG:
+                logging.error(msg, exc_info=True)
+                import traceback
+                traceback.print_exc()
+            else:
+                logging.warning(msg)
+            continue
+
+    if not feature_dicts:
+        msg = f"[ERROR] Feature extraction failed for all channels in record {record}. Raising exception for debug."
+        if DEBUG:
+            logging.error(msg)
+            import traceback
+            traceback.print_stack()
+        raise RuntimeError(msg)
+
+    single_lead_features = feature_dicts[0].copy()
+    single_lead_features_renamed = {f"{k}_single_lead": v for k, v in single_lead_features.items()}
+
+    features_df = pd.DataFrame(feature_dicts)
+    numeric_cols = features_df.select_dtypes(include=[np.number]).columns
+    means = features_df[numeric_cols].mean(axis=0)
+    stds = features_df[numeric_cols].std(axis=0)
+    aggregated_features = {}
+    for col in numeric_cols:
+        aggregated_features[f"{col}_mean_all_leads"] = means[col]
+        aggregated_features[f"{col}_std_all_leads"] = stds[col]
+
+    combined = {}
+    combined.update(single_lead_features_renamed)
+    combined.update(aggregated_features)
+    combined['age'] = age
+    combined['is_male'] = is_male
+    combined['chagas'] = chagas
+    combined['record'] = record
+    return combined
+
+def extract_all_ecg_features_from_path(record_path, header_path=None, channel_count=12):
     """
     Loads metadata and signals for a record, then iterates through all leads, calling extract_lead_features.
     Returns the first successful feature dict, or a NaN-filled dict if all channels fail.
     Handles all error cases robustly and logs issues.
     """
-    """
-    Loads metadata and signals, then iterates through leads, calling extract_lead_features.
-    Returns the first successful feature dict, or a NaN-filled dict if all fail.
-    """
-    import numpy as np
-    # --- Load metadata and signals, robust to missing or malformed files ---
     try:
         if header_path is None:
             header_path = record_path + '.hea'
         header = load_header(header_path)
         age = get_age(header)
-        is_male = 1 if get_sex(header) == 'Male' else 0
+        sex = get_sex(header)
+        is_male = 1 if str(sex).strip().lower() == 'male' else 0 if str(sex).strip().lower() == 'female' else np.nan
         chagas = get_label(header)
     except Exception as e:
         msg = f"[ERROR] Demographic extraction failed for {record_path}: {e}"
@@ -381,6 +537,13 @@ def extract_all_ecg_features(record_path, header_path=None, channel_count=12):
         age, is_male, chagas = np.nan, np.nan, np.nan
     try:
         signals, _ = load_signals(record_path)
+        if DEBUG:
+            logging.debug(f"[DEBUG] Loaded signals for {record_path}: type={type(signals)}, shape={getattr(signals, 'shape', None)}, dtype={getattr(signals, 'dtype', None)}")
+            if hasattr(signals, 'shape') and signals.shape[0] > 0 and signals.shape[1] > 0:
+                logging.debug(f"[DEBUG] First 5 samples, first channel: {signals[:5,0]}")
+                logging.debug(f"[DEBUG] First 5 samples, all channels: {signals[:5,:]}")
+            else:
+                logging.debug(f"[DEBUG] signals appears empty or malformed: {signals}")
     except Exception as e:
         msg = f"[ERROR] Signal loading failed for {record_path}: {e}"
         if DEBUG:
@@ -388,57 +551,25 @@ def extract_all_ecg_features(record_path, header_path=None, channel_count=12):
         else:
             logging.warning(msg)
         if DEBUG:
-            raise
-        return None
+            pass
+    # No debug logging for lead_signal here; handled in extract_lead_features
+    # Actually run feature extraction and raise if all channels fail
     try:
-        frequency = get_sampling_frequency(header)
+        frequency = get_sampling_frequency(header) if 'header' in locals() else 500
+        return extract_all_ecg_features_from_signal(signals, frequency, age=age, is_male=is_male, chagas=chagas, record=record_path, channel_count=signals.shape[1])
     except Exception as e:
-        msg = f"[WARN] Sampling frequency extraction failed for {record_path}: {e}. Using default 500Hz."
+        msg = f"[ERROR] Feature extraction failed for all channels in record {record_path}: {e}"
         if DEBUG:
             logging.error(msg, exc_info=True)
-        else:
-            logging.warning(msg)
-        frequency = 500
-    # --- Try all channels, return first successful feature dict ---
-    for channel in range(channel_count):
-        try:
-            lead_features = extract_lead_features(signals[:, channel], frequency)
-            lead_features['age'] = age
-            lead_features['is_male'] = is_male
-            lead_features['chagas'] = chagas
-            lead_features['record'] = os.path.basename(record_path)
-            return lead_features
-        except Exception as e:
-            msg = f"[ERROR] Feature extraction failed for {record_path} channel {channel}: {e}"
-            if DEBUG:
-                logging.error(msg, exc_info=True)
-                raise
-            else:
-                logging.warning(msg)
-            continue
-    # If all channels fail, return NaNs for all features
-    # If all channels fail, return a NaN-filled feature dict for downstream compatibility
-    msg = f"[FAIL] All channels failed for {record_path}"
-    if DEBUG:
-        logging.error(msg)
-    else:
-        logging.warning(msg)
-    nan_features = {col: np.nan for col in ['age', 'is_male', 'chagas', 'record']}
-    morph_feature_keys = ['P_wave_duration', 'PR_interval', 'PR_segment', 'QRS_duration', 'QT_interval', 'ST_segment', 'ST_slope']
-    for key in morph_feature_keys:
-        for stat in ['mean', 'std', 'min', 'max']:
-            nan_features[f'{key}_{stat}'] = np.nan
-    # Only include HRV features that are supported for short ECGs (exclude windowed features)
-    hrv_keys = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_RMSSD', 'HRV_SDSD', 'HRV_CVNN', 'HRV_CVSD',
-               'HRV_MedianNN', 'HRV_MadNN', 'HRV_MCVNN', 'HRV_IQRNN', 'HRV_SDRMSSD', 'HRV_Prc20NN',
-               'HRV_Prc80NN', 'HRV_pNN50', 'HRV_pNN20', 'HRV_MinNN', 'HRV_MaxNN', 'HRV_HTI', 'HRV_TINN']
-    for key in hrv_keys:
-        nan_features[key] = np.nan
-    wavelet_keys = ['wavelet_energy_d1', 'wavelet_energy_d2', 'wavelet_energy_d3', 'wavelet_energy_d4', 'wavelet_energy_a4',
-                    'wavelet_std_d1', 'wavelet_std_d2', 'wavelet_std_d3', 'wavelet_std_d4', 'wavelet_std_a4']
-    for key in wavelet_keys:
-        nan_features[key] = np.nan
-    return nan_features
+            import traceback
+            traceback.print_exc()
+        raise
+
+def extract_all_ecg_features(record_path, header_path=None, channel_count=12):
+    """
+    Backward-compatible alias for extract_all_ecg_features_from_path.
+    """
+    return extract_all_ecg_features_from_path(record_path, header_path=header_path, channel_count=channel_count)
 
 def assess_ecg_quality(info, signals, frequency):
     """

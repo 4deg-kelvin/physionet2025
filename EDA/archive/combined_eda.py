@@ -56,6 +56,11 @@ from tqdm import tqdm
 import orjson
 import pywt
 
+# Suppress common warnings for cleaner EDA output
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=RuntimeWarning)
+
 from helper_code import *
 
 # --- Utility Functions ---
@@ -99,83 +104,79 @@ def extract_basic_features(record_path):
     except Exception:
         return None
 
-def extract_advanced_ecg_features(signal, sampling_rate):
+def extract_advanced_ecg_features(signal, sampling_rate, failure_counters):
     """
-    Extracts morphological and HRV features from a single ECG signal.
-    Focuses on features robust for short recordings.
+    Extracts a comprehensive set of ECG features with robust, modular error handling.
     """
     features = {}
-    # Use Lead II for analysis, which is typically the second column in 12-lead ECGs
-    if signal.ndim > 1 and signal.shape[1] > 1:
-        lead_signal = signal[:, 1]
-    else:
-        lead_signal = signal.flatten()
+    rr_interval_lengths = []
 
+    # --- Single-Lead Feature Extraction (using the first available lead) ---
     try:
-        # Process the ECG signal with NeuroKit2
+        lead_signal = signal[:, 0] # Default to first lead
         signals, info = nk.ecg_process(lead_signal, sampling_rate=sampling_rate)
         peaks = info["ECG_R_Peaks"]
+        rr_interval_lengths.append(len(peaks))
 
-        # If not enough peaks are found, return empty features
-        if len(peaks) < 4: # Need at least a few beats for meaningful stats
-            return {}, []
+        if len(peaks) >= 4:
+            # Morphological Features
+            morph_features = [
+                'ECG_P_Duration', 'ECG_P_Amplitude', 'ECG_QRS_Duration', 
+                'ECG_QRS_Amplitude', 'ECG_T_Duration', 'ECG_T_Amplitude', 
+                'ECG_QT_Interval', 'ECG_QTc_Interval'
+            ]
+            for feature in morph_features:
+                if feature in signals:
+                    feature_values = signals[feature].dropna()
+                    if not feature_values.empty:
+                        features[f'{feature}_mean'] = feature_values.mean()
+                        features[f'{feature}_std'] = feature_values.std()
 
-        # --- Morphological Features (mean and std over all detected beats) ---
-        morph_features = [
-            'ECG_P_Duration', 'ECG_P_Amplitude', 'ECG_QRS_Duration', 
-            'ECG_QRS_Amplitude', 'ECG_T_Duration', 'ECG_T_Amplitude', 'ECG_QT_Interval'
-        ]
-        for feature in morph_features:
-            if feature in signals:
-                feature_values = signals[feature].dropna()
-                if not feature_values.empty:
-                    features[f'{feature}_mean'] = feature_values.mean()
-                    features[f'{feature}_std'] = feature_values.std()
-                else: # Handle case where no valid values exist for a feature
-                    features[f'{feature}_mean'] = np.nan
-                    features[f'{feature}_std'] = np.nan
+            # HRV, Stats, and TKEO
+            rate_values = signals['ECG_Rate'].dropna()
+            if not rate_values.empty:
+                features['Heart_Rate_Mean'] = rate_values.mean()
+            else:
+                features['Heart_Rate_Mean'] = np.nan
+            features['signal_skewness'] = stats.skew(lead_signal)
+            features['signal_kurtosis'] = stats.kurtosis(lead_signal)
+            tkeo_signal = nk.ecg_tkeo(lead_signal)
+            features['tkeo_mean'] = np.mean(tkeo_signal)
+            features['tkeo_std'] = np.std(tkeo_signal)
 
-        # --- HRV Features (computed only if enough peaks are detected) ---
-        # Based on user feedback, these calculations can fail on very short signals.
-        # We will only compute them if more than 20 RR intervals (21 peaks) are found.
-        if len(peaks) > 20:
-            try:
-                # Add a check for variability in peaks to prevent errors
-                if np.std(np.diff(peaks)) > 0:
-                    # Time-Domain
+            # Conditional HRV Features
+            if len(peaks) > 20 and np.std(np.diff(peaks)) > 0:
+                try:
                     hrv_time = nk.hrv_time(peaks, sampling_rate=sampling_rate, show=False)
-                    features['HRV_RMSSD'] = hrv_time['HRV_RMSSD'].iloc[0]
-                    features['HRV_MeanNN'] = hrv_time['HRV_MeanNN'].iloc[0]
-                    features['HRV_pNN50'] = hrv_time['HRV_pNN50'].iloc[0]
+                    features.update(hrv_time.iloc[0].to_dict())
+                    hrv_poincare = nk.hrv_poincare(peaks, sampling_rate=sampling_rate, show=False)
+                    features.update(hrv_poincare.iloc[0].to_dict())
+                    hrv_fragmentation = nk.hrv_fragmentation(peaks, sampling_rate=sampling_rate, show=False)
+                    features.update(hrv_fragmentation.iloc[0].to_dict())
+                except Exception:
+                    failure_counters['hrv_failures'] += 1
+                    pass # Fail silently if HRV calculations fail
 
-                    # Non-Linear (Poincaré)
-                    hrv_poincare_df = nk.hrv_poincare(peaks, sampling_rate=sampling_rate, show=False)
-                    features['HRV_SD1'] = hrv_poincare_df['HRV_SD1'].iloc[0]
-                else:
-                    raise ValueError("No variability in RR-intervals.")
-            except Exception:
-                features['HRV_RMSSD'] = np.nan
-                features['HRV_MeanNN'] = np.nan
-                features['HRV_pNN50'] = np.nan
-                features['HRV_SD1'] = np.nan
-        else:
-            # If not enough peaks, fill with NaN
-            features['HRV_RMSSD'] = np.nan
-            features['HRV_MeanNN'] = np.nan
-            features['HRV_pNN50'] = np.nan
-            features['HRV_SD1'] = np.nan
+    except Exception:
+        failure_counters['single_lead_processing_failures'] += 1
+        pass # Fail silently on single-lead processing
 
-        # --- Overall Heart Rate ---
-        if 'ECG_Rate' in signals and not signals['ECG_Rate'].dropna().empty:
-            features['Heart_Rate_Mean'] = signals['ECG_Rate'].mean()
-        else:
-            features['Heart_Rate_Mean'] = np.nan
-        
-        rr_interval_lengths = [len(peaks)]
-
-    except Exception as e:
-        # Silently fail for signals that are too noisy or short to be processed
-        return {}, []
+    # --- Multi-Lead (Axis) Feature Extraction ---
+    if signal.ndim > 1 and signal.shape[1] > 1:
+        try:
+            lead1_signal = signal[:, 0]
+            lead2_signal = signal[:, 1]
+            signals_I, _ = nk.ecg_process(lead1_signal, sampling_rate=sampling_rate)
+            signals_II, _ = nk.ecg_process(lead2_signal, sampling_rate=sampling_rate)
+            
+            features['qrs_axis'] = nk.ecg_axis(signals_I, signals_II)
+            features['t_axis'] = nk.ecg_axis(signals_I, signals_II, wave='T')
+            features['p_axis'] = nk.ecg_axis(signals_I, signals_II, wave='P')
+            if features.get('qrs_axis') is not None and features.get('t_axis') is not None:
+                features['qrs_t_angle'] = abs(features['qrs_axis'] - features['t_axis'])
+        except Exception:
+            failure_counters['axis_failures'] += 1
+            pass # Fail silently on axis calculation
 
     return features, rr_interval_lengths
 
@@ -207,7 +208,7 @@ def extract_wavelet_features(record_path):
     except Exception:
         return None
 
-def process_record(record_path):
+def process_record(record_path, failure_counters):
     """
     Main processing function for a single record.
     """
@@ -215,17 +216,19 @@ def process_record(record_path):
         # Basic features from header
         basic_features = extract_basic_features(record_path)
         if not basic_features:
-            return None, []
+            failure_counters['basic_feature_failures'] += 1
+            return None, [], failure_counters
 
         # Load signal for advanced feature extraction
         signal, fields = wfdb.rdsamp(record_path)
         sampling_rate = fields['fs']
         
         if signal is None or signal.size == 0:
-            return None, []
+            failure_counters['signal_loading_failures'] += 1
+            return None, [], failure_counters
 
         # Advanced and wavelet features
-        advanced_features, rr_interval_lengths = extract_advanced_ecg_features(signal, sampling_rate)
+        advanced_features, rr_interval_lengths = extract_advanced_ecg_features(signal, sampling_rate, failure_counters)
         wavelet_features = extract_wavelet_features(record_path)
 
         # Combine all features
@@ -236,10 +239,10 @@ def process_record(record_path):
             all_features.update(wavelet_features)
         
         all_features['record'] = os.path.basename(record_path)
-        return all_features, rr_interval_lengths
+        return all_features, rr_interval_lengths, failure_counters
     except Exception as e:
-        # print(f"Error in process_record for {os.path.basename(record_path)}: {e}") # Uncomment for debugging
-        return None, []
+        failure_counters['process_record_exceptions'] += 1
+        return None, [], failure_counters
 
 # --- Main Execution ---
 
@@ -258,21 +261,47 @@ def main():
     # --- Feature Extraction (with new wavelet features) ---
     all_rr_interval_lengths_collected = []
     processed_results = []
+    failure_counters = {
+        'basic_feature_failures': 0,
+        'signal_loading_failures': 0,
+        'single_lead_processing_failures': 0,
+        'hrv_failures': 0,
+        'axis_failures': 0,
+        'process_record_exceptions': 0
+    }
 
     with Parallel(n_jobs=-1) as parallel:
-        for res, rr_lengths in tqdm(parallel(delayed(process_record)(record) for record in record_stems), total=len(record_stems)):
-            if res is not None:
-                processed_results.append(res)
-                all_rr_interval_lengths_collected.extend(rr_lengths)
+        results = parallel(delayed(process_record)(record, failure_counters.copy()) for record in tqdm(record_stems))
+
+    for res, rr_lengths, counters in results:
+        if res is not None:
+            processed_results.append(res)
+            all_rr_interval_lengths_collected.extend(rr_lengths)
+        for key in failure_counters:
+            failure_counters[key] += counters[key]
 
     df = pd.DataFrame(processed_results)
-    
-    # Data Cleaning
+
+    # --- Failure Analysis ---
+    print("\n--- Feature Extraction Failure Report ---")
+    total_records = len(record_stems)
+    print(f"Total records attempted: {total_records}")
+    for key, value in failure_counters.items():
+        if value > 0:
+            print(f"- {key}: {value} ({value/total_records:.2%})")
+    print("-----------------------------------------")
+
+    # --- Data Cleaning and Validation ---
+    if df.empty:
+        print("\nNo records were processed successfully. The resulting DataFrame is empty.")
+        print("Cannot proceed with EDA. Please check the data source and failure report above.")
+        return # Exit gracefully
+
     df.dropna(subset=['chagas'], inplace=True)
     df.fillna(df.median(numeric_only=True), inplace=True)
     
-    print("Feature extraction complete.")
-    print(f"Dataset shape: {df.shape}")
+    print("\nFeature extraction and cleaning complete.")
+    print(f"Final dataset shape: {df.shape}")
     print("Columns:", df.columns.tolist())
 
     # --- EDA (from notebook_template.ipynb) ---
