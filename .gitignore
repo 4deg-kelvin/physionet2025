@@ -29,3 +29,7 @@ venv/
 training_data/ptbxl/
 notebooks/model_output
 training_data/to_ignore
+/EDA/.github
+/.github
+/EDA/training_data
+EDA/EDA_output
