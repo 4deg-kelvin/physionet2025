@@ -64,6 +64,8 @@ def run_model(record, model, verbose):
         pred   = 1 if prob > 0.5 else 0
         return pred, prob
 
+    except NotImplementedError as e:
+        raise NotImplementedError(f"run_model error: {e}")
     except Exception as e:
         if verbose:
             print(f"run_model error: {e}")
