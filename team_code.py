@@ -56,7 +56,7 @@ def run_model(record, model, verbose):
     # --- copy of ECGDataset.__getitem__ preprocessing ---
     record_path = record
     try:
-        signal, wide_feats = utils.preprocess_signal(record_path, windowing_method='entire_recording')
+        signal, wide_feats = utils.preprocess_signal(record_path, windowing_method='entire_recording', is_training=False)
         sig_t = torch.FloatTensor(signal).unsqueeze(0).to("cuda:0" if torch.cuda.is_available() else "cpu")
         wf_t  = torch.FloatTensor(wide_feats).unsqueeze(0).to("cuda:0" if torch.cuda.is_available() else "cpu")
         logits = model(sig_t, wf_t)
