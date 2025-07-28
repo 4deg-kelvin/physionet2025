@@ -141,8 +141,9 @@ def get_source(string):
     return source
 # Get age, sex, and label from a WFDB header or a similar string in one pass.
 # NOTE: I made this function myself, it is NOT part of the original challenge.
-def get_patient_info(string, allow_missing_label=False):
-    '''Gets the age, sex, and label from a WFDB header or a similar string.'''
+def get_patient_info(string, get_label=True):
+    '''Gets the age, sex, and label from a WFDB header or a similar string.
+    If get_label is True, then the label is also returned.'''
     age = None
     sex = None
     label = None
@@ -160,15 +161,20 @@ def get_patient_info(string, allow_missing_label=False):
         elif l.startswith(sex_string):
             sex = l[len(sex_string):].strip()
             has_sex = True
-        elif l.startswith(label_string):
+        elif get_label and l.startswith(label_string):
             label = l[len(label_string):].strip()
             has_label = True
             label = sanitize_boolean_value(label)
+    # Stop program, if we can't find a label and we are trying to get a label.
+    if get_label is True and has_label is False:
+        # IMPORTANT: throw this specific error so that we know that this is an error that should IMMEDIATELY stop 
+        # program, as you probably tried to load the labels from the held-out data, which is not allowed.
+        raise NotImplementedError('No label is available: are you trying to load the labels from the held-out data?')
     
-    if not has_label and not allow_missing_label:
-        raise Exception('No label is available: are you trying to load the labels from the held-out data?')
-    
-    return age, sex, label
+    if get_label:
+        return age, sex, label
+    else:
+        return age, sex
 # Normalize the channel names.
 def normalize_names(names_ref, names_est):
     tmp = list()
