@@ -14,7 +14,8 @@ import numpy as np
 import os
 
 
-import transformer
+import finetuning
+import mae
 
 import torch
 
@@ -38,13 +39,15 @@ import neurokit2 as nk
 
 # Train your model.
 def train_model(data_folder, model_folder, verbose):
-    transformer.train(data_folder, model_folder)
+    mae.train_model(data_folder, model_folder, verbose) # this outputs "mae_encoder_pretrained.ckpt"
+    # this takes the output of the previous step and finetunes it, outputting "finetuned_model.ckpt" in model_folder
+    print("Finetuning the model...")
+    finetuning.train_finetune_model(data_folder, model_folder, verbose)
 
 # Load your trained models. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function. If you do not train one of the models, then you can return None for the model.
 def load_model(model_folder, verbose):
-    checkpoint_path = os.path.join(model_folder, 'last.ckpt')
-    model = transformer.load_model(checkpoint_path)
+    model = finetuning.load_finetuned_model(model_folder)
     # move model to GPU if available
     if torch.cuda.is_available():
         model = model.to('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -53,23 +56,34 @@ def load_model(model_folder, verbose):
 # Run your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def run_model(record, model, verbose):
-    # --- copy of ECGDataset.__getitem__ preprocessing ---
     record_path = record
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
     try:
-        signal, wide_feats = utils.preprocess_signal(record_path, windowing_method='entire_recording')
-        sig_t = torch.FloatTensor(signal).unsqueeze(0).to("cuda:0" if torch.cuda.is_available() else "cpu")
-        wf_t  = torch.FloatTensor(wide_feats).unsqueeze(0).to("cuda:0" if torch.cuda.is_available() else "cpu")
-        logits = model(sig_t, wf_t)
-        prob   = torch.sigmoid(logits).item()
-        pred   = 1 if prob > 0.5 else 0
+        signal, wide_feats = utils.preprocess_signal(
+            record_path, windowing_method='entire_recording', is_training=False
+        )
+        sig_t = torch.FloatTensor(signal).unsqueeze(0).to(device)
+        wf_t  = torch.FloatTensor(wide_feats).unsqueeze(0).to(device)
+
+        # Attempt to call forward(x, info); fallback to forward(x)
+        try:
+            logits = model(sig_t, wf_t)
+        except TypeError:
+            logits = model(sig_t)
+
+        prob = torch.sigmoid(logits).item()
+        pred = 1 if prob > 0.5 else 0
         return pred, prob
 
+    # IMPORTANT: if you get a NotImplementedError specifically, something bad happened (ie, you 
+    # chose the wrong preprocessing steps, etc, so you should NOT proceed with ANY prediction, therefore we 
+    # end the program here for debugging purposes.)
+    except NotImplementedError as e:
+        raise NotImplementedError(f"run_model error: {e}")
     except Exception as e:
         if verbose:
             print(f"run_model error: {e}")
         return None, None
-
-
 ################################################################################
 #
 # Optional functions. You can change or remove these functions and/or add new functions.
@@ -78,8 +92,8 @@ def run_model(record, model, verbose):
 
 
 
-# Save your trained model.
-def save_model(model_folder, model):
-    d = {'model': model}
-    filename = os.path.join(model_folder, 'model.sav')
-    joblib.dump(d, filename, protocol=0)
+# # Save your trained model.
+# def save_model(model_folder, model):
+#     d = {'model': model}
+#     filename = os.path.join(model_folder, 'model.sav')
+#     joblib.dump(d, filename, protocol=0)

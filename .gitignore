@@ -1,1 +1,7 @@
 outputs/
+outputs2/
+*.pyc
+*.txt
+*.ckpt
+events.out.tfevents.*
+hparams.yaml

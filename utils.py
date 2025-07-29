@@ -21,19 +21,41 @@ REFERENCE_POLARITY_LEAD_IDX = 1  # Lead II is the reference lead for polarity ch
 MIN_SIGNAL_DURATION = 2  # seconds, minimum duration of the signal to even be used for training
 np.random.seed(42)  # For reproducibility
 
+MEAN_AGE_TRAIN = 53.78590876196458
+STD_AGE_TRAIN = 20.76942829983386
+
 from biosppy.signals import ecg as biosppy_ecg
 from biosppy.signals import hrv as biosppy_hrv
 
-def preprocess_signal(record_path, windowing_method='entire_recording'):
+def preprocess_signal(record_path, windowing_method='entire_recording', is_training=False):
+    """ Preprocess the ECG signal from the record file.
+    Args:
+        record_path (str): Path to the record file.
+        windowing_method (str): Method for windowing the signal.
+        is_training (bool): Whether the preprocessing is for training or inference. This is useful when 
+        you want to disable checking for the minimum signal duration, as usually short records will be skipped, 
+        and REQUIRED so that we don't get labels from held-out data
+    Returns:
+        signal (np.ndarray): Preprocessed signal of shape (num_leads, num_samples).
+        wide_feats (np.ndarray): Wide features
+    """
     signal, metadata = custom_helper_code.load_signals(record_path)
     header_text = custom_helper_code.load_header(record_path)
     signal = signal.T  # (num_leads, num_samples)
     orig_freq = metadata['fs']
-    if signal.shape[1] < orig_freq * MIN_SIGNAL_DURATION:
-        return None, None
 
-    age, sex, _ = custom_helper_code.get_patient_info(header_text, allow_missing_label=False)
-    normalized_age = 0.0 if age is None or np.isnan(age) else float(age) / 100.0
+    if is_training:
+        if signal.shape[1] < orig_freq * MIN_SIGNAL_DURATION:
+            return None, None
+
+    age, sex, label = None, None, None
+    if is_training:
+        age, sex, label = custom_helper_code.get_patient_info(header_text, get_label=True)
+    else:
+        age, sex = custom_helper_code.get_patient_info(header_text, get_label=False)
+    if age is not None and not np.isnan(age):
+        age = (age - MEAN_AGE_TRAIN) / STD_AGE_TRAIN
+    normalized_age = 0.0 if age is None or np.isnan(age) else age
     if sex is None or sex.lower() not in ['male','female']:
         numerical_sex = 0.5
     elif sex.lower() == 'male':
@@ -41,16 +63,17 @@ def preprocess_signal(record_path, windowing_method='entire_recording'):
     else:
         numerical_sex = 1.0
 
+    # Resample
     if orig_freq != UNIFIED_FREQUENCY:
         ns = int(signal.shape[1] * (UNIFIED_FREQUENCY / orig_freq))
         signal = resample(signal, ns, axis=1)
 
     cleaned = [nk.ecg_clean(lead, sampling_rate=UNIFIED_FREQUENCY) for lead in signal]
     signal = np.stack(cleaned)
-    try:
-        signal, _ = correct_12_lead_polarity_lead_II_ref(signal,UNIFIED_FREQUENCY)
-    except:
-        pass
+    # try:
+    #     signal, _ = correct_12_lead_polarity_lead_II_ref(signal,UNIFIED_FREQUENCY)
+    # except:
+    #     print("Error in correcting polarity of the signal")
 
     # comp = calculate_ecg_features(signal, UNIFIED_FREQUENCY, REFERENCE_POLARITY_LEAD_IDX)
     # if comp is None:
@@ -60,6 +83,7 @@ def preprocess_signal(record_path, windowing_method='entire_recording'):
 
     windows = get_windows(signal, method=windowing_method, window_size=WINDOW_SIZE)
     if windows is None or len(windows) == 0:
+        print(f"No windows found for record {record_path}.")
         return None, None
     signal = windows[0]
     signal = normalize(signal, smooth=1e-8)
