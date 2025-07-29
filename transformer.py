@@ -245,7 +245,7 @@ class ECGDataset(Dataset):
                 return None # Return None to be filtered out by the custom collate function
             
             # --- ADDED: Get and process demographic data as wide features ---
-            age, sex, label = custom_helper_code.get_patient_info(header_text, allow_missing_label=False)
+            age, sex, label = custom_helper_code.get_patient_info(header_text, get_label=True)
             assert label is not None and label == 0 or label == 1, f"Invalid label {label} for record {self.records_list[idx]}"
     
             # Process and normalize age. Use a neutral value for missing data.
