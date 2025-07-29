@@ -451,17 +451,34 @@ class ECGClassifierLightning(pl.LightningModule):
         self.validation_step_labels.clear()
 
     def on_validation_epoch_end(self):
-        if self.trainer.sanity_checking or not self.validation_step_outputs:
+        # This hook is also called after the sanity check.
+        # We must ensure that the monitored metric is logged, otherwise the ModelCheckpoint callback will fail.
+        
+        # Check if any outputs were produced in the validation step.
+        if not self.validation_step_outputs or not self.validation_step_labels:
+            self.log('val_challenge_score', 0.0, prog_bar=True) # Log a default value
+            # Clear the lists in case one is populated and the other isn't.
+            self.validation_step_outputs.clear()
+            self.validation_step_labels.clear()
             return
-            
+
+        # Concatenate all predictions and labels from the validation steps.
         all_preds = torch.cat(self.validation_step_outputs).flatten().cpu().numpy()
         all_labels = torch.cat(self.validation_step_labels).flatten().cpu().numpy()
-
-        challenge_score = utils.compute_challenge_score(all_labels, all_preds)
-        self.log('val_challenge_score', challenge_score, prog_bar=True)
         
-        print(f"\nEpoch {self.current_epoch}: Validation Challenge Score = {challenge_score:.4f}")
+        # It's possible the validation set produced no valid samples after filtering.
+        if all_labels.size == 0:
+            self.log('val_challenge_score', 0.0, prog_bar=True)
+        else:
+            # Compute and log the actual challenge score.
+            challenge_score = utils.compute_challenge_score(all_labels, all_preds)
+            self.log('val_challenge_score', challenge_score, prog_bar=True)
+            
+            # Optionally, print the score but skip it during the sanity check to keep logs clean.
+            if not self.trainer.sanity_checking:
+                print(f"\nEpoch {self.current_epoch}: Validation Challenge Score = {challenge_score:.4f}")
 
+        # Clear the lists to prepare for the next validation epoch.
         self.validation_step_outputs.clear()
         self.validation_step_labels.clear()
 
