@@ -224,7 +224,7 @@ def train_finetune_model(data_folder, model_folder, verbose):
     config = {
         "data_dir": data_folder,
         "batch_size": 32,
-        "epochs": 16,
+        "epochs": 14,
         "lr": 1e-4,
         "weight_decay": 0.05,
         "num_unfrozen_layers": 2,
