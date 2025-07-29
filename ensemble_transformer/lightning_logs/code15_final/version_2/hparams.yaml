@@ -6,7 +6,7 @@ model_hparams:
   data_path: ../training_data/
   deepfeat_sz: 256
   dropout_rate: 0.1
-  epochs: 16
+  epochs: 7
   nhead: 8
   num_layers: 8
   num_leads: 12

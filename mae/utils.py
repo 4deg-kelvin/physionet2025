@@ -6,6 +6,7 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import thread_map
 import os 
 from sklearn.model_selection import StratifiedKFold 
+import sys
 
 
 UNIFIED_FREQUENCY = 500
@@ -46,7 +47,7 @@ except NameError:
 # The script will now directly use these modules.
 # Make sure they are available in your environment.
 import helper_code
-import utils
+
 
 def check_interval(waves_signals: dict) -> pd.DataFrame:
     # Define the relevant keys (also in the order they should be)

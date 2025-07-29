@@ -6,6 +6,9 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import thread_map
 import os 
 from sklearn.model_selection import StratifiedKFold 
+import sys
+
+from functools import cache
 
 
 UNIFIED_FREQUENCY = 500
@@ -46,7 +49,7 @@ except NameError:
 # The script will now directly use these modules.
 # Make sure they are available in your environment.
 import helper_code
-import utils
+
 
 def check_interval(waves_signals: dict) -> pd.DataFrame:
     # Define the relevant keys (also in the order they should be)
@@ -464,6 +467,7 @@ def generate_k_folds(k_folds, records):
         folds.append([records[i] for i in test_idx])
     
     return folds
+
 def prepare_stratification(records):
     """
     Prepare stratification for cross-validation based on the records.

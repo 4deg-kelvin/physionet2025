@@ -24,6 +24,7 @@ from datetime import datetime
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 import time
+from sklearn.model_selection import train_test_split
 # --- Robust Path Handling ---
 # Handles running in different environments (e.g., script vs. notebook)
 # This allows the script to find your helper_code and utils modules
@@ -244,8 +245,9 @@ class ECGDataset(Dataset):
 
             # --- Gracefully handle short signals ---
             # Get frequency and check if the signal is long enough to be useful
+            # Only exclude records if we're not training 
             orig_freq = metadata['fs']
-            if signal.shape[1] < orig_freq * utils.MIN_SIGNAL_DURATION:
+            if signal.shape[1] < orig_freq * utils.MIN_SIGNAL_DURATION and self.is_training:
                 tqdm.write(f"Skipping record {self.records_list[idx]} due to insufficient length: {signal.shape[1]} samples.")
                 return None # Return None to be filtered out by the custom collate function
             
@@ -352,18 +354,27 @@ class ECGDataModule(pl.LightningDataModule):
         self.seq_len = seq_len
         self.windowing_method = windowing_method
 
+        # ensure these attrs always exist
+        self.train_dataset = None
+        self.val_dataset = None
+        self.test_dataset = None
+
     def setup(self, stage=None):
-        # CSV-based splitting removed; train/val/test datasets are assigned externally per fold.
         pass
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10), persistent_workers=True, shuffle=True, pin_memory=True, collate_fn=collate_fn_skip_none)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10),
+                          persistent_workers=True, shuffle=True, pin_memory=True, collate_fn=collate_fn_skip_none)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10), persistent_workers=True, pin_memory=True, collate_fn=collate_fn_skip_none)
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10),
+                          persistent_workers=True, pin_memory=True, collate_fn=collate_fn_skip_none)
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10), persistent_workers=True, pin_memory=True, collate_fn=collate_fn_skip_none)
+        # fallback to val_dataset if no test_dataset was set
+        dataset = self.test_dataset if self.test_dataset is not None else self.val_dataset
+        return DataLoader(dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10),
+                          persistent_workers=True, pin_memory=True, collate_fn=collate_fn_skip_none)
 
 # --- 3. PyTorch Lightning Module ---
 
@@ -512,22 +523,114 @@ class ECGClassifierLightning(pl.LightningModule):
                 "interval": "step",
             },
         }
-# --- 4. Training Script ---
+def ensemble_predict(test_records, kfold_ckpts, code15_ckpt, seq_len, windowing_method, batch_size, data_dir, w_k=0.5, w_c=0.5):
+        """
+        test_records: list of record IDs for universal_test
+        kfold_ckpts: list of two checkpoint paths (best PTB folds)
+        code15_ckpt: path to CODE-15% checkpoint
+        w_k, w_c: weights for k-fold avg and code15
+        """
+        # Create dataset in inference mode (don't skip short signals)
+        ds = ECGDataset(test_records, data_dir, is_training=False,
+                        seq_len=seq_len, windowing_method=windowing_method)
+        loader = DataLoader(ds, batch_size=batch_size, collate_fn=collate_fn_skip_none)
+        # select device
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+        # load and predict k-fold
+        k_preds = []
+        # load and predict k-fold models
+        for ckpt in kfold_ckpts:
+            m = ECGClassifierLightning.load_from_checkpoint(
+                ckpt, model_hparams=model_hparams, optimizer_hparams=optimizer_hparams
+            )
+            m.to(device)
+            m.eval()
+            preds = []
+            for batch in tqdm(loader, total=len(loader), desc=f"Predicting with {ckpt}"):
+                x, w, _ = batch
+                # Skip empty batches (all records filtered out)
+                if isinstance(x, torch.Tensor) and x.numel() == 0:
+                    continue
+                x, w = x.to(device), w.to(device)
+                with torch.no_grad():
+                    out = m(x, w)
+                    preds.append(torch.sigmoid(out).cpu().numpy())
+            k_preds.append(np.concatenate(preds))
+        # If no predictions were collected, return empty array
+        if not k_preds:
+            return np.array([])
+        avg_k = np.mean(k_preds, axis=0)
+
+        # load and predict code15
+        # load and predict CODE-15% model
+        m15 = ECGClassifierLightning.load_from_checkpoint(
+            code15_ckpt, model_hparams=model_hparams, optimizer_hparams=optimizer_hparams
+        )
+        m15.to(device)
+        m15.eval()
+        c_preds = []
+        for batch in tqdm(loader, total=len(loader), desc="Predicting with CODE-15%"):
+            x, w, _ = batch
+            # Skip empty batches
+            if isinstance(x, torch.Tensor) and x.numel() == 0:
+                continue
+            x, w = x.to(device), w.to(device)
+            with torch.no_grad():
+                out15 = m15(x, w)
+                c_preds.append(torch.sigmoid(out15).cpu().numpy())
+        # If no code15 predictions, return average from k-fold only
+        if not c_preds:
+            return avg_k
+        c_all = np.concatenate(c_preds)
+
+        # weighted ensemble
+        return w_k * avg_k + w_c * c_all
+# --- 4. Training Script ---
+# --- Hyperparameters ---
+DATA_DIR = "../training_data/" 
+BATCH_SIZE = 80
+SEQ_LEN = utils.WINDOW_SIZE
+NUM_LEADS = 12
+SPLIT_FILE = "../train_val_test_sets.csv"
+WINDOWING_METHOD = 'entire_recording'
+NUM_EPOCHS = 7
+CHECKPOINT_MONITOR_METRIC = 'val_challenge_score'
+NUM_WIDE_FEATURES = 2
+model_hparams = {
+    'd_model': 256,
+    'nhead': 8,
+    'num_layers': 8,
+    'd_ff': 2048,
+    'dropout_rate': 0.1,
+    'deepfeat_sz': 256,
+    'batch_size': BATCH_SIZE,
+    'data_path': DATA_DIR,
+    'seq_len': SEQ_LEN,
+    'num_leads': NUM_LEADS,
+    'use_single_window': utils.USE_ONE_WINDOW,
+    # 'num_records': len(record_files),
+    'split_file': SPLIT_FILE,
+    'pos_weight': utils.POS_WEIGHT,
+    'windowing_method': WINDOWING_METHOD,
+    'epochs': NUM_EPOCHS,
+    'checkpoint_monitor_metric': CHECKPOINT_MONITOR_METRIC,
+}
+optimizer_hparams = {
+    'lr': 2e-5,
+    'warmup_steps': 700,
+    'lr_end': 1e-7
+}
 if __name__ == '__main__':
     pl.seed_everything(42)
+    # --- Create run directory ---
+    run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = f"trained_model_{run_ts}"
+    RUN_DIR = run_name
+    os.makedirs(RUN_DIR, exist_ok=True)
+    print(f"Run artifacts will be saved to: {RUN_DIR}")
 
-    # --- Hyperparameters ---
-    DATA_DIR = "../training_data/" 
-    BATCH_SIZE = 80
-    SEQ_LEN = utils.WINDOW_SIZE
-    NUM_LEADS = 12
-    SPLIT_FILE = "../train_val_test_sets.csv"
-    WINDOWING_METHOD = 'entire_recording'
-    NUM_EPOCHS = 7
-    CHECKPOINT_MONITOR_METRIC = 'val_challenge_score'
 
-    NUM_WIDE_FEATURES = 2
     # PRECISION = "16-mixed"
 
     try:
@@ -553,45 +656,40 @@ if __name__ == '__main__':
     print(f"Found {len(record_files)} records in '{DATA_DIR}'")
 
     # restore hyperparameters for model and optimizer
-    model_hparams = {
-        'd_model': 256,
-        'nhead': 8,
-        'num_layers': 8,
-        'd_ff': 2048,
-        'dropout_rate': 0.1,
-        'deepfeat_sz': 256,
-        'batch_size': BATCH_SIZE,
-        'data_path': DATA_DIR,
-        'seq_len': SEQ_LEN,
-        'num_leads': NUM_LEADS,
-        'use_single_window': utils.USE_ONE_WINDOW,
-        'num_records': len(record_files),
-        'split_file': SPLIT_FILE,
-        'pos_weight': utils.POS_WEIGHT,
-        'windowing_method': WINDOWING_METHOD,
-        'epochs': NUM_EPOCHS,
-        'checkpoint_monitor_metric': CHECKPOINT_MONITOR_METRIC,
-    }
-    optimizer_hparams = {
-        'lr': 2e-5,
-        'warmup_steps': 700,
-        'lr_end': 1e-7
-    }
 
-    # --- K-Fold Cross-Validation on CODE-15% and PTB-XL ---
 
-    records_meta = utils.prepare_stratification(record_files)
-    filtered_meta = [m for m in records_meta if m.get('source') in ['CODE-15%', 'PTB-XL']]
-    k_folds = 5
-    folds = utils.generate_k_folds(k_folds, filtered_meta)
-    
+    # --- Load metadata and stratify ---
+    records_meta = utils.prepare_stratification(helper_code.find_records_abs(DATA_DIR))
+
+    # 1. build universal 10% test set (stratified per source)
+    universal_test = []
+    remaining = []
+    for src in ['PTB-XL','SaMi-Trop','CODE-15%']:
+        src_meta = [m for m in records_meta if m['source']==src]
+        labels   = [m['label'] for m in src_meta]
+        # 10% for test
+        train_val, test_src = train_test_split(src_meta,
+                                               test_size=0.1,
+                                               stratify=labels,
+                                               random_state=42)
+        universal_test += test_src
+        remaining    += train_val
+
+    print(f"Created test set with {len(universal_test)} records. Remaining records: {len(remaining)}")
+    # 2. K-fold on PTB+SaMi using remaining entries
+    ptb_sami = [m for m in remaining if m['source'] in ['PTB-XL','SaMi-Trop']]
+    folds = utils.generate_k_folds(5, ptb_sami)
+
+    # track (fold_idx, path, score)
+    fold_results = []
+
     for fold_idx, val_fold in enumerate(folds, start=1):
         # build train/val file lists
-        train_fold = [rec for f in folds if f is not val_fold for rec in f]
-        train_files = [rec['record'] for rec in train_fold]
-        val_files   = [rec['record'] for rec in val_fold]
+        train_fold = [r for f in folds if f is not val_fold for r in f]
+        train_files = [r['record'] for r in train_fold]
+        val_files   = [r['record'] for r in val_fold]
         
-        print(f"\n-- Fold {fold_idx}/{k_folds}: Train={len(train_files)}, Val={len(val_files)}")
+        print(f"\n-- Fold {fold_idx}/5: Train={len(train_files)}, Val={len(val_files)}")
         
         # initialize DataModule for this fold (override datasets manually)
         data_module = ECGDataModule(
@@ -608,48 +706,94 @@ if __name__ == '__main__':
         data_module.test_dataset  = ECGDataset(val_files,   DATA_DIR, is_training=False, seq_len=SEQ_LEN, windowing_method=WINDOWING_METHOD)
         
         # setup loggers
-        tb_logger = pl.loggers.TensorBoardLogger("lightning_logs/", name=f"ecg_transformer_fold{fold_idx}")
-        wandb_logger = WandbLogger(project="ecg_transformer_chagas", name=f"ensemble_transformer_fold{fold_idx}")
+        tb_logger    = pl.loggers.TensorBoardLogger(os.path.join(RUN_DIR, "logs"), name=f"fold{fold_idx}")
+        wandb_logger = WandbLogger(project="ecg_transformer_chagas", name=f"fold{fold_idx}", save_dir=RUN_DIR)
 
-        # Get time and date for log naming purposes
-        now = datetime.now()
-        date_str_MDY = now.strftime("%m-%d-%Y")
-
-        # Create a WandB run for this fold, grouped under the name + date
-        wandb.init(
-            entity="edwards_physionet", 
-            project="ecg_transformer_chagas",
-            name=f"ensemble_transformer_fold{fold_idx}",
-            config={
-                'model_hparams': model_hparams,
-                'optimizer_hparams': optimizer_hparams,
-                'fold_idx': fold_idx,
-                'k_folds': k_folds,
-                'batch_size': BATCH_SIZE,
-                'seq_len': SEQ_LEN,
-                'windowing_method': WINDOWING_METHOD,
-                'epochs': NUM_EPOCHS,
-                'checkpoint_monitor_metric': CHECKPOINT_MONITOR_METRIC
-            },
-            group=f"ensemble_transformer_fold_{date_str_MDY}",
-            reinit=True,
-        )
         # rebuild model & trainer per fold
         model   = ECGClassifierLightning(model_hparams, optimizer_hparams)
+        checkpoint_cb = pl.callbacks.ModelCheckpoint(
+            dirpath=RUN_DIR,
+            filename=f'fold{fold_idx}-best-{{epoch:02d}}-{{val_challenge_score:.4f}}',
+            monitor=CHECKPOINT_MONITOR_METRIC, mode='max'
+        )
         trainer = pl.Trainer(
             max_epochs=NUM_EPOCHS,
             accelerator="auto",
             devices=1,
             logger=[tb_logger, wandb_logger],
-            callbacks=[
-                pl.callbacks.ModelCheckpoint(
-                    monitor=CHECKPOINT_MONITOR_METRIC,
-                    mode='max',
-                    filename=f'fold{fold_idx}-best-{{epoch:02d}}-{{val_challenge_score:.4f}}.ckpt'
-                ),
-                pl.callbacks.DeviceStatsMonitor()
-            ]
+            callbacks=[checkpoint_cb]
         )
         trainer.fit(model, datamodule=data_module)
         trainer.test(model, datamodule=data_module)
-        wandb.finish()
+
+        # record best path and score (convert tensor to float)
+        fold_results.append((fold_idx, checkpoint_cb.best_model_path, float(checkpoint_cb.best_model_score)))
+
+    # Save all fold results (fold index, checkpoint path, score) to CSV
+    fold_df = pd.DataFrame(fold_results, columns=["fold_idx", "ckpt_path", "score"])
+    fold_df.to_csv(os.path.join(RUN_DIR, "fold_results.csv"), index=False)
+
+    # 3. CODE-15% model
+    code15_rem = [m for m in remaining if m['source']=='CODE-15%']
+    labels15   = [m['label'] for m in code15_rem]
+    train15, val15 = train_test_split(code15_rem,
+                                      test_size=0.2,
+                                      stratify=labels15,
+                                      random_state=42)
+    train_files15 = [r['record'] for r in train15]
+    val_files15   = [r['record'] for r in val15]
+
+    data_module15 = ECGDataModule(DATA_DIR, batch_size=BATCH_SIZE, seq_len=SEQ_LEN, windowing_method=WINDOWING_METHOD)
+    data_module15.train_dataset = ECGDataset(train_files15, DATA_DIR, seq_len=SEQ_LEN, windowing_method=WINDOWING_METHOD)
+    data_module15.val_dataset   = ECGDataset(val_files15,   DATA_DIR, seq_len=SEQ_LEN, windowing_method=WINDOWING_METHOD)
+
+    # setup loggers
+    tb_logger    = pl.loggers.TensorBoardLogger("lightning_logs/", name="code15_final")
+    wandb_logger = WandbLogger(project="ecg_transformer_chagas", name="code15_final")
+
+    model   = ECGClassifierLightning(model_hparams, optimizer_hparams)
+    trainer = pl.Trainer(
+        max_epochs=NUM_EPOCHS,
+        accelerator="auto",
+        devices=1,
+        logger=[tb_logger, wandb_logger],
+        callbacks=[
+            pl.callbacks.ModelCheckpoint(
+                dirpath=RUN_DIR,
+                filename='code15-best-{epoch:02d}-{val_challenge_score:.4f}',
+                monitor=CHECKPOINT_MONITOR_METRIC, mode='max'
+            )
+        ]
+    )
+    trainer.fit(model, datamodule=data_module15)
+    trainer.test(model, datamodule=data_module15)
+
+    # ensemble evaluation & grid search
+    
+
+    # usage:
+    # final_scores = ensemble_predict(...)
+
+    NUM_FOLDS_IN_STRONG_TRANSFORMER = 2
+    # 5. Evaluate ensemble on universal test
+    test_records  = [r['record'] for r in universal_test]
+    test_labels   = [r['label']  for r in universal_test]
+    fold_results_sorted = sorted(fold_results, key=lambda x: x[NUM_FOLDS_IN_STRONG_TRANSFORMER], reverse=True)
+    top2_ckpts = [path for _, path, _ in fold_results_sorted[:NUM_FOLDS_IN_STRONG_TRANSFORMER]]
+    code15_ckpt   = 'code15-best.ckpt'
+
+    # simple grid search for best weights
+    best_score = -1.0
+    best_wk, best_wc = 0.5, 0.5
+    for w_k in np.linspace(0, 1, 11):
+        w_c = 1.0 - w_k
+        preds = ensemble_predict(test_records, top2_ckpts, code15_ckpt, w_k=w_k, w_c=w_c)
+        score = utils.compute_challenge_score(test_labels, preds)
+        if score > best_score:
+            best_score, best_wk, best_wc = score, w_k, w_c
+
+    print(f"Best ensemble weights: w_k={best_wk:.2f}, w_c={best_wc:.2f} -> Challenge Score={best_score:.4f}")
+
+    # save best weights to CSV in run dir
+    ensemble_df = pd.DataFrame([{"w_k": best_wk, "w_c": best_wc}])
+    ensemble_df.to_csv(os.path.join(RUN_DIR, "ensemble_weights.csv"), index=False)
