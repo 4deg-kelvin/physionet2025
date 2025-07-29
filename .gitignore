@@ -1,1 +1,8 @@
 outputs/
+EDA/
+.github/
+venv/
+training_data/
+__pycache__/
+notebooks/
+**/wandb/
