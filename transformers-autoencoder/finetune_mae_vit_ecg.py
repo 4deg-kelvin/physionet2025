@@ -12,13 +12,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, accuracy_score
 from helper_code import find_records, load_signals, load_label, compute_challenge_score
 
-def finetune_mae(model, train_files, train_labels, train_folders, val_files, val_labels, val_folders, test_files, test_labels, test_folders, file_type, epochs=10, batch_size=8, lr=1e-4, device='cuda', patience=3):
+def finetune_mae(model, train_files, train_labels, train_folders, val_files, val_labels, val_folders, test_files, test_labels, test_folders, file_type, epochs=10, batch_size=8, lr=1e-4, weight_decay: float = 1e-2, warmup_epochs: int = 1, min_lr: float = 1e-6, device='cuda', patience=3):
     # Add classifier head
     # 1. Start a new run
     wandb.init(
         project="mae-vit-ecg-finetuning",
         config={
             "learning_rate": lr,
+            "weight_decay": weight_decay,
+            "warmup_epochs": warmup_epochs,
+            "min_lr": min_lr,
             "architecture": "ViT-Base with Classifier",
             "dataset": "SaMi-Trop + PTB-XL",
             "epochs": epochs,
@@ -55,8 +58,15 @@ def finetune_mae(model, train_files, train_labels, train_folders, val_files, val
         device = 'cpu'
     print(f"Using device: {device}")
     model.to(device)
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     criterion = nn.BCELoss()
+    
+    # Initialize learning rate scheduler with cosine annealing after warmup
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, 
+        T_max=epochs - warmup_epochs, 
+        eta_min=min_lr
+    )
     
     # Early stopping variables
     best_loss = float('inf')
@@ -70,6 +80,19 @@ def finetune_mae(model, train_files, train_labels, train_folders, val_files, val
         total_loss = 0
         num_batches = 0
         print(f"\nStarting epoch {epoch+1}/{epochs}")
+        
+        # Implement linear warmup for the first warmup_epochs
+        if epoch < warmup_epochs:
+            warmup_lr = lr * (epoch + 1) / warmup_epochs
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = warmup_lr
+            print(f"Warmup epoch {epoch+1}/{warmup_epochs}, LR: {warmup_lr:.6f}")
+        elif epoch == warmup_epochs:
+            # Reset to base learning rate for cosine annealing
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
+            print(f"Starting cosine annealing from epoch {epoch+1}, LR: {lr:.6f}")
+        
         # --- Training loop ---
         for i in range(0, len(train_files), batch_size):
             batch_files = train_files[i:i+batch_size]
@@ -244,6 +267,12 @@ def finetune_mae(model, train_files, train_labels, train_folders, val_files, val
             print(f"Restoring best model from epoch {epoch + 1 - patience}")
             model.load_state_dict(best_model_state)
             break
+        
+        # Step the scheduler after warmup period
+        if epoch >= warmup_epochs:
+            scheduler.step()
+            print(f"Scheduler step: New LR = {optimizer.param_groups[0]['lr']:.6f}")
+            
     # Save the best fine-tuned model
     if best_model_state is not None:
         torch.save(best_model_state, 'mae_vit_ecg_finetuned.pth')
