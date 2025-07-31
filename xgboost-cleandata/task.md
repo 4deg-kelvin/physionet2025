@@ -19,5 +19,10 @@ cl.predict(test_data)
 # A universal data-centric AI tool, cleanlab quantifies class-level issues and overall data quality, for any dataset.
 cleanlab.dataset.health_summary(labels, confident_joint=cl.confident_joint)
 
+Notes:
+
+Run prna to get the features during infernece (prna code is also in current repo)
+
+when we run this code on the physio's val set, we won't have access to their data, so we have to hook up PRNA inference to get the PRNA outputs. Basically all you need to do is just write code that'll forward pass through PRNA to get the embeddings for XGBoost (in addition to the embedding from the feature extraction), but you can test it on a tiny dataset, since you hvae the PRNA outputs for the entire dataset already above
 
 (credit Kelvin for instructions)
