@@ -376,10 +376,10 @@ class ECGDataModule(pl.LightningDataModule):
         print(f"Total records processed: {total_records}, %age in a split: {total_records / len(self.records_list) * 100:.2f}%")
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10), persistent_workers=True, shuffle=True, pin_memory=True, collate_fn=collate_fn_skip_none)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=2, persistent_workers=False, shuffle=True, pin_memory=False, collate_fn=collate_fn_skip_none)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10), persistent_workers=True, pin_memory=True, collate_fn=collate_fn_skip_none)
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=2, persistent_workers=False, pin_memory=False, collate_fn=collate_fn_skip_none)
 
 
 # --- 3. PyTorch Lightning Module ---
@@ -637,7 +637,9 @@ def train(data_dir, model_folder):
                 dirpath=checkpoint_dir,              # save here
                 monitor=CHECKPOINT_MONITOR_METRIC,
                 mode='max',
-                filename='last'
+                save_top_k=1,
+                save_weights_only=True,
+                filename='last',
             ),
         ]
     )
@@ -647,7 +649,10 @@ def train(data_dir, model_folder):
     trainer.fit(model, datamodule=data_module)
 
     print("\n--- Training Finished ---")
-
+    # Save the model weights only to the checkpoint dir
+    # final_checkpoint_path = os.path.join(checkpoint_dir, "last.ckpt")
+    # trainer.save_checkpoint(final_checkpoint_path, weights_only=True)
+    # print(f"Model weights saved to {final_checkpoint_path}")
 def load_model(checkpoint_path):
     """
     Load and return a trained ECGClassifierLightning from a .ckpt file.
