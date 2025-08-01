@@ -376,10 +376,10 @@ class ECGDataModule(pl.LightningDataModule):
         print(f"Total records processed: {total_records}, %age in a split: {total_records / len(self.records_list) * 100:.2f}%")
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10), persistent_workers=True, shuffle=True, pin_memory=True, collate_fn=collate_fn_skip_none)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=0, persistent_workers=False, shuffle=True, pin_memory=False, collate_fn=collate_fn_skip_none)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10), persistent_workers=True, pin_memory=True, collate_fn=collate_fn_skip_none)
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=0, persistent_workers=False, pin_memory=False, collate_fn=collate_fn_skip_none)
 
 
 # --- 3. PyTorch Lightning Module ---
