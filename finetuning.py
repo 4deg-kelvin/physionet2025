@@ -281,24 +281,27 @@ def train_finetune_model(data_folder, model_folder, verbose):
         include_wide_feats=True
     )
 
-    # 4. Checkpoint only last model
-    checkpoint_cb = ModelCheckpoint(
-        dirpath=model_folder,
-        filename='finetuned_model',  # extension “.ckpt” will be added automatically
-        save_last=True
-    )
 
     # 5. Trainer without logger, no val/test loaders
     trainer = pl.Trainer(
         max_epochs=config["epochs"],
         accelerator='auto',
         devices=1,
-        callbacks=[checkpoint_cb],
+        callbacks=[],
         gradient_clip_val=1.0,
-        num_sanity_val_steps=0  # No sanity check, disables validation/test
+        num_sanity_val_steps=0,
+        enable_checkpointing=False  # No sanity check, disables validation/test,
     )
 
     trainer.fit(fine_tune_module, datamodule=data_module)
+    # Save the final fine-tuned model
+    # DO NOT REMOVE THE INITIAL ENCODER, IT IS NEEDED TO LOAD THE MODEL FOR PREDICTION!!
+    # for file in os.listdir(model_folder):
+    #     if file.endswith('.ckpt') or file.endswith('.pth'):
+    #         print(f"Removing existing model file: {file}")
+    #         os.remove(os.path.join(model_folder, file))
+    final_model_path = os.path.join(model_folder, 'finetuned_model.ckpt')
+    trainer.save_checkpoint(final_model_path, weights_only=True)
     print("Fine-tuning finished.")
 
 

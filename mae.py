@@ -429,38 +429,52 @@ def train_model(data_folder, model_folder, verbose):
                                            seq_len=SEQ_LENGTH, windowing_method='entire_recording')
     # No validation or test sets for pre-training
     
-    # Train MAE via Lightning with validation monitoring
-    checkpoint_cb = ModelCheckpoint(
-        dirpath=model_folder,      # save to the user-specified model_folder
-        filename='mae_encoder_pretrained',       
-        save_last=True
-    )
+    # # Train MAE via Lightning with validation monitoring
+    # checkpoint_cb = ModelCheckpoint(
+    #     dirpath=model_folder,      # save to the user-specified model_folder
+    #     filename='mae_encoder_pretrained',       
+    #     save_last=True
+    # )
 
     trainer = pl.Trainer(
         max_epochs=EPOCHS,
         accelerator='auto',
         devices=1,
-        callbacks=[checkpoint_cb],
+        callbacks=[],
         gradient_clip_val=1.0,  # Added gradient clipping
-        num_sanity_val_steps=0
+        num_sanity_val_steps=0, 
+        enable_checkpointing=False
     )
     
     # Load weights from a partial checkpoint if it exists, but start a fresh training session.
-    partial_ckpt_path = os.path.join(model_folder, 'mae_encoder_partially_pretrained.ckpt')
+    partial_ckpt_path = 'mae_encoder_partially_pretrained.ckpt'
     if os.path.isfile(partial_ckpt_path):
         if verbose:
             print(f"Loading weights from partial checkpoint: {partial_ckpt_path}")
-        # Load the state dict from the checkpoint file.
-        # Using strict=False allows us to load only the model weights
-        # and ignore other parts of the checkpoint like optimizer states.
-        state_dict = torch.load(partial_ckpt_path, map_location='cpu')['state_dict']
+        
+        # Load the checkpoint dictionary
+        checkpoint = torch.load(partial_ckpt_path, map_location='cpu', weights_only=False)
+        
+        # Check if the checkpoint is a full Lightning checkpoint or just a state_dict
+        if 'state_dict' in checkpoint:
+            state_dict = checkpoint['state_dict']
+        else:
+            state_dict = checkpoint
+            
+        # Load the state dict into the model, ignoring non-matching keys
         mae_module.load_state_dict(state_dict, strict=False)
-    elif verbose:
-        print("Partial checkpoint not found. Starting pre-training from scratch.")
+    else:
+        raise ValueError(f"Partial checkpoint not found at {partial_ckpt_path}. ")
+
 
     # fit and validate, starting a new training run without ckpt_path
     trainer.fit(mae_module, datamodule=data_module)
     
+    # Save the model weights only to the checkpoint dir
+    final_checkpoint_path = os.path.join(model_folder, "mae_encoder_pretrained.ckpt")
+    trainer.save_checkpoint(final_checkpoint_path, weights_only=True)
+    print(f"Model weights saved to {final_checkpoint_path}")
+
     # # Get best checkpoint path
     # best_model_path = checkpoint_cb.best_model_path
     # print(f"Best model checkpoint path: {best_model_path}")
