@@ -429,24 +429,25 @@ def train_model(data_folder, model_folder, verbose):
                                            seq_len=SEQ_LENGTH, windowing_method='entire_recording')
     # No validation or test sets for pre-training
     
-    # Train MAE via Lightning with validation monitoring
-    checkpoint_cb = ModelCheckpoint(
-        dirpath=model_folder,      # save to the user-specified model_folder
-        filename='mae_encoder_pretrained',       
-        save_last=True
-    )
+    # # Train MAE via Lightning with validation monitoring
+    # checkpoint_cb = ModelCheckpoint(
+    #     dirpath=model_folder,      # save to the user-specified model_folder
+    #     filename='mae_encoder_pretrained',       
+    #     save_last=True
+    # )
 
     trainer = pl.Trainer(
         max_epochs=EPOCHS,
         accelerator='auto',
         devices=1,
-        callbacks=[checkpoint_cb],
-        gradient_clip_val=1.0,  # Added gradient clipping
+        callbacks=[],  # No callbacks needed for checkpointing
+        enable_checkpointing=False, # This disables all automatic checkpointing
+        gradient_clip_val=1.0,
         num_sanity_val_steps=0
     )
     
     # Load weights from a partial checkpoint if it exists, but start a fresh training session.
-    partial_ckpt_path = os.path.join(model_folder, 'mae_encoder_partially_pretrained.ckpt')
+    partial_ckpt_path = 'mae_encoder_partially_pretrained.ckpt'
     if os.path.isfile(partial_ckpt_path):
         if verbose:
             print(f"Loading weights from partial checkpoint: {partial_ckpt_path}")
@@ -455,12 +456,17 @@ def train_model(data_folder, model_folder, verbose):
         # and ignore other parts of the checkpoint like optimizer states.
         state_dict = torch.load(partial_ckpt_path, map_location='cpu')['state_dict']
         mae_module.load_state_dict(state_dict, strict=False)
-    elif verbose:
-        print("Partial checkpoint not found. Starting pre-training from scratch.")
+    else:
+        print("Could not find checkpoint")
+        raise Exception(f"checkpoint at {partial_ckpt_path} not found")
+    
 
     # fit and validate, starting a new training run without ckpt_path
     trainer.fit(mae_module, datamodule=data_module)
     
+    # --- Manually save the final model weights after training is complete ---
+    final_ckpt_path = os.path.join(model_folder, 'mae_encoder_pretrained.ckpt')
+    trainer.save_checkpoint(final_ckpt_path, weights_only=True)
     # # Get best checkpoint path
     # best_model_path = checkpoint_cb.best_model_path
     # print(f"Best model checkpoint path: {best_model_path}")
