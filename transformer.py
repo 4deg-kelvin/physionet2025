@@ -24,6 +24,7 @@ import warnings
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 import custom_helper_code
+import helper_code
 import utils
 
 def _showwarn(message, category, filename, lineno, file=None, line=None):
@@ -252,7 +253,7 @@ class ECGDataset(Dataset):
             if age is None or np.isnan(age):
                 normalized_age = 0.0 
             else:
-                normalized_age = float(age) / 100.0 # normalize to between 0 and 1  , as the signal is already between -1 and 1
+                normalized_age = (age - utils.MEAN_AGE_TRAIN) / utils.STD_AGE_TRAIN
 
             # Process and normalize sex. Use a neutral value for unknown/missing.
             if sex is None or not isinstance(sex, str) or sex.lower() not in ['male', 'female']:
@@ -413,6 +414,7 @@ class ECGClassifierLightning(pl.LightningModule):
         
         # Handle cases where the batch is empty after filtering
         if signals.numel() == 0:
+            print(f"Batch {batch_idx} is empty — skipping")
             return None, None, None
 
         # MODIFIED: Pass both signals and wide_feats to the forward method
@@ -583,7 +585,7 @@ def train(data_dir, model_folder):
     print("\n--- Starting Training Script ---")
     print(f"Using data directory: {DATA_DIR}")
     # --- Setup Data and Model ---
-    record_files = custom_helper_code.find_records(DATA_DIR)
+    record_files = custom_helper_code.find_records_abs(DATA_DIR)
     
     print(f"Found {len(record_files)} records in '{DATA_DIR}'")
 

@@ -36,9 +36,11 @@ WORKDIR /challenge
 
 RUN pip install -r requirements_linux.txt
 
-# Optional: install additional pip packages
-RUN pip install torch --index-url https://download.pytorch.org/whl/cu118
+# Install the pretrained MAE, must be after installing pip reqs so that gdown is installed
+RUN gdown 1TJ9O-rKIUb0N5_e9o_IHXUZe0Gu11D-R
 
+
+RUN pip install torch --index-url https://download.pytorch.org/whl/cu118
 
 # COPY requirements_linux.txt requirements_linux.txt
 
