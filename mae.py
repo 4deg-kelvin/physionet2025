@@ -466,19 +466,18 @@ def train_model(data_folder, model_folder, verbose):
     # Search in model folder for a partial checkpoint
     elif os.path.isfile(os.path.join(model_folder, partial_ckpt_path)):
         if verbose:
-            print(f"Loading weights from partial checkpoint in model folder: {os.path.join(model_folder, partial_ckpt_path)}")
-            if verbose:        
-                # Load the checkpoint dictionary
-                checkpoint = torch.load(os.path.join(model_folder, partial_ckpt_path), map_location='cpu', weights_only=False)
-                
-                # Check if the checkpoint is a full Lightning checkpoint or just a state_dict
-                if 'state_dict' in checkpoint:
-                    state_dict = checkpoint['state_dict']
-                else:
-                    state_dict = checkpoint
-                    
-                # Load the state dict into the model, ignoring non-matching keys
-                mae_module.load_state_dict(state_dict, strict=False)
+            print(f"Loading weights from partial checkpoint in model folder: {os.path.join(model_folder, partial_ckpt_path)}")  
+        # Load the checkpoint dictionary
+        checkpoint = torch.load(os.path.join(model_folder, partial_ckpt_path), map_location='cpu', weights_only=False)
+        
+        # Check if the checkpoint is a full Lightning checkpoint or just a state_dict
+        if 'state_dict' in checkpoint:
+            state_dict = checkpoint['state_dict']
+        else:
+            state_dict = checkpoint
+            
+        # Load the state dict into the model, ignoring non-matching keys
+        mae_module.load_state_dict(state_dict, strict=False)
     else:
         raise ValueError(f"Partial checkpoint not found at {partial_ckpt_path}. ")
 
