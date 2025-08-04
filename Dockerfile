@@ -38,7 +38,7 @@ RUN pip install -r requirements_linux.txt
 
 # Install the pretrained MAE, must be after installing pip reqs so that gdown is installed
 # 1o4zghwYD4j61SgazijwtKRfyCZyOjky is the mae_vit_ecg pretrained model
-RUN gdown 1o4zghwYD4j61SgazijwtKRfyCZyOjky
+RUN gdown 1o4zghwYD4j61SgazijwtKRfyCZyOjkyz
 
 
 RUN pip install torch --index-url https://download.pytorch.org/whl/cu118
