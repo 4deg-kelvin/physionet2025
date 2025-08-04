@@ -337,7 +337,7 @@ def train(data_folder, model_folder, verbose):
     DATA_DIR = data_folder
     BATCH_SIZE = 32
     SEQ_LEN = 500 * 10
-    EPOCHS = 1
+    EPOCHS = 20
     CHECKPOINT_PATH = "mae_vit_encoder_partially_pretrained.ckpt"  # Path to a Lightning checkpoint to load model weights from
     
     # --- Data Loading and Splitting ---

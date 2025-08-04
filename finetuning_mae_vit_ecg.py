@@ -236,7 +236,7 @@ def train(data_folder, model_folder, verbose):
     DATA_DIR = data_folder  # Main data directory
     BATCH_SIZE = 32
     SEQ_LEN = 5000
-    EPOCHS = 1
+    EPOCHS = 16
     
     # Freezing strategies examples:
     # freeze_layers = None  # Train all parameters
