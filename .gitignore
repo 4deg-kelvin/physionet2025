@@ -35,3 +35,4 @@ Prna/physionet2020-submission/test_outputs/
 wandb*
 *.ckpt
 *.pth
+*hparams.ymal
