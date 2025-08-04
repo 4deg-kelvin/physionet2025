@@ -133,8 +133,7 @@ class ECGFeatureExtractor:
     
     def _calculate_kurtosis(self, signal: np.ndarray) -> float:
         """Calculate kurtosis of signal."""
-        # TODO: Implement kurtosis calculation
-        pass
+        return float(kurtosis(signal))
     
     def extract_all_features(self, signal: np.ndarray) -> Dict[str, float]:
         """
