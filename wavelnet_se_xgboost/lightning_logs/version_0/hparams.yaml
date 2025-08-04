@@ -1,0 +1,4 @@
+kernel_size: 129
+learning_rate: 0.001
+num_leads: 12
+out_channels: 32
