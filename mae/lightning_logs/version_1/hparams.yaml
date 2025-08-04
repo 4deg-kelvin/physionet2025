@@ -1,0 +1,9 @@
+decoder_layers: 2
+embed_dim: 256
+encoder_layers: 8
+lr: 0.001
+masking_ratio: 0.75
+num_heads: 8
+num_patches: 2
+patch_dim: 3000
+patch_size: 250

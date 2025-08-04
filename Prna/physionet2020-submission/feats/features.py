@@ -5,7 +5,7 @@
 from __future__ import absolute_import, division, print_function
 
 # 3rd party imports
-import scipy.io as sio
+import numpy as np
 import pandas as pd
 import os
 from biosppy.signals import ecg
@@ -79,12 +79,8 @@ class Features:
             Time after R-Peak to end template.
         """
 
-        # Create empty features DataFrame
-        self.features = pd.DataFrame()
-
-        # # Load ECG .mat file
-        # try:
-
+        # Compute features row and build DataFrame
+         
         # Load ECG signal
         signal_raw = self.data
 
@@ -93,21 +89,19 @@ class Features:
             self._preprocess_signal(signal_raw, filter_bandwidth, normalize,
                                     polarity_check, template_before, template_after)
 
-        # Get features
-        self.features = self.features.append(
-            self._group_features(
-                file_name='',
-                ts=ts,
-                signal_raw=signal_raw,
-                signal_filtered=signal_filtered,
-                rpeaks=rpeaks,
-                templates_ts=templates_ts,
-                templates=templates,
-                template_before=template_before,
-                template_after=template_after
-            ),
-            ignore_index=True
+        # Generate feature dictionary and build DataFrame
+        row = self._group_features(
+            file_name='',
+            ts=ts,
+            signal_raw=signal_raw,
+            signal_filtered=signal_filtered,
+            rpeaks=rpeaks,
+            templates_ts=templates_ts,
+            templates=templates,
+            template_before=template_before,
+            template_after=template_after
         )
+        self.features = pd.DataFrame([row])
 
     def _preprocess_signal(self, signal_raw, filter_bandwidth, normalize,
                            polarity_check, template_before, template_after):
@@ -115,14 +109,12 @@ class Features:
         # Filter signal
         signal_filtered = self._apply_filter(signal_raw, filter_bandwidth)
 
-        # Get BioSPPy ECG object
+        # Get BioSPPy ECG object for R-peak detection
         ecg_object = ecg.ecg(signal=signal_raw, sampling_rate=self.fs, show=False)
+        ts = ecg_object['ts']                    # Signal time array
+        rpeaks = ecg_object['rpeaks']            # R-peak indices
 
-        # Get BioSPPy output
-        ts = ecg_object['ts']                        # Signal time array
-        rpeaks = ecg_object['rpeaks']                # rpeak indices
-
-        # Get templates and template time array
+        # Get templates and time array
         templates, rpeaks = self._extract_templates(signal_filtered, rpeaks, template_before, template_after)
         templates_ts = np.linspace(-template_before, template_after, templates.shape[1], endpoint=False)
 
@@ -197,18 +189,15 @@ class Features:
 
     def _apply_filter(self, signal, filter_bandwidth):
 
-        # Calculate filter order
+        # Filter signal using BioSPPy
         order = int(0.3 * self.fs)
-
-        # Filter signal
-        signal, _, _ = filter_signal(signal=signal,
-                                     ftype='FIR',
-                                     band='bandpass',
-                                     order=order,
-                                     frequency=filter_bandwidth,
-                                     sampling_rate=self.fs)
-
-        return signal
+        filtered, _, _ = filter_signal(signal=signal,
+                                       ftype='FIR',
+                                       band='bandpass',
+                                       order=order,
+                                       frequency=filter_bandwidth,
+                                       sampling_rate=self.fs)
+        return filtered
 
     def _group_features(self, file_name, ts, signal_raw, signal_filtered, rpeaks,
                         templates_ts, templates, template_before, template_after):

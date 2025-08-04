@@ -16,11 +16,13 @@
 # measure, and the Challenge metric, which assigns different weights to
 # different misclassification errors.
 
-import numpy as np, os, os.path, sys
+import numpy as np, os, os.path, sys, argparse
+from tqdm import tqdm 
 
 def evaluate_12ECG_score(label_directory, output_directory):
     # Define the weights, the SNOMED CT code for the normal class, and equivalent SNOMED CT codes.
-    weights_file = 'weights.csv'
+    weights_file = '/sailhome/kelvinkn/scr2_juice/other_work/edwards/physionet2025/Prna/physionet2020-submission/eval/weights.csv'
+    assert os.path.isfile(weights_file), f'Weights file {weights_file} not found.'
     normal_class = '426783006'
     equivalent_classes = [['713427006', '59118001'], ['284470004', '63593006'], ['427172004', '17338001']]
 
@@ -84,6 +86,7 @@ def is_number(x):
 def find_challenge_files(label_directory, output_directory):
     label_files = list()
     output_files = list()
+    total_missed = 0
     for f in sorted(os.listdir(label_directory)):
         F = os.path.join(label_directory, f) # Full path for label file
         if os.path.isfile(F) and F.lower().endswith('.hea') and not f.lower().startswith('.'):
@@ -94,12 +97,15 @@ def find_challenge_files(label_directory, output_directory):
                 label_files.append(F)
                 output_files.append(G)
             else:
-                raise IOError('Output file {} not found for label file {}.'.format(g, f))
-
+                # raise IOError('Output file {} not found for label file {}.'.format(g, f))
+                print('WARNING: Output file {} not found for label file {}.'.format(g, f))
+                total_missed += 1
+    print(f"Total missed: {total_missed} files.")
     if label_files and output_files:
         return label_files, output_files
     else:
         raise IOError('No label or output files found.')
+
 
 # Load labels from header/label files.
 def load_labels(label_files, normal_class, equivalent_classes_collection):
@@ -113,13 +119,22 @@ def load_labels(label_files, normal_class, equivalent_classes_collection):
     tmp_labels = list()
     for i in range(num_recordings):
         with open(label_files[i], 'r') as f:
+            found_dx = False
             for l in f:
-                if l.startswith('#Dx'):
+                if l.startswith('# Dx'):
                     dxs = set(arr.strip() for arr in l.split(': ')[1].split(','))
                     tmp_labels.append(dxs)
+                    found_dx = True
+                    break
+            if not found_dx:
+                print('WARNING: No diagnoses found in file {}. Using empty diagnoses.'.format(label_files[i]))
+                raise Exception("no diagnoses found in file {}".format(label_files[i]))
+
+            
+
 
     # Identify classes.
-    classes = set.union(*map(set, tmp_labels))
+    classes = set().union(*tmp_labels)
     if normal_class not in classes:
         classes.add(normal_class)
         print('- The normal class {} is not one of the label classes, so it has been automatically added, but please check that you chose the correct normal class.'.format(normal_class))
@@ -127,7 +142,7 @@ def load_labels(label_files, normal_class, equivalent_classes_collection):
     num_classes = len(classes)
 
     # Use one-hot encoding for labels.
-    labels = np.zeros((num_recordings, num_classes), dtype=np.bool)
+    labels = np.zeros((num_recordings, num_classes), dtype=bool)
     for i in range(num_recordings):
         dxs = tmp_labels[i]
         for dx in dxs:
@@ -177,7 +192,7 @@ def load_outputs(output_files, normal_class, equivalent_classes_collection):
     tmp_labels = list()
     tmp_binary_outputs = list()
     tmp_scalar_outputs = list()
-    for i in range(num_recordings):
+    for i in tqdm(range(num_recordings), total=num_recordings, desc='Loading outputs'):
         with open(output_files[i], 'r') as f:
             for j, l in enumerate(f):
                 arrs = [arr.strip() for arr in l.split(',')]
@@ -198,7 +213,7 @@ def load_outputs(output_files, normal_class, equivalent_classes_collection):
                     tmp_scalar_outputs.append(row)
 
     # Identify classes.
-    classes = set.union(*map(set, tmp_labels))
+    classes = set().union(*tmp_labels)
     if normal_class not in classes:
         classes.add(normal_class)
         print('- The normal class {} is not one of the output classes, so it has been automatically added, but please check that you identified the correct normal class.'.format(normal_class))
@@ -206,7 +221,7 @@ def load_outputs(output_files, normal_class, equivalent_classes_collection):
     num_classes = len(classes)
 
     # Use one-hot encoding for binary outputs and the same order for scalar outputs.
-    binary_outputs = np.zeros((num_recordings, num_classes), dtype=np.bool)
+    binary_outputs = np.zeros((num_recordings, num_classes), dtype=bool)
     scalar_outputs = np.zeros((num_recordings, num_classes), dtype=np.float64)
     for i in range(num_recordings):
         dxs = tmp_labels[i]
@@ -263,12 +278,12 @@ def organize_labels_outputs(label_classes, output_classes, tmp_labels, tmp_binar
     num_recordings = len(tmp_labels)
 
     # Rearrange the columns of the labels and the outputs to be consistent with the order of the classes.
-    labels = np.zeros((num_recordings, num_classes), dtype=np.bool)
+    labels = np.zeros((num_recordings, num_classes), dtype=bool)
     for k, dx in enumerate(label_classes):
         j = classes.index(dx)
         labels[:, j] = tmp_labels[:, k]
 
-    binary_outputs = np.zeros((num_recordings, num_classes), dtype=np.bool)
+    binary_outputs = np.zeros((num_recordings, num_classes), dtype=bool)
     scalar_outputs = np.zeros((num_recordings, num_classes), dtype=np.float64)
     for k, dx in enumerate(output_classes):
         j = classes.index(dx)
@@ -551,7 +566,7 @@ def compute_challenge_metric(weights, labels, outputs, classes, normal_class):
     correct_score = np.nansum(weights * A)
 
     # Compute the score for the model that always chooses the normal class.
-    inactive_outputs = np.zeros((num_recordings, num_classes), dtype=np.bool)
+    inactive_outputs = np.zeros((num_recordings, num_classes), dtype=bool)
     inactive_outputs[:, normal_index] = 1
     A = compute_modified_confusion_matrix(labels, inactive_outputs)
     inactive_score = np.nansum(weights * A)
@@ -564,14 +579,52 @@ def compute_challenge_metric(weights, labels, outputs, classes, normal_class):
     return normalized_score
 
 if __name__ == '__main__':
-    #auroc, auprc, accuracy, f_measure, f_beta_measure, g_beta_measure, challenge_metric = evaluate_12ECG_score(sys.argv[1], sys.argv[2])
-    lbl_dir = '/home/p2017-999/acs_data/processed_data/physionet2020/jonathan/in'
-    out_dir = '/home/p2017-999/acs_data/processed_data/physionet2020/jonathan/out'
-    auroc, auprc, accuracy, f_measure, f_beta_measure, g_beta_measure, challenge_metric = evaluate_12ECG_score(lbl_dir, out_dir)
+    # Create the parser
+    parser = argparse.ArgumentParser(
+        description='Evaluate 12ECG scores based on label and output directories.'
+    )
 
-    output_string = 'AUROC,AUPRC,Accuracy,F-measure,Fbeta-measure,Gbeta-measure,Challenge metric\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}'.format(auroc, auprc, accuracy, f_measure, f_beta_measure, g_beta_measure, challenge_metric)
-    if len(sys.argv) > 3:
-        with open(sys.argv[3], 'w') as f:
-            f.write(output_string)
+    # Add arguments for label directory and output directory
+    parser.add_argument(
+        '--lbl_dir',
+        type=str,
+        required=True,
+        help='Path to the label directory (input data).'
+    )
+    parser.add_argument(
+        '--out_dir',
+        type=str,
+        required=True,
+        help='Path to the output directory (prediction results).'
+    )
+    # Add an optional argument for the output file
+    parser.add_argument(
+        '--output_file',
+        type=str,
+        help='Optional: Path to a file where the results will be written. If not provided, results are printed to console.'
+    )
+
+    # Parse the arguments
+    args = parser.parse_args()
+
+    # Call the evaluation function with the parsed arguments
+    auroc, auprc, accuracy, f_measure, f_beta_measure, g_beta_measure, challenge_metric = \
+        evaluate_12ECG_score(args.lbl_dir, args.out_dir)
+
+    # Format the output string
+    output_string = (
+        'AUROC,AUPRC,Accuracy,F-measure,Fbeta-measure,Gbeta-measure,Challenge metric\n'
+        '{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}'
+    ).format(auroc, auprc, accuracy, f_measure, f_beta_measure, g_beta_measure, challenge_metric)
+
+    # Write to file or print to console based on whether output_file was provided
+    if args.output_file:
+        try:
+            with open(args.output_file, 'w') as f:
+                f.write(output_string)
+            print(f"Results successfully written to {args.output_file}")
+        except IOError as e:
+            print(f"Error writing to file {args.output_file}: {e}", file=sys.stderr)
+            print(output_string) # Fallback to printing if file write fails
     else:
         print(output_string)

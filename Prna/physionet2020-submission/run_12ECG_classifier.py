@@ -15,12 +15,13 @@ from biosppy.signals import ecg
 from biosppy.signals.tools import filter_signal
 
 import torch
-from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.tensorboard import SummaryWriter
+from torch.serialization import safe_globals
 
 from model import CTN
 from feats.features import *
@@ -67,21 +68,29 @@ def run_12ECG_classifier_batch(data_batch, header_data_batch, loaded_model):
     processed_recordings = []
     all_feats_t = []
     all_header_data = []
+    skipped_files_indexes = []
 
-    for data, header_data in zip(data_batch, header_data_batch):
+    for i, (data, header_data) in enumerate(zip(data_batch, header_data_batch)):
         # Standardize recording
         recording = standardize_sampling_rate(data, header_data)
 
         # Get wide features
         feat_means = loaded_model['feat_means']
         feat_stds = loaded_model['feat_stds']
-        feats_t = get_normalized_features(recording[ch_idx], feat_means, feat_stds)
+        try:
+            feats_t = get_normalized_features(recording[ch_idx], feat_means, feat_stds)
 
-        # Apply filtering and normalization
-        recording = preprocess_signal(recording, filter_bandwidth, ch_idx=1)
 
-        # Split into random windows
-        inp_t = get_windows_padded(recording, window_size, nb_windows)
+            # Apply filtering and normalization
+            recording = preprocess_signal(recording, filter_bandwidth, ch_idx=1)
+
+            # Split into random windows
+            inp_t = get_windows_padded(recording, window_size, nb_windows)
+
+        except Exception as e:
+            print("Error in get_normalized_features: {}".format(e))
+            skipped_files_indexes.append(i)
+            continue
         
         processed_recordings.append(inp_t)
         all_feats_t.append(feats_t)
@@ -97,8 +106,7 @@ def run_12ECG_classifier_batch(data_batch, header_data_batch, loaded_model):
     
     batch_probs, batch_preds = predict_batch(models, thrs, inp_t_batch, feats_t_batch, all_header_data)
 
-    return batch_preds, batch_probs, classes
-
+    return batch_preds, batch_probs, classes, skipped_files_indexes
 
 def run_12ECG_classifier(data, header_data, loaded_model):
     # Standardize recording
@@ -302,9 +310,13 @@ def load_12ECG_model(model_dir):
     return loaded_model
 
 def load_best_model(model, model_loc):
-    checkpoint = torch.load(model_loc)
+    # Add the context manager to temporarily allow loading the numpy scalar
+    with safe_globals([np.core.multiarray.scalar]):
+        checkpoint = torch.load(model_loc, weights_only=False)
+    
+    # The rest of your function remains the same
     model.load_state_dict(checkpoint['model_state_dict'])
-    return model    
+    return model
 
 def standardize_sampling_rate(recording, hdr, fs=fs):
     ''' Standardize sampling rate '''

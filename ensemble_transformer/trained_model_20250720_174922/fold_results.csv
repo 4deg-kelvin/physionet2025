@@ -1,0 +1,6 @@
+fold_idx,ckpt_path,score
+1,/juice2/scr2/kelvinkn/other_work/edwards/physionet2025/ensemble_transformer/trained_model_20250720_174922/fold1-best-epoch=06-val_challenge_score=0.3844.ckpt,"tensor(0.3844, device='cuda:0')"
+2,/juice2/scr2/kelvinkn/other_work/edwards/physionet2025/ensemble_transformer/trained_model_20250720_174922/fold2-best-epoch=06-val_challenge_score=0.4334.ckpt,"tensor(0.4334, device='cuda:0')"
+3,/juice2/scr2/kelvinkn/other_work/edwards/physionet2025/ensemble_transformer/trained_model_20250720_174922/fold3-best-epoch=05-val_challenge_score=0.3584.ckpt,"tensor(0.3584, device='cuda:0')"
+4,/juice2/scr2/kelvinkn/other_work/edwards/physionet2025/ensemble_transformer/trained_model_20250720_174922/fold4-best-epoch=04-val_challenge_score=0.3959.ckpt,"tensor(0.3959, device='cuda:0')"
+5,/juice2/scr2/kelvinkn/other_work/edwards/physionet2025/ensemble_transformer/trained_model_20250720_174922/fold5-best-epoch=06-val_challenge_score=0.4490.ckpt,"tensor(0.4490, device='cuda:0')"

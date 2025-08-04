@@ -1,9 +1,14 @@
 code15.zip
 code15/
+samitrop/
+ptbxl/
+__pycache__
+.venv/
 checkpoints/
 results/
 Prna/physionet2020-submission/my_container_dir
 Prna/trained_model
+trained_model/
 feature_model/
 custom_transformer/lightning_logs/
 *.pyc
@@ -33,3 +38,6 @@ training_data/to_ignore
 /.github
 /EDA/training_data
 EDA/EDA_output
+*.wandb
+*.log
+Prna/physionet2020-submission/test_outputs/

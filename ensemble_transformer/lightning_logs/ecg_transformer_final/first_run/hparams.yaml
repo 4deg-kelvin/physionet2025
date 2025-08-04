@@ -1,0 +1,17 @@
+model_hparams:
+  batch_size: 64
+  d_ff: 2048
+  d_model: 256
+  data_path: ../training_data/
+  deepfeat_sz: 256
+  dropout_rate: 0.1
+  nhead: 8
+  num_layers: 8
+  num_leads: 12
+  num_records: 366185
+  pos_weight: 43.711233
+  seq_len: 7500
+  split_file: ../train_val_test_sets.csv
+  use_single_window: true
+optimizer_hparams:
+  lr: 0.0001

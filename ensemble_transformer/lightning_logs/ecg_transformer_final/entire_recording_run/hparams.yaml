@@ -1,0 +1,22 @@
+model_hparams:
+  batch_size: 80
+  checkpoint_monitor_metric: val_challenge_score
+  d_ff: 2048
+  d_model: 256
+  data_path: ../training_data/
+  deepfeat_sz: 256
+  dropout_rate: 0.1
+  epochs: 16
+  nhead: 8
+  num_layers: 8
+  num_leads: 12
+  num_records: 366185
+  pos_weight: 10.92780825
+  seq_len: 5000
+  split_file: ../train_val_test_sets.csv
+  use_single_window: true
+  windowing_method: entire_recording
+optimizer_hparams:
+  lr: 2.0e-05
+  lr_end: 1.0e-07
+  warmup_steps: 700

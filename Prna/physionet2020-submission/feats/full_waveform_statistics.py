@@ -1,14 +1,9 @@
 #### By: Sebastian D. Goodfellow, Ph.D. (PhysioNet Challenge 2017)
 #### Modified: Jonathan Rubin
 
-# Compatibility imports
-from __future__ import absolute_import, division, print_function
-
 # 3rd party imports
 import numpy as np
-import scipy as sp
-from scipy import signal
-from scipy import interpolate
+from scipy import signal, interpolate, stats
 from pyentrp import entropy as ent
 from biosppy.signals.tools import smoother
 import pywt
@@ -93,8 +88,8 @@ class FullWaveformStatistics:
         basic_features['full_waveform_mean'] = np.mean(self.signal_filtered)
         basic_features['full_waveform_median'] = np.median(self.signal_filtered)
         basic_features['full_waveform_std'] = np.std(self.signal_filtered)
-        basic_features['full_waveform_skew'] = sp.stats.skew(self.signal_filtered)
-        basic_features['full_waveform_kurtosis'] = sp.stats.kurtosis(self.signal_filtered)
+        basic_features['full_waveform_skew'] = stats.skew(self.signal_filtered)
+        basic_features['full_waveform_kurtosis'] = stats.kurtosis(self.signal_filtered)
         basic_features['full_waveform_duration'] = np.max(self.ts)
 
         return basic_features
@@ -193,13 +188,13 @@ class FullWaveformStatistics:
         """
         Frequency Domain
         """
-        for level in range(len(swt)):
+        for level, coeffs in enumerate(swt, start=1):
 
             """
             Detail
             """
             # Compute Welch periodogram
-            fxx, pxx = signal.welch(x=swt[level]['d'], fs=self.fs)
+            fxx, pxx = signal.welch(x=coeffs['d'], fs=self.fs)
 
             # Get frequency band
             freq_band_low_index = np.logical_and(fxx >= freq_band_low[0], fxx < freq_band_low[1])
@@ -217,18 +212,15 @@ class FullWaveformStatistics:
             mean_power_high = np.trapz(y=pxx[freq_band_high_index], x=fxx[freq_band_high_index])
 
             # Calculate max/mean power ratio
-            stationary_wavelet_transform_features['swt_d_' + str(level+1) + '_low_power_ratio'] = \
-                max_power_low / mean_power_low
-            stationary_wavelet_transform_features['swt_d_' + str(level+1) + '_med_power_ratio'] = \
-                max_power_med / mean_power_med
-            stationary_wavelet_transform_features['swt_d_' + str(level+1) + '_high_power_ratio'] = \
-                max_power_high / mean_power_high
+            stationary_wavelet_transform_features[f'swt_d_{level}_low_power_ratio'] = max_power_low / mean_power_low
+            stationary_wavelet_transform_features[f'swt_d_{level}_med_power_ratio'] = max_power_med / mean_power_med
+            stationary_wavelet_transform_features[f'swt_d_{level}_high_power_ratio'] = max_power_high / mean_power_high
 
             """
             Approximation
             """
             # Compute Welch periodogram
-            fxx, pxx = signal.welch(x=swt[level]['a'], fs=self.fs)
+            fxx, pxx = signal.welch(x=coeffs['a'], fs=self.fs)
 
             # Get frequency band
             freq_band_low_index = np.logical_and(fxx >= freq_band_low[0], fxx < freq_band_low[1])
@@ -246,38 +238,31 @@ class FullWaveformStatistics:
             mean_power_high = np.trapz(y=pxx[freq_band_high_index], x=fxx[freq_band_high_index])
 
             # Calculate max/mean power ratio
-            stationary_wavelet_transform_features['swt_a_' + str(level+1) + '_low_power_ratio'] = \
-                max_power_low / mean_power_low
-            stationary_wavelet_transform_features['swt_a_' + str(level+1) + '_med_power_ratio'] = \
-                max_power_med / mean_power_med
-            stationary_wavelet_transform_features['swt_a_' + str(level+1) + '_high_power_ratio'] = \
-                max_power_high / mean_power_high
+            stationary_wavelet_transform_features[f'swt_a_{level}_low_power_ratio'] = max_power_low / mean_power_low
+            stationary_wavelet_transform_features[f'swt_a_{level}_med_power_ratio'] = max_power_med / mean_power_med
+            stationary_wavelet_transform_features[f'swt_a_{level}_high_power_ratio'] = max_power_high / mean_power_high
 
         """
         Non-Linear
         """
-        for level in range(len(swt)):
+        for level, coeffs in enumerate(swt, start=1):
 
             """
             Detail
             """
             # Log-energy entropy
-            stationary_wavelet_transform_features['swt_d_' + str(level+1) + '_energy_entropy'] = \
-                np.sum(np.log10(np.power(swt[level]['d'], 2)))
+            stationary_wavelet_transform_features[f'swt_d_{level}_energy_entropy'] = np.sum(np.log10(np.power(coeffs['d'], 2)))
 
             # Higuchi_fractal
-            stationary_wavelet_transform_features['swt_d_' + str(level+1) + '_higuchi_fractal'] = \
-                hfd(swt[level]['d'], k_max=10)
+            stationary_wavelet_transform_features[f'swt_d_{level}_higuchi_fractal'] = hfd(coeffs['d'], k_max=10)
 
             """
             Approximation
             """
             # Log-energy entropy
-            stationary_wavelet_transform_features['swt_a_' + str(level+1) + '_energy_entropy'] = \
-                np.sum(np.log10(np.power(swt[level]['a'], 2)))
+            stationary_wavelet_transform_features[f'swt_a_{level}_energy_entropy'] = np.sum(np.log10(np.power(coeffs['a'], 2)))
 
             # Higuchi_fractal
-            stationary_wavelet_transform_features['swt_a_' + str(level+1) + '_higuchi_fractal'] = \
-                hfd(swt[level]['a'], k_max=10)
+            stationary_wavelet_transform_features[f'swt_a_{level}_higuchi_fractal'] = hfd(coeffs['a'], k_max=10)
 
         return stationary_wavelet_transform_features
