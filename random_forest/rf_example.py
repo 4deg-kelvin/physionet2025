@@ -15,7 +15,7 @@ import numpy as np
 from pathlib import Path
 
 # Import the Random Forest components
-from random_forest_outline import (
+from .random_forest_outline import (
     ECGFeatureExtractor,
     ECGDataProcessor, 
     RandomForestTrainer,
