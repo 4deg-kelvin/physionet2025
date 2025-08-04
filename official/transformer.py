@@ -23,7 +23,7 @@ from tqdm import tqdm
 import warnings
 import wandb
 from pytorch_lightning.loggers import WandbLogger
-import helper_code
+import custom_helper_code
 import utils
 
 def _showwarn(message, category, filename, lineno, file=None, line=None):
@@ -227,8 +227,8 @@ class ECGDataset(Dataset):
             # --- FIX: Load header and signal separately for robustness ---
             try:
                 # Load header to get metadata and for label extraction
-                signal, metadata = helper_code.load_signals(record_path)
-                header_text = helper_code.load_header(record_path)
+                signal, metadata = custom_helper_code.load_signals(record_path)
+                header_text = custom_helper_code.load_header(record_path)
                 signal = signal.T # make signal (num_leads, num_samples) shape
 
             except Exception as e:
@@ -245,7 +245,7 @@ class ECGDataset(Dataset):
                 return None # Return None to be filtered out by the custom collate function
             
             # --- ADDED: Get and process demographic data as wide features ---
-            age, sex, label = helper_code.get_patient_info(header_text, allow_missing_label=False)
+            age, sex, label = custom_helper_code.get_patient_info(header_text, allow_missing_label=False)
             assert label is not None and label == 0 or label == 1, f"Invalid label {label} for record {self.records_list[idx]}"
     
             # Process and normalize age. Use a neutral value for missing data.
@@ -566,7 +566,7 @@ def train(data_dir, model_folder):
     print("\n--- Starting Training Script ---")
     print(f"Using data directory: {DATA_DIR}")
     # --- Setup Data and Model ---
-    record_files = helper_code.find_records_abs(DATA_DIR)
+    record_files = custom_helper_code.find_records(DATA_DIR)
     
     print(f"Found {len(record_files)} records in '{DATA_DIR}'")
 
@@ -616,8 +616,8 @@ def train(data_dir, model_folder):
         accelerator="auto",
         devices=1,
         callbacks=[
-            # save best model by val_challenge_score
             pl.callbacks.ModelCheckpoint(
+                dirpath=checkpoint_dir,              # save here
                 monitor=CHECKPOINT_MONITOR_METRIC,
                 mode='max',
                 filename='last'

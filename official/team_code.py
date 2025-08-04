@@ -23,6 +23,7 @@ import numpy as np
 import argparse
 import pathlib
 import helper_code
+import custom_helper_code
 import utils
 from scipy.signal import resample
 import neurokit2 as nk
@@ -64,6 +65,11 @@ def run_model(record, model, verbose):
         pred   = 1 if prob > 0.5 else 0
         return pred, prob
 
+    # IMPORTANT: if you get a NotImplementedError specifically, something bad happened (ie, you 
+    # chose the wrong preprocessing steps, etc, so you should NOT proceed with ANY prediction, therefore we 
+    # end the program here for debugging purposes.)
+    except NotImplementedError as e:
+        raise NotImplementedError(f"run_model error: {e}")
     except Exception as e:
         if verbose:
             print(f"run_model error: {e}")

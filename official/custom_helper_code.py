@@ -141,7 +141,7 @@ def get_source(string):
     return source
 # Get age, sex, and label from a WFDB header or a similar string in one pass.
 # NOTE: I made this function myself, it is NOT part of the original challenge.
-def get_patient_info(string, allow_missing_label=False, get_label=True):
+def get_patient_info(string, allow_missing_label=False):
     '''Gets the age, sex, and label from a WFDB header or a similar string.'''
     age = None
     sex = None
@@ -160,18 +160,15 @@ def get_patient_info(string, allow_missing_label=False, get_label=True):
         elif l.startswith(sex_string):
             sex = l[len(sex_string):].strip()
             has_sex = True
-        elif get_label and l.startswith(label_string):
+        elif l.startswith(label_string):
             label = l[len(label_string):].strip()
             has_label = True
             label = sanitize_boolean_value(label)
     
-    if not has_label and not allow_missing_label or get_label and not has_label:
+    if not has_label and not allow_missing_label:
         raise Exception('No label is available: are you trying to load the labels from the held-out data?')
     
-    if get_label:
-        return age, sex, label
-    else:
-        return age, sex
+    return age, sex, label
 # Normalize the channel names.
 def normalize_names(names_ref, names_est):
     tmp = list()
@@ -319,7 +316,7 @@ def compute_challenge_score(labels, outputs, fraction_capacity = 0.05, num_permu
         permuted_labels = labels[permuted_idx]
         permuted_outputs = outputs[permuted_idx]
 
-        ordered_idx = np.argsort(permuted_outputs, stable=True)[::-1]
+        ordered_idx = np.argsort(permuted_outputs, kind='stable')[::-1]
         ordered_labels = permuted_labels[ordered_idx]
 
         tp[i] = np.sum(ordered_labels[:capacity] == 1)

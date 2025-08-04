@@ -39,96 +39,52 @@ def main():
     BATCH_SIZE = 32
     SEQ_LENGTH = utils.UNIFIED_FREQUENCY * 10  # Length of each ECG sequence
     EPOCHS = 15
-    model_kwargs = {
-        'num_leads': 12,  # 12-lead ECG
-        'num_channels': [64, 128, 256, 512],
-        'info_features': 2,  # Set to number of additional features if using
-        'dropout_rate': 0.3
-    }
-    # --- Load metadata and stratify ---all th
+    
+    # --- Load metadata and prepare data splits ---
     records_meta = utils.prepare_stratification(helper_code.find_records_abs(DATA_DIR))
-
-    # Convert to pandas DataFrame for easier manipulation
     df = pd.DataFrame(records_meta)
 
     # Isolate data from different sources
     ptb_df = df[df['source'] == 'PTB-XL'].copy()
-    code_df = df[df['source'] == 'CODE-15%'].copy()
-    other_sources_df = df[~df['source'].isin(['PTB-XL', 'CODE-15%'])].copy()
+    sami_df = df[df['source'] == 'SaMi-Trop'].copy()
+    other_sources_df = df[~df['source'].isin(['PTB-XL', 'SaMi-Trop'])].copy()
 
-    # 1. Create a pool for validation and test sets from PTB-XL and CODE-15%
-    # We'll take 20% from each source for this pool. You can adjust this fraction.
-    VAL_TEST_FRAC = 0.20
+    # --- Create Validation Set (5% positive) ---
+    # Use 10% of the positive samples for validation
+    val_pos_count = int(len(sami_df) * 0.10)
+    # Calculate the number of negative samples needed for a 5% positive ratio
+    val_neg_count = int(val_pos_count * (0.95 / 0.05))
 
-    ptb_train, ptb_val_test = train_test_split(
-        ptb_df,
-        test_size=VAL_TEST_FRAC,
-        stratify=ptb_df['label'],
-        random_state=42
-    )
-    code_train, code_val_test = train_test_split(
-        code_df,
-        test_size=VAL_TEST_FRAC,
-        stratify=code_df['label'],
-        random_state=42
-    )
+    val_pos = sami_df.sample(n=val_pos_count, random_state=42)
+    val_neg = ptb_df.sample(n=val_neg_count, random_state=42)
+    val_set = pd.concat([val_pos, val_neg]).sample(frac=1, random_state=42)
 
-    # Combine the portions from PTB-XL and CODE-15% to form the main val/test pool
-    val_test_pool = pd.concat([ptb_val_test, code_val_test])
+    # --- Create Test Set (5% positive) from remaining data ---
+    sami_remaining = sami_df.drop(val_pos.index)
+    ptb_remaining = ptb_df.drop(val_neg.index)
+    
+    # Use 10% of the original positive samples for testing as well
+    test_pos_count = int(len(sami_df) * 0.10)
+    test_neg_count = int(test_pos_count * (0.95 / 0.05))
 
-    # 2. Split the pool 50/50 into final validation and test sets
-    val_set, test_set = train_test_split(
-        val_test_pool,
-        test_size=0.5,
-        stratify=val_test_pool['label'],
-        random_state=42
-    )
-    # Reset index to prevent KeyError in DataLoader
-    val_set = val_set.reset_index(drop=True)
-    test_set = test_set.reset_index(drop=True)
+    test_pos = sami_remaining.sample(n=test_pos_count, random_state=42)
+    test_neg = ptb_remaining.sample(n=test_neg_count, random_state=42)
+    test_set = pd.concat([test_pos, test_neg]).sample(frac=1, random_state=42)
 
-    print(f"✅ Created validation set with {len(val_set)} records.")
-    print(f"✅ Created test set with {len(test_set)} records.")
-    print("--- Validation/Test Set Source Composition ---")
-    print("Validation Set:\n", val_set['source'].value_counts(normalize=True))
-    print("\nTest Set:\n", test_set['source'].value_counts(normalize=True))
-    print("-" * 40)
-
-
-    # 3. Prepare the initial training set from the remaining data
-    initial_train_set = pd.concat([ptb_train, code_train, other_sources_df])
-
-    print(f"Initial training set has {len(initial_train_set)} records.")
-    print("Initial training set label distribution:\n", initial_train_set['label'].value_counts(normalize=True))
-    print("-" * 40)
-
-    # 4. Oversample the training set to 5% positive class
-    pos_df = initial_train_set[initial_train_set['label'] == 1]
-    neg_df = initial_train_set[initial_train_set['label'] == 0]
-
-    # Calculate the required number of positive samples for a 5% ratio
-    target_pos_count = int(np.ceil((0.05 / 0.95) * len(neg_df)))
-    num_to_add = target_pos_count - len(pos_df)
-
-    final_train_set = initial_train_set.copy()
-
-    if num_to_add > 0:
-        # Sample with replacement from the existing positive samples
-        oversampled_pos = pos_df.sample(n=num_to_add, replace=True, random_state=42)
-        # Add the new samples to the training set
-        final_train_set = pd.concat([initial_train_set, oversampled_pos])
-
-    # Shuffle the final training set
-    final_train_set = final_train_set.sample(frac=1, random_state=42).reset_index(drop=True)
-
-    print(f"🚀 Oversampling complete. Final training set has {len(final_train_set)} records.")
-    print("Final training set label distribution:\n", final_train_set['label'].value_counts(normalize=True))
-    print("-" * 40)
+    # --- Create Training Set from the rest of the data ---
+    train_pos = sami_remaining.drop(test_pos.index)
+    train_neg = ptb_remaining.drop(test_neg.index)
+    train_df = pd.concat([train_pos, train_neg, other_sources_df]).sample(frac=1, random_state=42)
 
     # Turn the final sets into lists of record paths
-    train_records = final_train_set['record'].tolist()
+    train_records = train_df['record'].tolist()
     val_records = val_set['record'].tolist()
     test_records = test_set['record'].tolist()
+
+    print(f"Training on {len(train_records)} records.")
+    print(f"Validating on {len(val_records)} records. Positive ratio: {len(val_pos) / len(val_set):.2%}")
+    print(f"Testing on {len(test_records)} records. Positive ratio: {len(test_pos) / len(test_set):.2%}")
+    print("-" * 40)
 
     # 2. Instantiate the Lightning module
     # Pass model-specific arguments directly to the constructor
@@ -170,7 +126,7 @@ def main():
     data_module.test_dataset  = ECGDataset(test_records,  DATA_DIR, is_training=False,
                                            seq_len=SEQ_LENGTH, windowing_method='entire_recording')
     trainer = pl.Trainer(
-        max_epochs=5, 
+        max_epochs=EPOCHS, 
         accelerator='auto',
         gradient_clip_val=1.0,
         gradient_clip_algorithm='norm',
@@ -182,6 +138,11 @@ def main():
     print("Starting training...")
     trainer.fit(model=lightning_model, datamodule=data_module)
     print("Training finished.")
+
+    # Run test set
+    print("Starting testing...")
+    test_results = trainer.test(model=lightning_model, datamodule=data_module)
+    print("Testing finished.")
 
 if __name__ == "__main__":
     main()

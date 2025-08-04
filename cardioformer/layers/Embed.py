@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 from torch.nn.utils import weight_norm
 
-from layers.Augmentation import get_augmentation
+from .Augmentation import get_augmentation
 
 
 class PositionalEmbedding(nn.Module):

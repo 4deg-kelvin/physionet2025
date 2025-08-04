@@ -130,8 +130,7 @@ def load_labels(label_files, normal_class, equivalent_classes_collection):
                 print('WARNING: No diagnoses found in file {}. Using empty diagnoses.'.format(label_files[i]))
                 raise Exception("no diagnoses found in file {}".format(label_files[i]))
 
-            
-
+        
 
     # Identify classes.
     classes = set().union(*tmp_labels)

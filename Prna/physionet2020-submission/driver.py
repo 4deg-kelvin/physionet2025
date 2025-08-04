@@ -43,7 +43,7 @@ if __name__ == '__main__':
     if len(sys.argv) < 4 or len(sys.argv) > 7:
         raise Exception('Usage: python driver.py model_input input_directory output_directory [batch_size] [eval_fraction] [eval_split]')
     print("Starting driver.py")
-
+            
     model_input = sys.argv[1]
     input_directory = sys.argv[2]
     output_directory = sys.argv[3]

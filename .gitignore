@@ -3,7 +3,7 @@ code15/
 samitrop/
 ptbxl/
 __pycache__
-.venv/
+*venv/
 checkpoints/
 results/
 Prna/physionet2020-submission/my_container_dir
@@ -29,6 +29,14 @@ batch*
 *.sif
 *_prna_outputs.json
 notebooks/core
+venv/
+*.zip
+training_data/ptbxl/
+notebooks/model_output
+training_data/to_ignore
+/EDA/.github
+/EDA/training_data
+EDA/EDA_output
 *.wandb
 *.log
 Prna/physionet2020-submission/test_outputs/
@@ -36,3 +44,6 @@ wandb*
 *.ckpt
 *.pth
 *hparams.ymal
+.github
+**/*_ignore
+transformers-autoencoder/wandb

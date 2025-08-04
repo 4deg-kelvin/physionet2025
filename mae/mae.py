@@ -20,6 +20,9 @@ from datetime import datetime
 import time
 from sklearn.model_selection import train_test_split
 
+# Import parent directoyr to access helper_code and utils
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # --- Standard Imports ---
 import helper_code
 import utils
@@ -227,12 +230,14 @@ class MaskedAutoencoder(nn.Module):
     Masked Autoencoder for 12-lead ECG with Contiguous Block Masking.
     """
     def __init__(self, patch_size, num_patches, patch_dim, embed_dim, num_heads, 
-                 encoder_layers, decoder_layers, masking_ratio=0.75, overlap_ratio=0.5, use_se=True):
+                 encoder_layers, decoder_layers, masking_ratio=0.75, overlap_ratio=0.5, use_se=True,
+                 masking_type='contiguous'):
         super().__init__()
         self.patching = Patching(patch_size, overlap_ratio, use_se, )
         self.encoder = MAEEncoder(num_patches, patch_dim, embed_dim, num_heads, encoder_layers)
         self.decoder = MAEDecoder(num_patches, patch_dim, embed_dim, num_heads, decoder_layers)
         self.masking_ratio = masking_ratio
+        self.masking_type = masking_type
 
     def forward(self, x):
         # Patching
@@ -242,20 +247,38 @@ class MaskedAutoencoder(nn.Module):
 
         # --- Contiguous Temporal Block Masking ---
         num_masked = int(self.masking_ratio * num_patches)
-        num_unmasked = num_patches - num_masked
+        
+        if self.masking_type == 'contiguous':
+            # --- Contiguous Temporal Block Masking ---
+            num_unmasked = num_patches - num_masked
 
-        # 1. For each sample, find a random start index for the mask block.
-        start_idx = torch.randint(0, num_patches, (batch_size, 1), device=device)
+            # 1. For each sample, find a random start index for the mask block.
+            start_idx = torch.randint(0, num_patches, (batch_size, 1), device=device)
+            
+            # 2. Create the indices for the contiguous block to be masked.
+            mask_range = torch.arange(num_masked, device=device).unsqueeze(0)
+            masked_indices = (start_idx + mask_range) % num_patches
+            
+            # 3. Determine the unmasked indices.
+            full_indices = torch.arange(num_patches, device=device).unsqueeze(0).repeat(batch_size, 1)
+            bool_mask = torch.ones_like(full_indices, dtype=torch.bool)
+            bool_mask.scatter_(1, masked_indices, False)
+            unmasked_indices = full_indices[bool_mask].reshape(batch_size, -1)
         
-        # 2. Create the indices for the contiguous block to be masked.
-        mask_range = torch.arange(num_masked, device=device).unsqueeze(0)
-        masked_indices = (start_idx + mask_range) % num_patches
-        
-        # 3. Determine the unmasked indices.
-        full_indices = torch.arange(num_patches, device=device).unsqueeze(0).repeat(batch_size, 1)
-        bool_mask = torch.ones_like(full_indices, dtype=torch.bool)
-        bool_mask.scatter_(1, masked_indices, False)
-        unmasked_indices = full_indices[bool_mask].reshape(batch_size, -1)
+        elif self.masking_type == 'random':
+            # --- Random Point Masking ---
+            # 1. Generate a random permutation of indices for each sample.
+            noise = torch.rand(batch_size, num_patches, device=device)
+            ids_shuffle = torch.argsort(noise, dim=1)
+            
+            # 2. Split into masked and unmasked indices.
+            masked_indices = ids_shuffle[:, :num_masked]
+            unmasked_indices = ids_shuffle[:, num_masked:]
+            
+            # 3. Sort unmasked indices to maintain some temporal order (optional but common).
+            unmasked_indices = torch.sort(unmasked_indices, dim=1)[0]
+        else:
+            raise ValueError(f"Unknown masking type: {self.masking_type}")
 
         # 4. Create the permutation that restores the original patch order for the decoder.
         shuffled_indices = torch.cat([unmasked_indices, masked_indices], dim=1)
@@ -274,7 +297,8 @@ class MaskedAutoencoder(nn.Module):
 class MAELightningModule(pl.LightningModule):
     def __init__(self, patch_size, num_patches, patch_dim, embed_dim, num_heads, 
                  encoder_layers, decoder_layers, masking_ratio=0.75, lr=1e-3, 
-                 overlap_ratio=0.0, use_se=True, log_reconstructions=True):
+                 overlap_ratio=0.0, use_se=True, log_reconstructions=True,
+                 masking_type='contiguous'):
         super().__init__()
         # Save hyperparameters (now includes use_se)
         self.save_hyperparameters()
@@ -290,7 +314,8 @@ class MAELightningModule(pl.LightningModule):
             decoder_layers=decoder_layers,
             masking_ratio=masking_ratio,
             overlap_ratio=overlap_ratio,
-            use_se=use_se
+            use_se=use_se,
+            masking_type=masking_type
         )
         self.criterion = nn.MSELoss(reduction='none')  # Changed to 'none' for efficient loss computation
 
@@ -329,6 +354,16 @@ class MAELightningModule(pl.LightningModule):
         self.log('learning_rate', self.optimizers().param_groups[0]['lr'], prog_bar=False)
         return loss
 
+    def validation_step(self, batch, batch_idx):
+        loss = self._common_step(batch, batch_idx)
+        self.log('val_loss', loss, on_epoch=True, prog_bar=True)
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        loss = self._common_step(batch, batch_idx)
+        self.log('test_loss', loss, on_epoch=True, prog_bar=True)
+        return loss
+
     def configure_optimizers(self):
         # Use AdamW optimizer
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=0.05)
@@ -351,6 +386,127 @@ class MAELightningModule(pl.LightningModule):
                 'frequency': 1
             }
         }
+if __name__ == "__main__":
+        pl.seed_everything(42)  # For reproducibility
+        # Hyperparameters
+        SEQ_LENGTH = utils.UNIFIED_FREQUENCY * 10
+        PATCH_SIZE = 125
+        OVERLAP_RATIO = 0.5  # 50% overlap between patches
+        NUM_LEADS = 12
+        
+        # Calculate number of patches with overlap
+        stride = int(PATCH_SIZE * (1 - OVERLAP_RATIO))
+        NUM_PATCHES = (SEQ_LENGTH - PATCH_SIZE) // stride + 1
+        
+        PATCH_DIM = NUM_LEADS * PATCH_SIZE
+        EMBED_DIM = 768
+        NUM_HEADS = 12
+        ENCODER_LAYERS = 8
+        DECODER_LAYERS = 2  # Increased from 1 for better reconstruction
+        MASKING_RATIO = 0.75  # Increased back to standard MAE ratio
+        BATCH_SIZE = 32  # Reduced slightly for memory with overlap
+        EPOCHS = 20  # Increased epochs
+        NO_LABELS = True  # No labels for pre-training
+        # Learning rate with linear scaling: base_lr * (batch_size / 256)
+        LR = 1.5e-4
+        USE_SE = True  # Whether to use Squeeze-and-Excitation blocks
+        MASKING_TYPE = 'random' # 'contiguous' or 'random'
+
+        if NO_LABELS:
+            print("WARNING: Pre-training without labels. This is intended for unsupervised pre-training only.")
+
+        # Instantiate Lightning module for MAE with SE flag
+        mae_module = MAELightningModule(
+            patch_size=PATCH_SIZE,
+            num_patches=NUM_PATCHES,
+            patch_dim=PATCH_DIM,
+            embed_dim=EMBED_DIM,
+            num_heads=NUM_HEADS,
+            encoder_layers=ENCODER_LAYERS,
+            decoder_layers=DECODER_LAYERS,
+            masking_ratio=MASKING_RATIO,
+            lr=LR,
+            overlap_ratio=OVERLAP_RATIO,
+            use_se=USE_SE,
+            log_reconstructions=False,
+            masking_type=MASKING_TYPE
+        )
+            # Data directories
+        DATA_DIR = "../training_data"
+        ADDIT_DIRS = [
+            r"/juice2/scr2/kelvinkn/other_work/edwards/prna_2020_pooled_inputs",
+            r"/juice2/scr2/kelvinkn/other_work/edwards/physionet2021_data",
+        ]
+
+
+        # --- Corrected Data Loading and Splitting ---
+        # 1. Load ALL records, for pretraining (since this is official code)
+        records_meta = utils.prepare_stratification(helper_code.find_records_abs(DATA_DIR))
+        
+        # Exclude PTB-XL and SaMi-Trop
+        records_meta = [rec['record'] for rec in records_meta if rec['source'] not in ['PTB-XL', 'SaMi-Trop']]
+
+        addit_data = []
+        # Also load the addit_dirs 
+        for addit_dir in ADDIT_DIRS:
+            addit_data += helper_code.find_records_abs(addit_dir)
+        
+
+        # 2. Combine all records into a single list
+        # print("WARNING: EXCLUDING UNLABELED RECORDS, THIS IS FOR COMPETITION MODEL TRAINING")
+        # all_records = labeled_records + unlabeled_records
+        all_records = records_meta + addit_data     
+        print(f"Total records found: {len(all_records)}")
+        if len(all_records) == 0:
+            raise ValueError("No records found in the specified directories. Please check the paths.")
+
+        np.random.shuffle(all_records)
+        
+        # Split records into train, validation, and test sets (80/10/10)
+        total_size = len(all_records)
+        val_test_size = int(0.2 * total_size)
+        val_size = val_test_size // 2
+        
+        train_records = all_records[:-val_test_size]
+        val_records = all_records[-val_test_size:-val_size]
+        test_records = all_records[-val_size:]
+
+        print(f"Training records: {len(train_records)}")
+        print(f"Validation records: {len(val_records)}")
+        print(f"Test records: {len(test_records)}")
+
+        # Wire up ECGDataModule
+        data_module = ECGDataModule(
+            data_dir=DATA_DIR, # Base directory, not strictly needed since paths are absolute
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LENGTH,
+            windowing_method='entire_recording'
+        )
+        data_module.train_dataset = ECGDataset(train_records, DATA_DIR, is_training=True, no_labels=NO_LABELS,
+                                               seq_len=SEQ_LENGTH, windowing_method='entire_recording')
+        data_module.val_dataset = ECGDataset(val_records, DATA_DIR, is_training=False, no_labels=NO_LABELS,
+                                             seq_len=SEQ_LENGTH, windowing_method='entire_recording')
+        data_module.test_dataset = ECGDataset(test_records, DATA_DIR, is_training=False, no_labels=NO_LABELS,
+                                              seq_len=SEQ_LENGTH, windowing_method='entire_recording')
+        
+        # Train MAE via Lightning with validation monitoring
+        checkpoint_cb = ModelCheckpoint(
+            filename='mae_encoder_pretrained',       
+            save_last=True,
+            monitor='val_loss',
+            mode='min'
+        )
+
+        trainer = pl.Trainer(
+            max_epochs=EPOCHS,
+            accelerator='auto',
+            devices=1,
+            callbacks=[checkpoint_cb],
+            gradient_clip_val=1.0,  # Added gradient clipping
+        )
+        
+        # fit and validate, starting a new training run without ckpt_path
+        trainer.fit(mae_module, datamodule=data_module)
 def train_model(data_folder, model_folder, verbose):
     pl.seed_everything(42)  # For reproducibility
     # Hyperparameters
@@ -375,6 +531,7 @@ def train_model(data_folder, model_folder, verbose):
     # Learning rate with linear scaling: base_lr * (batch_size / 256)
     LR = 1.5e-4
     USE_SE = True  # Whether to use Squeeze-and-Excitation blocks
+    MASKING_TYPE = 'random' # 'contiguous' or 'random'
 
     if NO_LABELS:
         print("WARNING: Pre-training without labels. This is intended for unsupervised pre-training only.")
@@ -392,31 +549,53 @@ def train_model(data_folder, model_folder, verbose):
         lr=LR,
         overlap_ratio=OVERLAP_RATIO,
         use_se=USE_SE,
-        log_reconstructions=True
+        log_reconstructions=False,
+        masking_type=MASKING_TYPE
     )
         # Data directories
     DATA_DIR = data_folder
     ADDIT_DIRS = [
-        # r"/juice2/scr2/kelvinkn/other_work/edwards/prna_2020_pooled_inputs",
-        # r"/juice2/scr2/kelvinkn/other_work/edwards/physionet2021_data",
+        r"/juice2/scr2/kelvinkn/other_work/edwards/prna_2020_pooled_inputs",
+        r"/juice2/scr2/kelvinkn/other_work/edwards/physionet2021_data",
     ]
 
 
+    print("Preparing stratification and loading records...")
     # --- Corrected Data Loading and Splitting ---
     # 1. Load ALL records, for pretraining (since this is official code)
-    records_meta = helper_code.find_records_abs(DATA_DIR)
+    records_meta = utils.prepare_stratification(helper_code.find_records_abs(DATA_DIR))
+    
+    # Exclude PTB-XL and SaMi-Trop
+    records_meta = [rec['record'] for rec in records_meta if rec['source'] not in ['PTB-XL', 'SaMi-Trop']]
+
+    addit_data = []
+    # Also load the addit_dirs 
+    for addit_dir in ADDIT_DIRS:
+        addit_data += helper_code.find_records_abs(addit_dir)
     
 
     # 2. Combine all records into a single list
-    print("WARNING: EXCLUDING UNLABELED RECORDS, THIS IS FOR COMPETITION MODEL TRAINING")
+    # print("WARNING: EXCLUDING UNLABELED RECORDS, THIS IS FOR COMPETITION MODEL TRAINING")
     # all_records = labeled_records + unlabeled_records
-    all_records = records_meta
+    all_records = records_meta + addit_data     
     print(f"Total records found: {len(all_records)}")
     if len(all_records) == 0:
         raise ValueError("No records found in the specified directories. Please check the paths.")
 
     np.random.shuffle(all_records)
-    train_records = all_records  # use all data for training
+    
+    # Split records into train, validation, and test sets (80/10/10)
+    total_size = len(all_records)
+    val_test_size = int(0.2 * total_size)
+    val_size = val_test_size // 2
+    
+    train_records = all_records[:-val_test_size]
+    val_records = all_records[-val_test_size:-val_size]
+    test_records = all_records[-val_size:]
+
+    print(f"Training records: {len(train_records)}")
+    print(f"Validation records: {len(val_records)}")
+    print(f"Test records: {len(test_records)}")
 
     # Wire up ECGDataModule
     data_module = ECGDataModule(
@@ -427,13 +606,18 @@ def train_model(data_folder, model_folder, verbose):
     )
     data_module.train_dataset = ECGDataset(train_records, DATA_DIR, is_training=True, no_labels=NO_LABELS,
                                            seq_len=SEQ_LENGTH, windowing_method='entire_recording')
-    # No validation or test sets for pre-training
+    data_module.val_dataset = ECGDataset(val_records, DATA_DIR, is_training=False, no_labels=NO_LABELS,
+                                         seq_len=SEQ_LENGTH, windowing_method='entire_recording')
+    data_module.test_dataset = ECGDataset(test_records, DATA_DIR, is_training=False, no_labels=NO_LABELS,
+                                          seq_len=SEQ_LENGTH, windowing_method='entire_recording')
     
     # Train MAE via Lightning with validation monitoring
     checkpoint_cb = ModelCheckpoint(
         dirpath=model_folder,      # save to the user-specified model_folder
         filename='mae_encoder_pretrained',       
-        save_last=True
+        save_last=True,
+        monitor='val_loss',
+        mode='min'
     )
 
     trainer = pl.Trainer(

@@ -235,14 +235,33 @@ class ECGDataset(Dataset):
                 tqdm.write(f"Error loading record {self.records_list[idx]}: {e}. Skipping.")
                 return None
 
+
             # --- Gracefully handle short signals ---
             # Get frequency and check if the signal is long enough to be useful
             orig_freq = metadata['fs']
             if signal.shape[1] < orig_freq * utils.MIN_SIGNAL_DURATION:
                 tqdm.write(f"Skipping record {self.records_list[idx]} due to insufficient length: {signal.shape[1]} samples.")
                 return None # Return None to be filtered out by the custom collate function
+            
+            # --- ADDED: Get and process demographic data as wide features ---
+            age, sex, label = helper_code.get_patient_info(header_text, allow_missing_label=False)
+            assert label is not None and label == 0 or label == 1, f"Invalid label {label} for record {self.records_list[idx]}"
+    
+            # Process and normalize age. Use a neutral value for missing data.
+            if age is None or np.isnan(age):
+                normalized_age = 0.0 
+            else:
+                normalized_age = (age - utils.MEAN_AGE_TRAIN) / utils.STD_AGE_TRAIN
 
+            # Process and normalize sex. Use a neutral value for unknown/missing.
+            if sex is None or not isinstance(sex, str) or sex.lower() not in ['male', 'female']:
+                numerical_sex = 0.5 
+            elif sex.lower() == 'male':
+                numerical_sex = 0.0
+            else: # 'female'
+                numerical_sex = 1.0
 
+            # wide_feats is a 2D tensor with age, sex, and computed_features
             # Standardize sampling frequency
             if orig_freq != utils.UNIFIED_FREQUENCY:
                 num_samples = int(signal.shape[1] * (utils.UNIFIED_FREQUENCY / orig_freq))
@@ -255,7 +274,34 @@ class ECGDataset(Dataset):
                 signal, _ = utils.correct_12_lead_polarity_lead_II_ref(signal, utils.UNIFIED_FREQUENCY)
             except Exception as e:
                 tqdm.write(f"Error correcting polarity for record {self.records_list[idx]}: {e}")
+            created_features = False
+            created_wide = False
+            try:
                 # Continue with the uncorrected signal if polarity check fails
+                # computed_features = utils.calculate_ecg_features(signal, utils.UNIFIED_FREQUENCY, utils.REFERENCE_POLARITY_LEAD_IDX)
+                # # If cant compute features on this lead, try on other leads
+                # if computed_features is None:
+                #     for i in range(signal.shape[0]):
+                #         if i != utils.REFERENCE_POLARITY_LEAD_IDX:
+                #             computed_features = utils.calculate_ecg_features(signal, utils.UNIFIED_FREQUENCY, i)
+                #             if computed_features is not None:
+                #                 break
+                # if computed_features is None:
+                #     tqdm.write(f"Skipping record {self.records_list[idx]} because no features could be computed.")
+                #     return None
+
+                # # Fill nan values in computed features with 0
+                # computed_features = np.nan_to_num(computed_features, nan=0.0, posinf=0.0, neginf=0.0)
+                # created_features = True
+
+                wide_feats = np.array([normalized_age, numerical_sex])
+                # Append the wide features to the computed features
+                # wide_feats = np.concatenate((wide_feats, computed_features), axis=0)
+                # created_wide = True
+
+            except Exception as e:
+                tqdm.write(f"Error extracting features for record {self.records_list[idx]}: {e}")
+                return None # Return None if feature extraction fails
 
             # Extract windows from the signal
             if utils.USE_ONE_WINDOW:
@@ -269,14 +315,9 @@ class ECGDataset(Dataset):
             
             # Normalize each lead between -1 and 1
             signal = utils.normalize(signal, smooth=1e-8)
-            
-            # Get the label from the loaded header
-            label = helper_code.get_label(header_text)
-
-            assert label == 0 or label == 1, f"Invalid label {label} for record {self.records_list[idx]}"
-
-            # Use .copy() to prevent potential negative stride errors from numpy operations
-            return torch.FloatTensor(signal.copy()), torch.FloatTensor([label])
+    
+            # MODIFIED: Return a 3-tuple including the wide_feats tensor
+            return torch.FloatTensor(signal.copy()), torch.FloatTensor(wide_feats), torch.FloatTensor([label])
         except Exception as e:
             tqdm.write(f"Error processing record {self.records_list[idx]}: {e}. Skipping.")
             return None

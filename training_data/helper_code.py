@@ -103,6 +103,8 @@ def get_age(string):
         age = float(age)
     return age
 
+
+
 # Load the sex from a record.
 def load_sex(record):
     header = load_header(record)

@@ -24,22 +24,6 @@ probability_string = '# Chagas probability:'
 ### Challenge data I/O functions
 
 # Find the records in a folder and its subfolders.
-# NOTE: this function is edited, the orig physio code returned relative paths, 
-# but this returns absolute paths now 
-# Returns a path in the form of 
-def find_records_abs(folder, file_extension='.hea'):
-    records = set()
-    for root, directories, files in os.walk(folder):
-        for file in files:
-            extension = os.path.splitext(file)[1]
-            if extension == file_extension:
-                record = os.path.abspath(os.path.join(root, file))[:-len(file_extension)]
-                records.add(record)
-    records = sorted(records)
-    return records
-# Original find_records function that returns relative paths, directly from physionet
-# If the folder is "training_data", the record will be "record_name" without the extension or 
-# parent folder
 def find_records(folder, file_extension='.hea'):
     records = set()
     for root, directories, files in os.walk(folder):
@@ -50,6 +34,7 @@ def find_records(folder, file_extension='.hea'):
                 records.add(record)
     records = sorted(records)
     return records
+
 # Load the binary label for a record.
 def load_label(record):
     header = load_header(record)
@@ -139,36 +124,7 @@ def load_source(record):
 def get_source(string):
     source, has_source = get_variable(string, source_string)
     return source
-# Get age, sex, and label from a WFDB header or a similar string in one pass.
-# NOTE: I made this function myself, it is NOT part of the original challenge.
-def get_patient_info(string, allow_missing_label=False):
-    '''Gets the age, sex, and label from a WFDB header or a similar string.'''
-    age = None
-    sex = None
-    label = None
-    
-    has_age = False
-    has_sex = False
-    has_label = False
-    
-    for l in string.split('\n'):
-        if l.startswith(age_string):
-            age = l[len(age_string):].strip()
-            has_age = True
-            if is_number(age):
-                age = float(age)
-        elif l.startswith(sex_string):
-            sex = l[len(sex_string):].strip()
-            has_sex = True
-        elif l.startswith(label_string):
-            label = l[len(label_string):].strip()
-            has_label = True
-            label = sanitize_boolean_value(label)
-    
-    if not has_label and not allow_missing_label:
-        raise Exception('No label is available: are you trying to load the labels from the held-out data?')
-    
-    return age, sex, label
+
 # Normalize the channel names.
 def normalize_names(names_ref, names_est):
     tmp = list()
@@ -221,7 +177,6 @@ def get_header_file(record):
     return header_file
 
 # Load the signals for a record.
-# Returns in the format (num_signals, num_leads)
 def load_signals(record):
     signal, fields = wfdb.rdsamp(record)
     return signal, fields
@@ -290,8 +245,6 @@ def get_signal_names(string):
 ### Evaluation functions
 
 # Compute the Challenge score.
-# NOTE: THIS CURRENTLY DOESNT WORK WITH OUR CODE, as the np.argsort uses a "stable" keyword that is present 
-# in np version 2.0, however, we use np version 1.26
 def compute_challenge_score(labels, outputs, fraction_capacity = 0.05, num_permutations = 10**4, seed=12345):
     # Check the data.
     assert len(labels) == len(outputs)
@@ -316,7 +269,7 @@ def compute_challenge_score(labels, outputs, fraction_capacity = 0.05, num_permu
         permuted_labels = labels[permuted_idx]
         permuted_outputs = outputs[permuted_idx]
 
-        ordered_idx = np.argsort(permuted_outputs, kind='stable')[::-1]
+        ordered_idx = np.argsort(permuted_outputs, stable=True)[::-1]
         ordered_labels = permuted_labels[ordered_idx]
 
         tp[i] = np.sum(ordered_labels[:capacity] == 1)
@@ -435,4 +388,4 @@ def sanitize_boolean_value(x):
     elif (is_number(x) and float(x)==1) or (remove_extra_characters(x).casefold() in ('true', 't', 'yes', 'y')):
         return 1
     else:
-        return float('nan') 
+        return float('nan')

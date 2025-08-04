@@ -1,6 +1,8 @@
 import numpy as np
 from wfdb import processing
 import neurokit2 as nk
+import pandas as pd
+from tqdm import tqdm 
 
 
 UNIFIED_FREQUENCY = 500
@@ -17,6 +19,150 @@ REFERENCE_POLARITY_LEAD_IDX = 1  # Lead II is the reference lead for polarity ch
 MIN_SIGNAL_DURATION = 2  # seconds, minimum duration of the signal to even be used for training
 np.random.seed(42)  # For reproducibility
 
+MEAN_AGE_TRAIN = 53.77
+STD_AGE_TRAIN = 20.80
+
+from biosppy.signals import ecg as biosppy_ecg
+from biosppy.signals import hrv as biosppy_hrv
+
+def check_interval(waves_signals: dict) -> pd.DataFrame:
+    # Define the relevant keys (also in the order they should be)
+    keys = ['ECG_P_Onsets', 'ECG_P_Peaks', 'ECG_P_Offsets', 'ECG_Q_Peaks', 'ECG_R_Peaks', 'ECG_S_Peaks', 'ECG_T_Onsets', 'ECG_T_Peaks', 'ECG_T_Offsets']
+    # Create a dataframe with the data from the dictionary only for the relevant keys
+    df_waves = pd.DataFrame({key: waves_signals[key] for key in keys})
+    rows = df_waves.shape[0]
+    mask = np.zeros(rows)
+    for i in range(1, rows):
+        start_interval = df_waves.loc[i-1, 'ECG_R_Peaks']
+        end_interval = df_waves.loc[i, 'ECG_R_Peaks']
+        sliced_df = df_waves[df_waves.isin([start_interval, end_interval]).any(axis=1)]
+        # if the sliced df has no missing values, then the interval is correct and the mask should be 1
+        first_condition = sliced_df[keys].isnull().sum().sum() == 0
+        second_condition = keys == sliced_df.iloc[0].sort_values(ascending=True).index.tolist()
+        if first_condition and second_condition:
+            mask[i] = 1
+    return df_waves[mask == 1]
+
+def ecg_signal_features(row: pd.Series, frequency: int = 400, milliseconds: bool = True) -> dict:
+    ECG_P_Peaks, ECG_P_Onsets, ECG_P_Offsets, ECG_Q_Peaks, ECG_S_Peaks, ECG_T_Peaks, ECG_T_Onsets, ECG_T_Offsets, ECG_R_Peaks = row
+    # Compute the P wave duration
+    P_wave_duration = (ECG_P_Offsets - ECG_P_Onsets)
+    # Compute the PR interval
+    PR_interval = (ECG_Q_Peaks - ECG_P_Onsets)
+    # Compute the PR segment
+    PR_segment = (ECG_Q_Peaks - ECG_P_Offsets)
+    # Compute the QRS duration
+    QRS_duration = (ECG_S_Peaks - ECG_Q_Peaks)
+    # Compute the QT interval
+    QT_interval = (ECG_T_Offsets - ECG_Q_Peaks)
+    # Compute the ST segment
+    ST_segment = (ECG_T_Onsets - ECG_S_Peaks)
+    
+    if milliseconds:
+        P_wave_duration = P_wave_duration * 1000 / frequency
+        PR_interval = PR_interval * 1000 / frequency
+        PR_segment = PR_segment * 1000 / frequency
+        QRS_duration = QRS_duration * 1000 / frequency
+        QT_interval = QT_interval * 1000 / frequency
+        ST_segment = ST_segment * 1000 / frequency
+
+    else:
+        P_wave_duration = P_wave_duration / frequency
+        PR_interval = PR_interval / frequency
+        PR_segment = PR_segment / frequency
+        QRS_duration = QRS_duration / frequency
+        QT_interval = QT_interval / frequency
+        ST_segment = ST_segment / frequency
+
+    return {
+        'P_wave_duration': P_wave_duration,
+        'PR_interval': PR_interval,
+        'PR_segment': PR_segment,
+        'QRS_duration': QRS_duration,
+        'QT_interval': QT_interval,
+        'ST_segment': ST_segment
+    }
+
+def st_slope(signal_df: pd.DataFrame, s_peak: int, t_onset: int) -> float:
+    with np.errstate(divide='ignore', invalid='ignore'):
+        return (signal_df.iloc[t_onset]['ECG_Clean'] - signal_df.iloc[s_peak]['ECG_Clean']) / (t_onset - s_peak)
+
+
+def calculate_ecg_features(signals, frequency, channel=1):
+    # Extract the record file
+    # Load the header and signals
+    # Fill nan values with the mean of the signal
+    signals = np.nan_to_num(signals, nan=np.nanmean(signals))
+    if signals.shape[0] == 12:
+        signals = signals.T  # Ensure the shape is (num_samples, num_leads) for NeuroKit2 compatibility
+    
+    try:
+        ecg_signals, info = nk.ecg_process(signals[:, channel], sampling_rate=frequency)
+
+        # Get HRV features - but handle potential issues
+        try:
+            hrv_features = nk.hrv_time(ecg_signals, sampling_rate=frequency)
+        except Exception as e:
+            print(f"Warning: HRV calculation failed: {e}")
+            hrv_features = pd.DataFrame() # Empty DataFrame as fallback
+
+        # Check the intervals (enforce the correct order)
+        correct_waves = check_interval(info)
+
+        # If no correct waves are found, return None
+        if correct_waves.shape[0] == 0:
+            return None
+
+        # Compute the ECG features
+        correct_waves[["P_wave_duration","PR_interval","PR_segment","QRS_duration","QT_interval","ST_segment"]] = correct_waves.apply(
+            lambda x: ecg_signal_features(x, frequency), axis=1, result_type='expand')
+        
+        # Compute the ST slope
+        correct_waves['ST_slope'] = correct_waves.apply(
+            lambda x: st_slope(ecg_signals, int(x['ECG_S_Peaks']), int(x['ECG_T_Onsets'])), axis=1)
+        
+        # Drop the unnecessary columns
+        correct_waves.drop(columns=['ECG_P_Peaks','ECG_P_Onsets','ECG_P_Offsets','ECG_Q_Peaks',
+                                   'ECG_S_Peaks','ECG_T_Peaks','ECG_T_Onsets','ECG_T_Offsets','ECG_R_Peaks'], inplace=True)
+        
+        # Add the exam_id
+        correct_waves['exam_id'] = 'placeholder'
+        
+        # Aggregate the features
+        correct_waves = correct_waves.groupby('exam_id').aggregate(['mean', 'std', 'min', 'max']).reset_index()
+        correct_waves.columns = ['_'.join(col).strip() for col in correct_waves.columns.values]
+        correct_waves.drop(columns=['exam_id_'], inplace=True)
+
+        # Define the desired features but only use those that are actually available
+        desired_features = ['ST_slope_min', 'ST_slope_mean', 'ST_segment_max', 'ST_segment_mean', 
+                          'QRS_duration_min', 'P_wave_duration_max', 'ST_segment_min', 
+                          'PR_segment_mean', 'QRS_duration_mean', 'ST_segment_std', 
+                          'PR_segment_min', 'P_wave_duration_mean']
+                          
+        hrv_desired_features = ['HRV_HTI', 'HRV_CVNN', 'HRV_TINN', 'HRV_MCVNN', 'HRV_SDSD', 'HRV_MaxNN']
+        
+        # Only include columns that exist in the DataFrame
+        available_features = [col for col in desired_features if col in correct_waves.columns]
+        available_hrv = [col for col in hrv_desired_features if col in hrv_features.columns]
+        
+        # Get only the available features
+        correct_waves_subset = correct_waves[available_features] if available_features else pd.DataFrame()
+        hrv_subset = hrv_features[available_hrv] if available_hrv else pd.DataFrame()
+        
+        # Combine available features
+        final_df = pd.concat([correct_waves_subset, hrv_subset], axis=1)
+        
+        # Handle case where we have no features
+        if final_df.empty:
+            print("Warning: No features could be extracted")
+            return None
+            
+        # Convert to numpy and return
+        return final_df.to_numpy().flatten()  # Flatten to ensure 1D array
+        
+    except Exception as e:
+        print(f"Error in feature extraction: {e}")
+        return None  # Return a default value
 
 def correct_12_lead_polarity_lead_II_ref(multilead_signal, fs=UNIFIED_FREQUENCY, allow_padding=True):
     """
@@ -88,19 +234,6 @@ def detect_qrs_peaks(signal, fs, lead_index=1):
     r_peaks = rpeaks_info["ECG_R_Peaks"]
 
     return r_peaks
-
-
-import numpy as np
-
-# Assume these constants and functions are defined elsewhere in your project
-# For example:
-# WINDOW_SIZE = 5000
-# UNIFIED_FREQUENCY = 100
-# def detect_qrs_peaks(signal, fs):
-#     # A placeholder for your QRS detection logic
-#     # In a real implementation, this would return the indices of R-peaks
-#     num_samples = signal.shape[1]
-#     return np.linspace(100, num_samples - 100, 10, dtype=int)
 
 def get_windows(signal, window_size, method='random', num_windows=1, stride=None, qrs_offset=None):
     """

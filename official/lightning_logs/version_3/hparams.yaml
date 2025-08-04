@@ -1,0 +1,22 @@
+model_hparams:
+  batch_size: 16
+  checkpoint_monitor_metric: val_challenge_score
+  d_ff: 2048
+  d_model: 256
+  data_path: ../training_data/code15/code15_outputs/code15_half1/exams_part0
+  deepfeat_sz: 256
+  dropout_rate: 0.1
+  epochs: 8
+  nhead: 8
+  num_layers: 8
+  num_leads: 12
+  num_records: 19901
+  pos_weight: 10.92780825
+  seq_len: 5000
+  use_single_window: true
+  wide_feats_size: 2
+  windowing_method: entire_recording
+optimizer_hparams:
+  lr: 2.0e-05
+  lr_end: 1.0e-07
+  warmup_steps: 700
