@@ -12,3 +12,4 @@ wfdb
 pandas==2.3.1
 PeakUtils==1.3.5
 gdown
+timm
