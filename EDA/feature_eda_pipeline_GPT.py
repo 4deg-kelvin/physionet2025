@@ -120,11 +120,6 @@ def ecg_signal_features(row: pd.Series, frequency: int, milliseconds: bool = Tru
         return features
         
     
-    # The following functions are now imported from utils.py and should be removed:
-    # def check_interval(waves_signals: dict) -> pd.DataFrame:
-    # def ecg_signal_features(row: pd.Series, frequency: int, milliseconds: bool = True) -> dict:
-    # def st_slope(signal_df: pd.DataFrame, s_peak: int, t_onset: int) -> float:
-        return np.nan
 
 # --- Helper Functions from combined_eda.py ---
 def get_json(path):
