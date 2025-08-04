@@ -295,42 +295,6 @@ def extract_lead_features(lead_signal: np.ndarray, frequency: int, channel=None)
                     'wavelet_std_d1', 'wavelet_std_d2', 'wavelet_std_d3', 'wavelet_std_d4', 'wavelet_std_a4']:
             features[key] = np.nan
     return features
-
-    # Morphological features
-    correct_waves = check_interval(info) if info else pd.DataFrame()
-    morph_feature_keys = ['P_wave_duration', 'PR_interval', 'PR_segment', 'QRS_duration', 'QT_interval', 'ST_segment', 'ST_slope']
-    stats = ['mean', 'std', 'min', 'max']
-    if correct_waves.shape[0] == 0:
-        for key in morph_feature_keys:
-            for stat in stats:
-                features[f'{key}_{stat}'] = np.nan
-    else:
-        morph_features = correct_waves.apply(lambda x: ecg_signal_features(x, frequency), axis=1, result_type='expand')
-        morph_features['ST_slope'] = correct_waves.apply(lambda x: st_slope(ecg_signals, int(x['ECG_S_Peaks']), int(x['ECG_T_Onsets'])), axis=1)
-        agg = morph_features.aggregate(['mean', 'std', 'min', 'max']).unstack().to_frame().T
-        agg.columns = ['_'.join(col).strip() for col in agg.columns.values]
-        features.update(agg.iloc[0].to_dict())
-
-    # HRV features
-    # Only include HRV features that are supported for short ECGs (exclude windowed features)
-    hrv_feature_names = ['HRV_MeanNN', 'HRV_SDNN', 'HRV_RMSSD', 'HRV_SDSD', 'HRV_CVNN', 'HRV_CVSD',
-                        'HRV_MedianNN', 'HRV_MadNN', 'HRV_MCVNN', 'HRV_IQRNN', 'HRV_SDRMSSD', 'HRV_Prc20NN',
-                        'HRV_Prc80NN', 'HRV_pNN50', 'HRV_pNN20', 'HRV_MinNN', 'HRV_MaxNN', 'HRV_HTI', 'HRV_TINN']
-    is_good_quality = False
-    if info and not ecg_signals.empty:
-        is_good_quality = assess_ecg_quality(info, lead_signal.reshape(-1, 1), frequency)
-    if is_good_quality:
-        hrv_features_full = nk.hrv_time(ecg_signals, sampling_rate=frequency)
-        for col in hrv_feature_names:
-            if col in hrv_features_full.columns:
-                features[col] = hrv_features_full.iloc[0][col]
-            else:
-                features[col] = np.nan
-    else:
-        for col in hrv_feature_names:
-            features[col] = np.nan
-
-    # Wavelet features
     try:
         coeffs = pywt.wavedec(lead_signal, 'db4', level=4)
         cA4, cD4, cD3, cD2, cD1 = coeffs
