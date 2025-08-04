@@ -3,7 +3,7 @@ code15/
 samitrop/
 ptbxl/
 __pycache__
-.venv/
+*venv/
 checkpoints/
 results/
 Prna/physionet2020-submission/my_container_dir
@@ -35,9 +35,11 @@ training_data/ptbxl/
 notebooks/model_output
 training_data/to_ignore
 /EDA/.github
-/.github
 /EDA/training_data
 EDA/EDA_output
 *.wandb
 *.log
 Prna/physionet2020-submission/test_outputs/
+.github
+**/*_ignore
+transformers-autoencoder/wandb
