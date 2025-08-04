@@ -46,6 +46,10 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Local imports
+# Add EDA directory to sys.path to import helper_code
+eda_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'EDA'))
+if eda_dir not in sys.path:
+    sys.path.insert(0, eda_dir)
 from helper_code import find_records, load_label, load_signal
 
 class ECGFeatureExtractor:
