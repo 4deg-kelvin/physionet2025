@@ -24,7 +24,7 @@ from random_forest_outline import (
 )
 
 # Import configuration
-from rf_config import (
+from .rf_config import (
     DATA_CONFIG,
     MODEL_CONFIG,
     TRAINING_CONFIG,
