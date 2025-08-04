@@ -370,7 +370,7 @@ def train_model(data_folder, model_folder, verbose):
     DECODER_LAYERS = 2  # Increased from 1 for better reconstruction
     MASKING_RATIO = 0.75  # Increased back to standard MAE ratio
     BATCH_SIZE = 32  # Reduced slightly for memory with overlap
-    EPOCHS = 22  # Increased epochs
+    EPOCHS = 20  # Increased epochs
     NO_LABELS = True  # No labels for pre-training
     # Learning rate with linear scaling: base_lr * (batch_size / 256)
     LR = 1.5e-4
@@ -467,20 +467,21 @@ def train_model(data_folder, model_folder, verbose):
     elif os.path.isfile(os.path.join(model_folder, partial_ckpt_path)):
         if verbose:
             print(f"Loading weights from partial checkpoint in model folder: {os.path.join(model_folder, partial_ckpt_path)}")
-            if verbose:        
-                # Load the checkpoint dictionary
-                checkpoint = torch.load(os.path.join(model_folder, partial_ckpt_path), map_location='cpu', weights_only=False)
-                
-                # Check if the checkpoint is a full Lightning checkpoint or just a state_dict
-                if 'state_dict' in checkpoint:
-                    state_dict = checkpoint['state_dict']
-                else:
-                    state_dict = checkpoint
-                    
-                # Load the state dict into the model, ignoring non-matching keys
-                mae_module.load_state_dict(state_dict, strict=False)
+        
+        # Load the checkpoint dictionary
+        checkpoint = torch.load(os.path.join(model_folder, partial_ckpt_path), map_location='cpu', weights_only=False)
+        
+        # Check if the checkpoint is a full Lightning checkpoint or just a state_dict
+        if 'state_dict' in checkpoint:
+            state_dict = checkpoint['state_dict']
+        else:
+            state_dict = checkpoint
+            
+        # Load the state dict into the model, ignoring non-matching keys
+        mae_module.load_state_dict(state_dict, strict=False)
     else:
-        raise ValueError(f"Partial checkpoint not found at {partial_ckpt_path}. ")
+        if verbose:
+            print(f"No partial checkpoint found. Starting training from scratch.")
 
 
     # fit and validate, starting a new training run without ckpt_path
