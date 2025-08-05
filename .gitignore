@@ -5,3 +5,7 @@ outputs2/
 *.ckpt
 events.out.tfevents.*
 hparams.yaml
+model*/
+lightning_logs/
+__pycache__/
+*.ckpt

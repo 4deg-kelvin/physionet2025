@@ -201,15 +201,15 @@ class ECGDataModule(pl.LightningDataModule):
         pass
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=2,
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=4,
                           persistent_workers=False, shuffle=True, pin_memory=False, collate_fn=collate_fn_skip_none)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=2,
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=4,
                           persistent_workers=False, pin_memory=False, collate_fn=collate_fn_skip_none)
 
     def test_dataloader(self):
         # fallback to val_dataset if no test_dataset was set
         dataset = self.test_dataset if self.test_dataset is not None else self.val_dataset
-        return DataLoader(dataset, batch_size=self.batch_size, num_workers=2,
+        return DataLoader(dataset, batch_size=self.batch_size, num_workers=4,
                           persistent_workers=False, pin_memory=True, collate_fn=collate_fn_skip_none)

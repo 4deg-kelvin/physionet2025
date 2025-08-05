@@ -370,7 +370,7 @@ def train_model(data_folder, model_folder, verbose):
     DECODER_LAYERS = 2  # Increased from 1 for better reconstruction
     MASKING_RATIO = 0.75  # Increased back to standard MAE ratio
     BATCH_SIZE = 32  # Reduced slightly for memory with overlap
-    EPOCHS = 20  # Increased epochs
+    EPOCHS = 14  # Increased epochs
     NO_LABELS = True  # No labels for pre-training
     # Learning rate with linear scaling: base_lr * (batch_size / 256)
     LR = 1.5e-4
