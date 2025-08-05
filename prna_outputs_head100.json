@@ -1,0 +1,100 @@
+[
+  {
+    "exam_id": "763256",
+    "chagas": false,
+    "age": "21",
+    "is_male": "False",
+    "nn_predicted_age": "32.933292",
+    "1dAVb": "False",
+    "RBBB": "False",
+    "LBBB": "False",
+    "SB": "False",
+    "ST": "False",
+    "AF": "False",
+    "patient_id": "1217369",
+    "death": "False",
+    "timey": "2.961641",
+    "normal_ecg": "False",
+    "trace_file": "exams_part1.hdf5",
+    "primary_id": "code15_763256",
+    "source": "code15",
+    "snomed_vals": {
+      "10370003": {
+        "present": false,
+        "probability": 0.00008375992
+      },
+      "111975006": {
+        "present": false,
+        "probability": 0.0010521555
+      },
+      "164889003": {
+        "present": false,
+        "probability": 0.00013104455,
+        "actual_present": false
+      },
+      "164890007": {
+        "present": false,
+        "probability": 8.582029e-6
+      },
+      "164909002": {
+        "present": false,
+        "probability": 8.851866e-6,
+        "actual_present": false
+      },
+      "164917005": {
+        "present": false,
+        "probability": 0.0008262891
+      },
+      "164934002": {
+        "present": false,
+        "probability": 0.0024428766
+      },
+      "164947007": {
+        "present": false,
+        "probability": 1.0487474e-6
+      },
+      "17338001": {
+        "present": false,
+        "probability": 0.00014215765
+      },
+      "251146004": {
+        "present": false,
+        "probability": 0.0034488987
+      },
+      "270492004": {
+        "present": false,
+        "probability": 0.00011326568,
+        "actual_present": false
+      },
+      "284470004": {
+        "present": false,
+        "probability": 0.0012743335
+      },
+      "39732003": {
+        "present": false,
+        "probability": 0.000031129424
+      },
+      "426177001": {
+        "present": false,
+        "probability": 0.00005556481,
+        "actual_present": false
+      },
+      "426627000": {
+        "present": false,
+        "probability": 0.000011588804
+      },
+      "426783006": {
+        "present": true,
+        "probability": 0.8249207
+      },
+      "427084000": {
+        "present": false,
+        "probability": 0.00003128358,
+        "actual_present": false
+      },
+      "427172004": {
+        "present": false,
+        "probability": 0.000010964913
+      },
+      "427393009": {
+        "present": false,
