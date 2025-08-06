@@ -3,8 +3,6 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.metrics import roc_auc_score, accuracy_score
-import matplotlib.pyplot as plt
 import sys
 from sklearn.model_selection import train_test_split
 import utils
@@ -16,6 +14,7 @@ import wandb
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 import pandas as pd
+import argparse
 
 from mae import Patching, MAELightningModule
 
@@ -74,7 +73,8 @@ class FineTuningLightningModule(pl.LightningModule):
     PyTorch Lightning module for fine-tuning the MAE for classification.
     """
     def __init__(self, mae_encoder, patch_size, overlap_ratio=0.0, 
-                 num_classes=1, lr=1e-4, weight_decay=0.05, num_unfrozen_layers=0, info_features=0):
+                 num_classes=1, lr=1e-4, weight_decay=0.05, num_unfrozen_layers=0, info_features=0,
+                 patching_type='linear', wavelnet_out_channels=32, use_se=True):
         """
         Args:
             mae_encoder (nn.Module): The pre-trained MAEEncoder.
@@ -86,11 +86,24 @@ class FineTuningLightningModule(pl.LightningModule):
             num_unfrozen_layers (int): Number of final encoder layers to unfreeze for training.
                                        If 0, the entire encoder is frozen.
             info_features (int): Number of wide demographic/clinical features.
+            patching_type (str): Type of patching to use ('linear' or 'wavelnet')
+            wavelnet_out_channels (int): Number of output channels for wavelnet patching
+            use_se (bool): Whether to use Squeeze-and-Excitation blocks
         """
         super().__init__()
         self.save_hyperparameters(ignore=['mae_encoder'])
         
-        self.patching = Patching(patch_size, overlap_ratio)
+        # Create patching module with same architecture as used in pre-training
+        self.patching = Patching(
+            patch_size=patch_size, 
+            overlap_ratio=overlap_ratio,
+            use_se=use_se,
+            patching_type=patching_type,
+            embed_dim=mae_encoder.pos_embedding.shape[-1],
+            wavelnet_out_channels=wavelnet_out_channels,
+            num_leads=12 # Added to match Patching definition in mae.py
+        )
+        
         self.model = FineTuningModel(
             mae_encoder, 
             num_classes, 
@@ -136,18 +149,33 @@ class FineTuningLightningModule(pl.LightningModule):
     def load_from_mae_checkpoint(checkpoint_path, **kwargs):
         """
         Loads the MAE encoder from a pre-trained checkpoint.
+        Handles state dict key migration for older checkpoints.
         """
-        mae_lightning_module = MAELightningModule.load_from_checkpoint(checkpoint_path)
+        # Manually load the checkpoint to inspect its contents first
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        hparams = checkpoint['hyper_parameters']
+        state_dict = checkpoint['state_dict']
+
+        # Instantiate the MAE module with its saved hyperparameters and load the state dict
+        mae_lightning_module = MAELightningModule(**hparams)
+        mae_lightning_module.load_state_dict(state_dict)
+        
         encoder = mae_lightning_module.model.encoder
         
-        hparams = mae_lightning_module.hparams
+        # Extract necessary hparams for the fine-tuning module
         patch_size = hparams.get('patch_size')
-        overlap_ratio = hparams.get('overlap_ratio', 0.5)  # Default to 50% overlap if not specified
+        overlap_ratio = hparams.get('overlap_ratio', 0.5)
+        patching_type = hparams.get('patching_type', 'linear')
+        wavelnet_out_channels = hparams.get('wavelnet_out_channels', 32)
+        use_se = hparams.get('use_se', True)
 
         return FineTuningLightningModule(
             mae_encoder=encoder,
             patch_size=patch_size,
             overlap_ratio=overlap_ratio,
+            patching_type=patching_type,
+            wavelnet_out_channels=wavelnet_out_channels,
+            use_se=use_se,
             **kwargs
         )
 
@@ -251,17 +279,21 @@ class FineTuningLightningModule(pl.LightningModule):
 # --- 4. Main Execution ---
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Fine-tuning script for ECG MAE.")
+    parser.add_argument('--debug', action='store_true', help='Run in debug mode with a small subset of data (1000 records).')
+    args = parser.parse_args()
+
     pl.seed_everything(42)
     # --- Configuration ---
     config = {
-        "data_dir": '../training_data',
+        "data_dir": '../training_data/',
         "batch_size": 32,
         "epochs": 20,
         "lr": 1e-4,
         "weight_decay": 0.05,
         "num_unfrozen_layers": 2,
         "info_features": 2, # Age and Sex
-        "pretrained_checkpoint_path": '/sailhome/kelvinkn/scr2_juice/other_work/edwards/physionet2025/mae/models/mae_se_encoder_pretrained.ckpt',
+        "pretrained_checkpoint_path": '/sailhome/kelvinkn/scr2_juice/other_work/edwards/physionet2025/mae/ecg_mae/4kzv2t9n/checkpoints/mae_encoder_pretrained.ckpt',
         "oversample" : False  # Set to True if you want to oversample the positive class in training
     }
 
@@ -292,7 +324,13 @@ if __name__ == '__main__':
         exit()
 
     # 2. Prepare data for fine-tuning
-    records_meta = utils.prepare_stratification(helper_code.find_records_abs(config["data_dir"]))
+    all_records = helper_code.find_records_abs(config["data_dir"])
+    if args.debug:
+        print("--- DEBUG MODE: Using a random subset of 1000 records. ---")
+        np.random.shuffle(all_records)
+        all_records = all_records[:10000]
+    print(f"{len(all_records)} records found in the dataset.")
+    records_meta = utils.prepare_stratification(all_records)
     df = pd.DataFrame(records_meta)
     
     # Isolate data from PTB-XL (negative) and SaMi-Trop (positive)
@@ -339,7 +377,8 @@ if __name__ == '__main__':
             train_df = pd.concat([initial_train_df, oversampled_pos])
         else:
             train_df = initial_train_df
-    train_df = initial_train_df
+    else:
+        train_df = initial_train_df
 
     # Shuffle the final training set
     train_df = train_df.sample(frac=1, random_state=42).reset_index(drop=True)
