@@ -1,4 +1,4 @@
-exam_id,dataset,chagas,age,sex
+record_id,dataset,chagas,age,sex
 1000010,CODE15,0,40.0,Female
 1000078,CODE15,0,56.0,Male
 1000087,CODE15,0,72.0,Male
