@@ -1,0 +1,13 @@
+decoder_layers: 2
+embed_dim: 768
+encoder_layers: 8
+log_reconstructions: false
+lr: 0.00015
+masking_ratio: 0.75
+masking_type: random
+num_heads: 12
+num_patches: 79
+overlap_ratio: 0.5
+patch_dim: 1500
+patch_size: 125
+use_se: true
