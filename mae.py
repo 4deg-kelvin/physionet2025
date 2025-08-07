@@ -297,29 +297,44 @@ class MAELightningModule(pl.LightningModule):
     def forward(self, x):
         return self.model(x)
 
+    # Vectorizing loss computation instead of looping over batches (I think this is correct)-Max
     def _common_step(self, batch, batch_idx):
-        # batch[0] is the ECG signal tensor
         signals = batch[0]
-        
-        # forward
         reconstructed, original, masked_indices = self(signals)
         
-        # Efficient loss computation only on masked patches
-        B = signals.shape[0]
-        total_loss = 0
+        B, N, D = reconstructed.shape
         
-        for i in range(B):
-            masked_idx = masked_indices[i]
-            # Compute loss only for masked patches
-            patch_loss = self.criterion(
-                reconstructed[i, masked_idx], 
-                original[i, masked_idx]
-            )
-            total_loss += patch_loss.mean()
-        
-        loss = total_loss / B
+        mask = torch.zeros(B, N, dtype=torch.bool, device=signals.device)
+        mask.scatter_(1, masked_indices, True)
+
+        loss = self.criterion(reconstructed, original)  
+        loss = loss.mean(dim=-1)  
+        loss = loss[mask].mean()  
         
         return loss
+    
+        # # batch[0] is the ECG signal tensor
+        # signals = batch[0]
+        
+        # # forward
+        # reconstructed, original, masked_indices = self(signals)
+        
+        # # Efficient loss computation only on masked patches
+        # B = signals.shape[0]
+        # total_loss = 0
+        
+        # for i in range(B):
+        #     masked_idx = masked_indices[i]
+        #     # Compute loss only for masked patches
+        #     patch_loss = self.criterion(
+        #         reconstructed[i, masked_idx], 
+        #         original[i, masked_idx]
+        #     )
+        #     total_loss += patch_loss.mean()
+        
+        # loss = total_loss / B
+        
+        # return loss
     
 
 
