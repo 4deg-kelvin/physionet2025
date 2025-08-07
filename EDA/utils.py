@@ -14,9 +14,70 @@ import pandas as pd
 import numpy as np
 import os
 import logging
+from tqdm.contrib.concurrent import thread_map
+import helper_code
 
 # --- Canonical Helper Functions ---
+def prepare_stratification(records):
+    """
+    Prepare stratification for cross-validation based on the records.
+    
+    Args:
+        records (list): List of record identifiers.
+        
+    Returns:
+        list: A list of dictionary entries, each containing keys 'label', 'source', and 'record'.
+         Each entry corresponds to a record and its associated label and source.
+    """
+    def extract_labels_and_sources(record):
+        """
+        Extract labels and sources from a record.
+        
+        Args:
+            record (str): Record identifier.
+            
+        Returns:
+            dict: A dictionary with 'label', 'source', and 'record'.
+        """
+        # Use helper_code to extract label and source
+    # max_workers is passed directly to thread_map
+        final_dict = {}
+        try:
+            header = helper_code.load_header(record)
+            label = helper_code.get_label(header)
+            if label is None:
+                raise ValueError(f"Label for record {record} is None.")
+            source = helper_code.get_source(header)
+            if source is None:
+                raise ValueError(f"Source for record {record} is None.")
+            final_dict['label'] = label
+            final_dict['source'] = source
+            final_dict['record'] = record
+        except Exception as e:
+            print(f"Error processing extraction of labels and sources for record {record}: {e}")
+            final_dict[record] = None
+        return final_dict
+    # Extract labels and sources from the records, with threading for efficiency
+    workers = min(get_cpu_count(), 8)  # Limit to a reasonable number of workers
+    print(f"Starting parallel processing for {len(records)} records with max_workers={workers}...")
+    results = thread_map(extract_labels_and_sources, records, max_workers=workers, desc="Extracting labels and sources")
 
+    return results
+def get_cpu_count():
+    """
+    Attempts to get the number of allocated CPUs from SLURM_CPUS_ON_NODE.
+    Falls back to os.cpu_count() if not in a Slurm environment.
+    """
+    slurm_cpus = os.getenv("SLURM_CPUS_ON_NODE")
+    if slurm_cpus:
+        try:
+            return int(slurm_cpus)
+        except ValueError:
+            print(f"Warning: SLURM_CPUS_ON_NODE ({slurm_cpus}) is not an integer. Falling back to os.cpu_count().")
+            return os.cpu_count()
+    else:
+        # Not in a Slurm environment, fall back to os.cpu_count()
+        return os.cpu_count()
 # Debug mode: set via environment variable DEBUG=1
 DEBUG = os.environ.get('DEBUG', '0') == '1'
 if DEBUG:

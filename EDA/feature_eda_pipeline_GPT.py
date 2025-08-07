@@ -406,18 +406,18 @@ def extract_lead_specific_features(signals, frequency, record_path, selected_fea
 
 # --- Step 2: Unified Feature Extraction Function ---
 
-def extract_all_features(record_relative_path: str, train_data_folder: Path, selected_features=None) -> Union[pd.DataFrame, str]:
+def extract_all_features(record_path: str, selected_features=None) -> Union[pd.DataFrame, str]:
     """
     Extracts a comprehensive set of features from an ECG record,
     including both global and lead-specific features.
+    Accepts an absolute path to the record stem.
     """
-    record_path = str(train_data_folder / record_relative_path)
     if not os.path.exists(record_path + '.hea'):
         print(f"Missing .hea file: {record_path + '.hea'}")
-        return record_relative_path
+        return record_path
     if not os.path.exists(record_path + '.mat'):
         print(f"Missing .mat file: {record_path + '.mat'}")
-        return record_relative_path
+        return record_path
 
     header = load_header(record_path)
     signals, _ = load_signals(record_path)
@@ -455,23 +455,203 @@ def extract_all_features(record_relative_path: str, train_data_folder: Path, sel
             break
         except Exception as e:
             if failure_count < 3:
-                print(f"Global feature extraction failed for {record_relative_path} channel {channel}: {e}")
+                print(f"Global feature extraction failed for {record_path} channel {channel}: {e}")
             failure_count += 1
     try:
         lead_specific_features = extract_lead_specific_features(signals, frequency, record_path, selected_features)
         all_features.update(lead_specific_features)
     except Exception as e:
-        print(f"Lead-specific feature extraction failed for {record_relative_path}: {e}")
+        print(f"Lead-specific feature extraction failed for {record_path}: {e}")
     if len(successful_channels) > 0:
         if not aggregated_features.empty:
             agg_dict = aggregated_features.iloc[0].to_dict()
             all_features.update(agg_dict)
         combined_features = pd.DataFrame([all_features])
-        base_record_id = Path(record_relative_path).name
+        base_record_id = Path(record_path).name
         combined_features['exam_id'] = base_record_id
-        combined_features['relative_path'] = record_relative_path
+        combined_features['relative_path'] = record_path  # Store the full path
         return combined_features
-    return record_relative_path
+    return record_path
+
+def run_feature_extraction_for_records(
+    records_to_process: list,
+    feature_ranking_csv: str = None,
+    top_n: int = 20,
+    jobs: int = -1
+) -> tuple[pd.DataFrame, list]:
+    """
+    Runs the feature extraction pipeline for a given list of absolute record paths.
+
+    Args:
+        records_to_process (list): A list of absolute record paths (stems) to process.
+        feature_ranking_csv (str, optional): Path to the feature ranking CSV.
+        top_n (int, optional): Number of top features to select from the ranking CSV.
+        jobs (int, optional): Number of parallel jobs to run. Defaults to -1 (all available cores).
+
+    Returns:
+        tuple[pd.DataFrame, list]: A tuple containing:
+            - A DataFrame with the extracted features for successfully processed records.
+            - A list of record paths that failed processing.
+    """
+    selected_features = None
+    if feature_ranking_csv:
+        try:
+            ranking_df = pd.read_csv(feature_ranking_csv)
+            selected_features = set(ranking_df['feature'].tolist()[:top_n])
+            print(f"Will only extract these top {top_n} features: {selected_features}")
+        except FileNotFoundError:
+            print(f"Warning: Feature ranking CSV not found at {feature_ranking_csv}. Extracting all features.")
+    
+    print(f"Starting feature extraction for {len(records_to_process)} records...")
+    results = Parallel(n_jobs=jobs)(
+        delayed(extract_all_features)(record_path, selected_features) for record_path in tqdm(records_to_process)
+    )
+
+    successful_features = [res for res in results if isinstance(res, pd.DataFrame)]
+    error_records = [res for res in results if isinstance(res, str)]
+    
+    print(f"\nSuccessfully processed {len(successful_features)} records.")
+    print(f"Failed to process {len(error_records)} records on all channels.")
+
+    if not successful_features:
+        print("No features were extracted.")
+        return pd.DataFrame(), error_records
+
+    df_features = pd.concat(successful_features, ignore_index=True)
+    return df_features, error_records
+
+# --- New functions for absolute paths ---
+
+def extract_all_features_absolute(record_path: str, selected_features=None) -> Union[pd.DataFrame, str]:
+    """
+    Extracts a comprehensive set of features from an ECG record using an absolute path.
+    This is a separate function that does not modify the original extract_all_features.
+    
+    Args:
+        record_path (str): Absolute path to the record stem (without .hea or .mat extension).
+        selected_features (set, optional): A set of specific features to extract. Defaults to None.
+
+    Returns:
+        Union[pd.DataFrame, str]: A DataFrame with features for the record, or the path if it fails.
+    """
+    if not os.path.exists(record_path + '.hea'):
+        print(f"Missing .hea file: {record_path + '.hea'}")
+        return record_path
+    if not os.path.exists(record_path + '.mat'):
+        print(f"Missing .mat file: {record_path + '.mat'}")
+        return record_path
+
+    header = load_header(record_path)
+    signals, _ = load_signals(record_path)
+    frequency = get_sampling_frequency(header)
+
+    all_features = {}
+    successful_channels = []
+    failure_count = 0
+    aggregated_features = pd.DataFrame()
+
+    # Try to extract global features (use first successful channel)
+    for channel in range(min(12, signals.shape[1])):
+        try:
+            ecg_signals, info = nk.ecg_process(signals[:, channel], sampling_rate=frequency)
+            correct_waves = check_interval(info)
+            if correct_waves.shape[0] == 0:
+                continue
+            
+            morph_features = correct_waves.apply(lambda x: ecg_signal_features(x, frequency), axis=1, result_type='expand')
+            morph_features['ST_slope'] = correct_waves.apply(lambda x: st_slope(ecg_signals, int(x['ECG_S_Peaks']), int(x['ECG_T_Onsets'])), axis=1)
+            
+            hrv_features = nk.hrv_time(ecg_signals, sampling_rate=frequency) if 'ECG_R_Peaks' in info and len(info['ECG_R_Peaks']) > 1 else pd.DataFrame()
+            wavelet_features = extract_wavelet_features(record_path)
+            wavelet_df = pd.DataFrame([wavelet_features]) if wavelet_features else pd.DataFrame()
+
+            agg_morph_features = pd.DataFrame()
+            for col in morph_features.columns:
+                if morph_features[col].notna().any():
+                    stats = calculate_comprehensive_stats(morph_features[col].dropna().values)
+                    for stat_name, stat_value in stats.items():
+                        col_name = f'{col}_{stat_name}'
+                        if selected_features is None or col_name in selected_features:
+                            agg_morph_features[col_name] = [stat_value]
+            
+            hrv_features_filtered = hrv_features[[c for c in hrv_features.columns if selected_features is None or c in selected_features]] if not hrv_features.empty else pd.DataFrame()
+            wavelet_df_filtered = wavelet_df[[c for c in wavelet_df.columns if selected_features is None or c in selected_features]] if not wavelet_df.empty else pd.DataFrame()
+            
+            aggregated_features = pd.concat([agg_morph_features, hrv_features_filtered, wavelet_df_filtered], axis=1)
+            successful_channels.append(channel)
+            break
+        except Exception as e:
+            if failure_count < 3:
+                print(f"Global feature extraction failed for {record_path} channel {channel}: {e}")
+            failure_count += 1
+
+    try:
+        lead_specific_features = extract_lead_specific_features(signals, frequency, record_path, selected_features)
+        all_features.update(lead_specific_features)
+    except Exception as e:
+        print(f"Lead-specific feature extraction failed for {record_path}: {e}")
+
+    if len(successful_channels) > 0:
+        if not aggregated_features.empty:
+            all_features.update(aggregated_features.iloc[0].to_dict())
+        
+        combined_features = pd.DataFrame([all_features])
+        combined_features['exam_id'] = Path(record_path).name
+        combined_features['absolute_path'] = record_path
+        return combined_features
+        
+    return record_path
+
+
+def run_feature_extraction_for_records_absolute(
+    absolute_record_paths: list,
+    feature_ranking_csv: str = None,
+    top_n: int = 20,
+    jobs: int = -1
+) -> tuple[pd.DataFrame, list]:
+    """
+    Runs the feature extraction pipeline for a given list of absolute record paths.
+
+    Args:
+        absolute_record_paths (list): A list of absolute record paths (stems) to process.
+        feature_ranking_csv (str, optional): Path to the feature ranking CSV.
+        top_n (int, optional): Number of top features to select from the ranking CSV.
+        jobs (int, optional): Number of parallel jobs to run. Defaults to -1 (all available cores).
+
+    Returns:
+        tuple[pd.DataFrame, list]: A tuple containing:
+            - A DataFrame with the extracted features for successfully processed records.
+            - A list of record paths that failed processing.
+    """
+    selected_features = None
+    if feature_ranking_csv:
+        try:
+            ranking_df = pd.read_csv(feature_ranking_csv)
+            selected_features = set(ranking_df['feature'].tolist()[:top_n])
+            print(f"Will only extract these top {top_n} features: {selected_features}")
+        except FileNotFoundError:
+            print(f"Warning: Feature ranking CSV not found at {feature_ranking_csv}. Extracting all features.")
+    
+    print(f"Starting feature extraction for {len(absolute_record_paths)} records...")
+    
+    # Use tqdm to wrap the Parallel call for a better progress bar
+    results = Parallel(n_jobs=jobs)(
+        delayed(extract_all_features_absolute)(record_path, selected_features) 
+        for record_path in tqdm(absolute_record_paths, desc="Extracting Features")
+    )
+
+    successful_features = [res for res in results if isinstance(res, pd.DataFrame)]
+    error_records = [res for res in results if isinstance(res, str)]
+    
+    print(f"\nSuccessfully processed {len(successful_features)} records.")
+    print(f"Failed to process {len(error_records)} records on all channels.")
+
+    if not successful_features:
+        print("No features were extracted.")
+        return pd.DataFrame(), error_records
+
+    df_features = pd.concat(successful_features, ignore_index=True)
+    return df_features, error_records
 
 # --- Step 3: Main Execution Workflow ---
 
@@ -577,33 +757,25 @@ def main():
     print(f"Dataset contains {balanced_df.shape[0]} records: {positives.shape[0]} positives and {negatives.shape[0]} negatives.")
     print("Sample of records to process:", records_to_process[:5])
     print(f"Total records to process: {len(records_to_process)}")
-    # --- Feature Selection Setup ---
-    selected_features = None
-    if args.feature_ranking_csv:
-        ranking_df = pd.read_csv(args.feature_ranking_csv)
-        top_n = args.top_n if args.top_n is not None else 20
-        selected_features = set(ranking_df['feature'].tolist()[:top_n])
-        print(f"Will only extract these top {top_n} features: {selected_features}")
-    else:
-        selected_features = None
+    
+    # Convert relative paths from metadata to absolute paths for the function
+    absolute_records_to_process = [str(train_data_folder / rec) for rec in records_to_process]
 
     # --- Parallel Feature Extraction ---
-    print("Starting feature extraction...")
-    results = Parallel(n_jobs=args.jobs)(
-        delayed(extract_all_features)(record_id, train_data_folder, selected_features) for record_id in tqdm(records_to_process)
+    df_features, error_records = run_feature_extraction_for_records(
+        records_to_process=absolute_records_to_process,
+        feature_ranking_csv=args.feature_ranking_csv,
+        top_n=args.top_n,
+        jobs=args.jobs
     )
 
-    successful_features = [res for res in results if isinstance(res, pd.DataFrame)]
-    error_records = [res for res in results if isinstance(res, str)]
-    print(f"\nSuccessfully processed {len(successful_features)} records.")
-    print(f"Failed to process {len(error_records)} records on all channels.")
-
     # --- Finalize DataFrame ---
-    if not successful_features:
+    if df_features.empty:
         print("No features were extracted. Exiting.")
+        if error_records:
+            pd.DataFrame(error_records, columns=['exam_id']).to_csv(output_folder / 'final_error_records.csv', index=False)
         return
 
-    df_features = pd.concat(successful_features, ignore_index=True)
     # Ensure exam_id is string in both DataFrames for merge
     df_features['exam_id'] = df_features['exam_id'].astype(str).str.lower().str.replace(r'(_hr|_lr)$', '', regex=True)
     balanced_df['exam_id'] = balanced_df['exam_id'].astype(str).str.lower().str.replace(r'(_hr|_lr)$', '', regex=True)
@@ -723,6 +895,3 @@ def main():
         pd.DataFrame(error_records, columns=['exam_id']).to_csv(output_folder / 'final_error_records.csv', index=False)
 
     print(f"\nPipeline complete. Outputs are saved in '{output_folder}'.")
-
-if __name__ == '__main__':
-    main()
