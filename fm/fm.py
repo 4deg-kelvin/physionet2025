@@ -152,95 +152,72 @@ class FMChagasClassifier(pl.LightningModule):
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs)
         return [optimizer], [scheduler]
 
-# ...existing code...
-
-def train_model_with_ecgfm(data_folder, model_folder, ecg_fm_checkpoint_path, verbose):
-    pl.seed_everything(42)
-    
+def train_model(data_folder, model_folder, checkpoint_path, verbose):
+    pl.seed_everything(42)  # For reproducibility
     # Hyperparameters
-    SEQ_LENGTH = utils.UNIFIED_FREQUENCY * 10  # 10 seconds
+    SEQ_LENGTH = utils.UNIFIED_FREQUENCY * 5  
     BATCH_SIZE = 16  # Smaller batch size due to ECG-FM memory requirements
     EPOCHS = 50
     LR = 1e-4
     NO_LABELS = False  # We need labels for Chagas classification
-    
-    # Initialize Chagas classifier with ECG-FM backbone
+
+    # Instantiate Lightning module for MAE with SE flag
     model = FMChagasClassifier(
-        ecg_fm_checkpoint_path=ecg_fm_checkpoint_path,
+        ecg_fm_checkpoint_path=checkpoint_path,
         num_classes=1,  # Binary classification for Chagas
         lr=LR,
         freeze_encoder=True  # Start with frozen encoder, can fine-tune later
     )
-    
-    # Data preparation (same as before but with labels)
+        # Data directories
     DATA_DIR = data_folder
-    print("Preparing stratification and loading records...")
+
+    # --- Corrected Data Loading and Splitting ---
+    # 1. Load ALL records, for pretraining (since this is official code)
+    records_meta = custom_helper_code.find_records(DATA_DIR)
     
-    records_meta = utils.prepare_stratification(helper_code.find_records_abs(DATA_DIR))
-    records_meta = [rec['record'] for rec in records_meta if rec['source'] not in ['PTB-XL', 'SaMi-Trop']]
-    
-    # Filter for labeled records only (for Chagas classification)
-    labeled_records = [rec for rec in records_meta if helper_code.get_labels(rec)]
-    
-    print(f"Total labeled records found: {len(labeled_records)}")
-    if len(labeled_records) == 0:
-        raise ValueError("No labeled records found for classification.")
-    
-    np.random.shuffle(labeled_records)
-    
-    # Split data
-    total_size = len(labeled_records)
-    val_test_size = int(0.2 * total_size)
-    val_size = val_test_size // 2
-    
-    train_records = labeled_records[:-val_test_size]
-    val_records = labeled_records[-val_test_size:-val_size]
-    test_records = labeled_records[-val_size:]
-    
-    print(f"Training records: {len(train_records)}")
-    print(f"Validation records: {len(val_records)}")
-    print(f"Test records: {len(test_records)}")
-    
-    # Create data module
+    # 2. Combine all records into a single list
+    print("WARNING: EXCLUDING UNLABELED RECORDS, THIS IS FOR COMPETITION MODEL TRAINING")
+    # all_records = labeled_records + unlabeled_records
+    all_records = records_meta
+    print(f"Total records found: {len(all_records)}")
+    if len(all_records) == 0:
+        raise ValueError("No records found in the specified directories. Please check the paths.")
+
+    np.random.shuffle(all_records)
+    train_records = all_records  # use all data for training
+
+    # Wire up ECGDataModule
     data_module = ECGDataModule(
-        data_dir=DATA_DIR,
+        data_dir=DATA_DIR, # Base directory, not strictly needed since paths are absolute
         batch_size=BATCH_SIZE,
         seq_len=SEQ_LENGTH,
         windowing_method='entire_recording'
     )
-    
-    data_module.train_dataset = ECGDataset(
-        train_records, DATA_DIR, is_training=True, no_labels=NO_LABELS,
-        seq_len=SEQ_LENGTH, windowing_method='entire_recording'
-    )
-    data_module.val_dataset = ECGDataset(
-        val_records, DATA_DIR, is_training=False, no_labels=NO_LABELS,
-        seq_len=SEQ_LENGTH, windowing_method='entire_recording'
-    )
-    data_module.test_dataset = ECGDataset(
-        test_records, DATA_DIR, is_training=False, no_labels=NO_LABELS,
-        seq_len=SEQ_LENGTH, windowing_method='entire_recording'
-    )
-    
-    # Training setup
-    checkpoint_cb = ModelCheckpoint(
-        dirpath=model_folder,
-        filename='chagas_ecgfm_classifier',
-        save_last=True,
-        monitor='val_loss',
-        mode='min'
-    )
-    
+
+    data_module.train_dataset = ECGDataset(train_records, DATA_DIR, is_training=True, no_labels=NO_LABELS,
+                                           seq_len=SEQ_LENGTH, windowing_method='entire_recording')
+
     trainer = pl.Trainer(
         max_epochs=EPOCHS,
         accelerator='auto',
         devices=1,
-        callbacks=[checkpoint_cb],
-        gradient_clip_val=1.0,
+        callbacks=[],
+        gradient_clip_val=1.0,  # Added gradient clipping
+        num_sanity_val_steps=0, 
+        enable_checkpointing=False
     )
     
-    # Train the model
+    # fit and validate, starting a new training run without ckpt_path
     trainer.fit(model, datamodule=data_module)
     
-    # Test the best model
-    trainer.test(datamodule=data_module, ckpt_path=checkpoint_cb.best_model_path)
+    # Save the model weights only to the checkpoint dir
+    final_checkpoint_path = os.path.join(model_folder, "mae_encoder_pretrained.ckpt")
+    trainer.save_checkpoint(final_checkpoint_path, weights_only=True)
+    print(f"Model weights saved to {final_checkpoint_path}")
+
+train_model(
+    data_folder='../training_data',
+    model_folder='./ckpts',
+    checkpoint_path='./ckpts/mimic_iv_ecg_finetuned.pt',
+    verbose=True
+)
