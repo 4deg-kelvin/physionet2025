@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
+from sklearn.metrics import roc_auc_score, accuracy_score
+import matplotlib.pyplot as plt
 import sys
 from sklearn.model_selection import train_test_split
 import utils
@@ -13,28 +15,35 @@ from datetime import datetime
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-import pandas as pd
-import argparse
-
+import custom_helper_code
+from dataloader import ECGDataset, ECGDataModule, collate_fn_skip_none
 from mae import Patching, MAELightningModule
+import argparse
+import pandas as pd
+import custom_helper_code
 
-# --- 1. Re-define necessary components from pre-training ---
-# Note: These must match the definitions used during pre-training.
+
+# --- Standard Imports ---
+# Make sure these modules are on Python path after path hack
+import custom_helper_code
+from dataloader import ECGDataset, ECGDataModule, collate_fn_skip_none
+
 try:
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if project_root not in sys.path:
         sys.path.append(project_root)
-    # also add this module's directory so local utils/dataloader resolve
-    this_dir = os.path.dirname(os.path.abspath(__file__))
-    if this_dir not in sys.path:
-        sys.path.insert(0, this_dir)
 except NameError:
+    print("Warning: __file__ not defined. Assuming 'helper_code.py' and 'utils.py' are in the Python path.")
+    # In an interactive environment (like a notebook), ensure the parent directory
+    # containing your modules is in the path. You might add it manually:
+    # sys.path.append('path/to/your/project/root')
     pass
 
 # --- Standard Imports ---
-# Make sure these modules are on Python path after path hack
+# The script will now directly use these modules.
+# Make sure they are available in your environment.
 import helper_code
-from dataloader import ECGDataset, ECGDataModule, collate_fn_skip_none
+import utils
 class FineTuningModel(nn.Module):
     """
     A model for fine-tuning the pre-trained MAE encoder for classification.
@@ -73,8 +82,7 @@ class FineTuningLightningModule(pl.LightningModule):
     PyTorch Lightning module for fine-tuning the MAE for classification.
     """
     def __init__(self, mae_encoder, patch_size, overlap_ratio=0.0, 
-                 num_classes=1, lr=1e-4, weight_decay=0.05, num_unfrozen_layers=0, info_features=0,
-                 patching_type='linear', wavelnet_out_channels=32, use_se=True):
+                 num_classes=1, lr=1e-4, weight_decay=0.05, num_unfrozen_layers=0, info_features=0):
         """
         Args:
             mae_encoder (nn.Module): The pre-trained MAEEncoder.
@@ -86,9 +94,6 @@ class FineTuningLightningModule(pl.LightningModule):
             num_unfrozen_layers (int): Number of final encoder layers to unfreeze for training.
                                        If 0, the entire encoder is frozen.
             info_features (int): Number of wide demographic/clinical features.
-            patching_type (str): Type of patching to use ('linear' or 'wavelnet')
-            wavelnet_out_channels (int): Number of output channels for wavelnet patching
-            use_se (bool): Whether to use Squeeze-and-Excitation blocks
         """
         super().__init__()
         self.save_hyperparameters(ignore=['mae_encoder'])
@@ -96,12 +101,7 @@ class FineTuningLightningModule(pl.LightningModule):
         # Create patching module with same architecture as used in pre-training
         self.patching = Patching(
             patch_size=patch_size, 
-            overlap_ratio=overlap_ratio,
-            use_se=use_se,
-            patching_type=patching_type,
-            embed_dim=mae_encoder.pos_embedding.shape[-1],
-            wavelnet_out_channels=wavelnet_out_channels,
-            num_leads=12 # Added to match Patching definition in mae.py
+            overlap_ratio=overlap_ratio
         )
         
         self.model = FineTuningModel(
@@ -165,18 +165,19 @@ class FineTuningLightningModule(pl.LightningModule):
         # Extract necessary hparams for the fine-tuning module
         patch_size = hparams.get('patch_size')
         overlap_ratio = hparams.get('overlap_ratio', 0.5)
-        patching_type = hparams.get('patching_type', 'linear')
-        wavelnet_out_channels = hparams.get('wavelnet_out_channels', 32)
-        use_se = hparams.get('use_se', True)
+
+        # Filter kwargs to only include arguments accepted by FineTuningLightningModule's __init__
+        import inspect
+        init_signature = inspect.signature(FineTuningLightningModule.__init__)
+        allowed_args = {p.name for p in init_signature.parameters.values() if p.kind == p.POSITIONAL_OR_KEYWORD}
+        
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in allowed_args}
 
         return FineTuningLightningModule(
             mae_encoder=encoder,
             patch_size=patch_size,
             overlap_ratio=overlap_ratio,
-            patching_type=patching_type,
-            wavelnet_out_channels=wavelnet_out_channels,
-            use_se=use_se,
-            **kwargs
+            **filtered_kwargs
         )
 
     def forward(self, x, info=None):
@@ -254,6 +255,24 @@ class FineTuningLightningModule(pl.LightningModule):
 
         self.test_step_outputs.clear()
 
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        """
+        Step for `trainer.predict()`. Correctly unpacks the batch.
+        """
+        # Unpack batch, which may or may not have info features
+        if self.hparams.info_features > 0:
+            signals, info, labels = batch
+        else:
+            signals, labels = batch
+            info = None
+        
+        # Ensure signals is a tensor, not a list of tensors
+        if isinstance(signals, list):
+            signals = torch.stack(signals)
+            
+        logits = self(signals, info)
+        return logits, labels
+
     def configure_optimizers(self):
         # Create an optimizer that only updates the parameters with requires_grad=True.
         # This will include the classification head and any unfrozen encoder layers.
@@ -275,7 +294,6 @@ class FineTuningLightningModule(pl.LightningModule):
             },
         }
 
-
 # --- 4. Main Execution ---
 
 if __name__ == '__main__':
@@ -293,7 +311,7 @@ if __name__ == '__main__':
         "weight_decay": 0.05,
         "num_unfrozen_layers": 2,
         "info_features": 2, # Age and Sex
-        "pretrained_checkpoint_path": '/sailhome/kelvinkn/scr2_juice/other_work/edwards/physionet2025/mae/ecg_mae/4kzv2t9n/checkpoints/mae_encoder_pretrained.ckpt',
+        "pretrained_checkpoint_path": '/sailhome/kelvinkn/scr2_juice/other_work/edwards/physionet2025/mae/models/mae_se_encoder_pretrained.ckpt',
         "oversample" : False  # Set to True if you want to oversample the positive class in training
     }
 
