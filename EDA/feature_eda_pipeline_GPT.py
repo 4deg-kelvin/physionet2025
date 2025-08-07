@@ -458,6 +458,9 @@ def main():
     parser.add_argument('--output', type=str, required=True, help='Path to the output folder')
     parser.add_argument('--seed', type=int, default=42, help='Seed for reproducibility')
     parser.add_argument('--jobs', type=int, default=-1, help='Number of jobs for parallel processing')
+    parser.add_argument('--dataset-type', type=str, choices=['strong', 'weak'], required=True, help='Which dataset to process: strong (PTB-XL/SaMi-Trop) or weak (CODE15)')
+    parser.add_argument('--feature-ranking-csv', type=str, default=None, help='Optional: Path to feature_importance_ranking.csv to select only ranked features')
+    parser.add_argument('--top-n', type=int, default=None, help='If set, only process the first N records (for quick testing)')
     args = parser.parse_args()
 
     train_data_folder = Path(args.train)
@@ -468,30 +471,65 @@ def main():
 
     # --- Metadata Extraction from .hea files ---
     print("Extracting metadata from .hea files...")
-    record_stems = find_records(str(train_data_folder))
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import project_helper_code as helper_code
+    record_stems = helper_code.find_records(str(train_data_folder))
     metadata = []
     for record_id in tqdm(record_stems):
-        meta = extract_basic_features(str(train_data_folder / record_id))
-        if meta is None:
-            print(f"Skipping {record_id} at {train_data_folder}: missing or invalid metadata (age, sex, or chagas label)")
+        try:
+            header = helper_code.load_header(str(train_data_folder / record_id))
+            age, sex, chagas = helper_code.get_patient_info(header, allow_missing_label=True)
+            meta = {
+                'age': age,
+                'is_male': 1 if sex == 'Male' else 0,
+                'chagas': chagas,
+                'exam_id': Path(record_id).name,
+                'relative_path': record_id
+            }
+            metadata.append(meta)
+        except Exception as e:
+            print(f"Skipping {record_id}: {e}")
             continue
-        base_record_id = Path(record_id).name
-        meta['exam_id'] = base_record_id  # Store as string, not int
-        meta['relative_path'] = record_id  # <--- Add this line
-        metadata.append(meta)
     metadata_df = pd.DataFrame(metadata)
     print(f"Loaded metadata for {len(metadata_df)} records.")
     print("Unique values in 'chagas' column:", metadata_df['chagas'].unique())
+    STRONG_DATASETS = ["PTB-XL", "SaMi-Trop"]
+    WEAK_DATASETS = ["CODE15"]
+    def infer_dataset(path):
+        path_lower = str(path).lower()
+        if "ptb" in path_lower:
+            return "PTB-XL"
+        if "samitrop" in path_lower:
+            return "SaMi-Trop"
+        return "CODE15"
+    metadata_df['dataset'] = metadata_df['relative_path'].apply(infer_dataset)
 
-    # --- Data Balancing (now using metadata from .hea files) ---
-    # The metadata is now sourced directly from .hea files (age, sex, chagas label)
-    # Robustly identify negatives and positives regardless of type
+    # --- Dataset type selection and error checking ---
+    if args.dataset_type == 'strong':
+        # Only process strong records
+        filtered_metadata_df = metadata_df[metadata_df['dataset'].isin(STRONG_DATASETS)].copy()
+        # Error if any CODE15 records are present
+        if (filtered_metadata_df['dataset'] == 'CODE15').any():
+            raise RuntimeError("ERROR: CODE15 (weak) records found when running strong feature extraction. Only PTB-XL and SaMi-Trop should be present.")
+        print(f"Filtered to {len(filtered_metadata_df)} strong records (PTB-XL and SaMi-Trop).")
+    elif args.dataset_type == 'weak':
+        # Only process weak records
+        filtered_metadata_df = metadata_df[metadata_df['dataset'].isin(WEAK_DATASETS)].copy()
+        # Error if any PTB-XL or SaMi-Trop records are present
+        if (filtered_metadata_df['dataset'].isin(STRONG_DATASETS)).any():
+            raise RuntimeError("ERROR: PTB-XL or SaMi-Trop (strong) records found when running weak feature extraction. Only CODE15 should be present.")
+        print(f"Filtered to {len(filtered_metadata_df)} weak records (CODE15).")
+    else:
+        raise RuntimeError("Unknown dataset type. Use --dataset-type strong or weak.")
+
+    # --- Data Balancing (using only filtered records) ---
     def is_negative(val):
         return val in [False, 0, 'False', '0', 'false', 'FALSE']
     def is_positive(val):
         return val in [True, 1, 'True', '1', 'true', 'TRUE']
-    negatives = metadata_df[metadata_df['chagas'].apply(is_negative)]
-    positives = metadata_df[metadata_df['chagas'].apply(is_positive)]
+    negatives = filtered_metadata_df[filtered_metadata_df['chagas'].apply(is_negative)]
+    positives = filtered_metadata_df[filtered_metadata_df['chagas'].apply(is_positive)]
     n_positive = positives.shape[0]
 
     if negatives.shape[0] == 0 and positives.shape[0] == 0:
@@ -512,9 +550,12 @@ def main():
             positives
         ])
     records_to_process = balanced_df['relative_path'].values.tolist()  # Use relative_path for processing
+    if args.top_n is not None:
+        print(f"Limiting to top {args.top_n} records for quick testing.")
+        records_to_process = records_to_process[:args.top_n]
     print(f"Dataset contains {balanced_df.shape[0]} records: {positives.shape[0]} positives and {negatives.shape[0]} negatives.")
     print("Sample of records to process:", records_to_process[:5])
-    
+    print(f"Total records to process: {len(records_to_process)}")
     # --- Parallel Feature Extraction ---
     print("Starting feature extraction...")
     results = Parallel(n_jobs=args.jobs)(
@@ -533,11 +574,40 @@ def main():
 
     df_features = pd.concat(successful_features, ignore_index=True)
     # Ensure exam_id is string in both DataFrames for merge
-    df_features['exam_id'] = df_features['exam_id'].astype(str)
-    balanced_df['exam_id'] = balanced_df['exam_id'].astype(str)
+    df_features['exam_id'] = df_features['exam_id'].astype(str).str.lower().str.replace(r'(_hr|_lr)$', '', regex=True)
+    balanced_df['exam_id'] = balanced_df['exam_id'].astype(str).str.lower().str.replace(r'(_hr|_lr)$', '', regex=True)
+    print("First 20 standardized exam_id values in df_features:", df_features['exam_id'].head(20).tolist())
+    print("First 20 standardized exam_id values in balanced_df:", balanced_df['exam_id'].head(20).tolist())
+    print("Number of unique standardized exam_id in df_features:", df_features['exam_id'].nunique())
+    print("Number of unique standardized exam_id in balanced_df:", balanced_df['exam_id'].nunique())
+    # Show intersection and difference for debugging
+    set_features = set(df_features['exam_id'])
+    set_balanced = set(balanced_df['exam_id'])
+    print("Number of exam_id in intersection:", len(set_features & set_balanced))
+    print("Number of exam_id only in df_features:", len(set_features - set_balanced))
+    print("Number of exam_id only in balanced_df:", len(set_balanced - set_features))
+    print("Example exam_id only in df_features:", list(set_features - set_balanced)[:10])
+    print("Example exam_id only in balanced_df:", list(set_balanced - set_features)[:10])
     df_final = df_features.merge(balanced_df, on='exam_id', how='inner')
+    print("Number of records after merge:", len(df_final))
     df_final.drop(columns=['HRV_SDANN1', 'HRV_SDNNI1', 'HRV_SDANN2', 'HRV_SDNNI2', 'HRV_SDANN5', 'HRV_SDNNI5'], inplace=True, errors='ignore')
     df_final.fillna(df_final.median(numeric_only=True), inplace=True)
+
+    # --- Feature Selection by Ranking CSV ---
+    if args.feature_ranking_csv:
+        print(f"Filtering features using ranking CSV: {args.feature_ranking_csv}")
+        ranking_df = pd.read_csv(args.feature_ranking_csv)
+        top_n = 20
+        ranked_features = ranking_df['feature'].tolist()[:top_n]
+        # Always keep metadata columns
+        meta_cols = ['exam_id', 'relative_path', 'chagas', 'is_male', 'age', 'dataset']
+        # Only keep columns in ranked_features + meta_cols (if present)
+        keep_cols = [col for col in meta_cols if col in df_final.columns] + [f for f in ranked_features if f in df_final.columns]
+        missing_cols = [f for f in ranked_features if f not in df_final.columns]
+        if missing_cols:
+            print(f"Warning: The following top {top_n} ranked features are missing from the output and will be skipped: {missing_cols}")
+        df_final = df_final[keep_cols]
+        print(f"Final output will contain {len(keep_cols)} columns: {keep_cols}")
 
     # --- NaN Tracking ---
     nan_counts = df_features.isna().sum(axis=1)
