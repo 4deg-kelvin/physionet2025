@@ -18,6 +18,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 import custom_helper_code
 from dataloader import ECGDataset, ECGDataModule, collate_fn_skip_none
 from mae import Patching, MAELightningModule
+import pandas as pd
 
 
 # --- Standard Imports ---
@@ -259,11 +260,38 @@ def train_finetune_model(data_folder, model_folder, verbose):
         print("Please run the pre-training script first and update the path.")
         exit()
 
-    # 2. Prepare training records (no validation/test)
-    records_meta = custom_helper_code.find_records_abs(config["data_dir"])
-    if not records_meta:
-        raise ValueError(f"No records found in {config['data_dir']}.")
-    train_records = records_meta
+    # 2. Prepare data for fine-tuning
+    all_records = custom_helper_code.find_records_abs(config["data_dir"])
+    print(f"{len(all_records)} records found in the dataset.")
+    records_meta = utils.prepare_stratification(all_records)
+    df = pd.DataFrame(records_meta)
+    
+    # # --- Exclude records from code15_label_issues.csv ---
+    # try:
+    #     issues_df = pd.read_csv('code15_label_issues.csv')
+    #     # Extract stem (filename without extension) from the full path for exclusion list
+    #     stems_to_exclude = set(issues_df['record_path'].apply(lambda x: os.path.splitext(os.path.basename(x))[0]))
+        
+    #     # Create a new 'base_record' column with the stem for matching
+    #     df['base_record'] = df['record'].apply(lambda x: os.path.splitext(os.path.basename(x))[0])
+        
+    #     initial_count = len(df)
+    #     # Filter out the records using the new column
+    #     df = df[~df['base_record'].isin(stems_to_exclude)]
+    #     final_count = len(df)
+        
+    #     print(f"Excluded {initial_count - final_count} records based on 'code15_label_issues.csv'.")
+    #     # Drop the temporary 'base_record' column
+    #     df = df.drop(columns=['base_record'])
+        
+    # except FileNotFoundError:
+    #     print("Warning: 'code15_label_issues.csv' not found. No records will be excluded.")
+    # # 2. Prepare training records (no validation/test)
+    # train_records = df['record'].tolist()
+
+    # Get records from df that have 'source' as 'PTB-XL' or 'SaMi-Trop"
+    train_records = df[df['source'].isin(['PTB-XL', 'SaMi-Trop'])]['record'].tolist()
+    print(f"Original training records count: {len(all_records)}, subset for fine-tuning: {len(train_records)}")
 
     # 3. Create DataModule with training only
     data_module = ECGDataModule(

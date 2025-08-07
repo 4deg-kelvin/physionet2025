@@ -3,8 +3,10 @@ from wfdb import processing
 import neurokit2 as nk
 import pandas as pd
 from tqdm import tqdm 
+from tqdm.contrib.concurrent import thread_map
 import custom_helper_code
 from scipy.signal import resample
+import os
 
 
 UNIFIED_FREQUENCY = 500
@@ -26,6 +28,66 @@ STD_AGE_TRAIN = 20.76942829983386
 
 from biosppy.signals import ecg as biosppy_ecg
 from biosppy.signals import hrv as biosppy_hrv
+def prepare_stratification(records):
+    """
+    Prepare stratification for cross-validation based on the records.
+    
+    Args:
+        records (list): List of record identifiers.
+        
+    Returns:
+        list: A list of dictionary entries, each containing keys 'label', 'source', and 'record'.
+         Each entry corresponds to a record and its associated label and source.
+    """
+    def extract_labels_and_sources(record):
+        """
+        Extract labels and sources from a record.
+        
+        Args:
+            record (str): Record identifier.
+            
+        Returns:
+            dict: A dictionary with 'label', 'source', and 'record'.
+        """
+        # Use helper_code to extract label and source
+    # max_workers is passed directly to thread_map
+        final_dict = {}
+        try:
+            header = custom_helper_code.load_header(record)
+            label = custom_helper_code.get_label(header)
+            if label is None:
+                raise ValueError(f"Label for record {record} is None.")
+            source = custom_helper_code.get_source(header)
+            if source is None:
+                raise ValueError(f"Source for record {record} is None.")
+            final_dict['label'] = label
+            final_dict['source'] = source
+            final_dict['record'] = record
+        except Exception as e:
+            print(f"Error processing extraction of labels and sources for record {record}: {e}")
+            final_dict[record] = None
+        return final_dict
+    # Extract labels and sources from the records, with threading for efficiency
+    workers = min(get_cpu_count(), 8)  # Limit to a reasonable number of workers
+    print(f"Starting parallel processing for {len(records)} records with max_workers={workers}...")
+    results = thread_map(extract_labels_and_sources, records, max_workers=workers, desc="Extracting labels and sources")
+
+    return results
+def get_cpu_count():
+    """
+    Attempts to get the number of allocated CPUs from SLURM_CPUS_ON_NODE.
+    Falls back to os.cpu_count() if not in a Slurm environment.
+    """
+    slurm_cpus = os.getenv("SLURM_CPUS_ON_NODE")
+    if slurm_cpus:
+        try:
+            return int(slurm_cpus)
+        except ValueError:
+            print(f"Warning: SLURM_CPUS_ON_NODE ({slurm_cpus}) is not an integer. Falling back to os.cpu_count().")
+            return os.cpu_count()
+    else:
+        # Not in a Slurm environment, fall back to os.cpu_count()
+        return os.cpu_count()
 
 def preprocess_signal(record_path, windowing_method='entire_recording', is_training=False):
     """ Preprocess the ECG signal from the record file.
