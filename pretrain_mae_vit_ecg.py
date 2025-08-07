@@ -337,14 +337,14 @@ def train(data_folder, model_folder, verbose):
     DATA_DIR = data_folder
     BATCH_SIZE = 32
     SEQ_LEN = 500 * 10
-    EPOCHS = 20
+    EPOCHS = 18
     CHECKPOINT_PATH = "mae_vit_encoder_partially_pretrained.ckpt"  # Path to a Lightning checkpoint to load model weights from
     
     # --- Data Loading and Splitting ---
     # 1. Load ALL records for pretraining
     records_meta = custom_helper_code.find_records_abs(DATA_DIR)
 
-    
+
     print("Found {} records in main directory".format(len(records_meta)))
     # 2. Combine all records into a single list
     print("WARNING: EXCLUDING UNLABELED RECORDS, THIS IS FOR COMPETITION MODEL TRAINING")

@@ -17,6 +17,7 @@ from pytorch_lightning.loggers import WandbLogger
 from torchmetrics import AUROC, Accuracy
 from typing import Optional, Union, List
 from mae_vit_ecg import MAEViTECGFinetune, MAEViTECGClassifier
+import pandas as pd
 
 try:
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -58,7 +59,7 @@ def main():
     
     # Load data
     print("Loading finetuning data from PTB-XL and SaMi-Trop...")
-    records_meta = utils.prepare_stratification(helper_code.find_records_abs(DATA_DIR))
+    records_meta = utils.prepare_stratification(custom_helper_code.find_records_abs(DATA_DIR))
     
     # Filter records and labels to only include PTB-XL and SaMi-Trop data
     filtered_records_meta = [record for record in records_meta if record['source'] in ['PTB-XL', 'SaMi-Trop']]
@@ -251,7 +252,17 @@ def train(data_folder, model_folder, verbose):
     # Load data
     print("Loading finetuning data from PTB-XL and SaMi-Trop...")
     records_meta = custom_helper_code.find_records_abs(DATA_DIR)
+
+    # Filter records and labels to only include PTB-XL and SaMi-Trop data
+    records_meta = utils.prepare_stratification(records_meta)
+    df = pd.DataFrame(records_meta)
     
+    # Filter records to only include PTB-XL and SaMi-Trop data
+    filtered_records_meta = df[df['source'].isin(['PTB-XL', 'SaMi-Trop'])]
+    records = filtered_records_meta['record'].tolist()
+    print(f"Found {len(records)} labeled records from PTB-XL and SaMi-Trop")
+
+    assert len(records) < 200000, f"found {len(records)} records, Too many records for finetuning, please reduce the dataset size."
     # Create data module
     data_module = ECGDataModule(
         data_dir=DATA_DIR,
@@ -262,7 +273,7 @@ def train(data_folder, model_folder, verbose):
     
     # Set datasets with paths only (ECGDataset expects paths, not dicts)
     data_module.train_dataset = ECGDataset(
-        records_meta, DATA_DIR, is_training=True, seq_len=SEQ_LEN,
+        records, DATA_DIR, is_training=True, seq_len=SEQ_LEN,
         windowing_method='entire_recording', include_wide_feats=True,
         no_labels=False  # We need labels for finetuning
     )
