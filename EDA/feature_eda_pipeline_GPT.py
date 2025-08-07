@@ -248,28 +248,68 @@ def calculate_comprehensive_stats(data):
     """Calculate comprehensive statistical features for ECG data."""
     if len(data) == 0 or np.all(np.isnan(data)):
         return {stat: np.nan for stat in AGGREGATION_METHODS}
-    
     data_clean = data[~np.isnan(data)]
     if len(data_clean) == 0:
         return {stat: np.nan for stat in AGGREGATION_METHODS}
-    
+    # If all values are identical, avoid precision loss warnings
+    if np.all(data_clean == data_clean[0]):
+        val = data_clean[0]
+        stats_dict = {stat: val if stat in ['mean', 'median', 'min', 'max', 'q25', 'q75'] else 0.0 for stat in AGGREGATION_METHODS}
+        stats_dict['range'] = 0.0
+        stats_dict['iqr'] = 0.0
+        return stats_dict
     stats_dict = {}
-    stats_dict['mean'] = np.mean(data_clean)
-    stats_dict['median'] = np.median(data_clean)
-    stats_dict['std'] = np.std(data_clean)
-    stats_dict['var'] = np.var(data_clean)
-    stats_dict['min'] = np.min(data_clean)
-    stats_dict['max'] = np.max(data_clean)
-    stats_dict['skew'] = stats.skew(data_clean)
-    stats_dict['kurt'] = stats.kurtosis(data_clean)
-    stats_dict['q25'] = np.percentile(data_clean, 25)
-    stats_dict['q75'] = np.percentile(data_clean, 75)
-    stats_dict['range'] = stats_dict['max'] - stats_dict['min']
-    stats_dict['iqr'] = stats_dict['q75'] - stats_dict['q25']
-    
+    try:
+        stats_dict['mean'] = np.mean(data_clean)
+    except Exception:
+        stats_dict['mean'] = np.nan
+    try:
+        stats_dict['median'] = np.median(data_clean)
+    except Exception:
+        stats_dict['median'] = np.nan
+    try:
+        stats_dict['std'] = np.std(data_clean)
+    except Exception:
+        stats_dict['std'] = np.nan
+    try:
+        stats_dict['var'] = np.var(data_clean)
+    except Exception:
+        stats_dict['var'] = np.nan
+    try:
+        stats_dict['min'] = np.min(data_clean)
+    except Exception:
+        stats_dict['min'] = np.nan
+    try:
+        stats_dict['max'] = np.max(data_clean)
+    except Exception:
+        stats_dict['max'] = np.nan
+    try:
+        stats_dict['skew'] = stats.skew(data_clean) if len(data_clean) > 2 else np.nan
+    except Exception:
+        stats_dict['skew'] = np.nan
+    try:
+        stats_dict['kurt'] = stats.kurtosis(data_clean) if len(data_clean) > 3 else np.nan
+    except Exception:
+        stats_dict['kurt'] = np.nan
+    try:
+        stats_dict['q25'] = np.percentile(data_clean, 25)
+    except Exception:
+        stats_dict['q25'] = np.nan
+    try:
+        stats_dict['q75'] = np.percentile(data_clean, 75)
+    except Exception:
+        stats_dict['q75'] = np.nan
+    try:
+        stats_dict['range'] = stats_dict['max'] - stats_dict['min'] if not (np.isnan(stats_dict['max']) or np.isnan(stats_dict['min'])) else np.nan
+    except Exception:
+        stats_dict['range'] = np.nan
+    try:
+        stats_dict['iqr'] = stats_dict['q75'] - stats_dict['q25'] if not (np.isnan(stats_dict['q75']) or np.isnan(stats_dict['q25'])) else np.nan
+    except Exception:
+        stats_dict['iqr'] = np.nan
     return stats_dict
 
-def extract_lead_specific_features(signals, frequency, record_path): #TODO: Kelvin see this
+def extract_lead_specific_features(signals, frequency, record_path, selected_features=None):
     """Extract features from specific ECG leads based on clinical significance."""
     lead_features = {}
     # Store per-lead stats for lead group features
@@ -281,7 +321,6 @@ def extract_lead_specific_features(signals, frequency, record_path): #TODO: Kelv
         'high_lateral': {'QRS_duration': [], 'QRS_amplitude': []},
         'rhythm_analysis': {'P_wave_duration': [], 'P_wave_amplitude': [], 'RR_interval': []},
     }
-    # Map feature names to NeuroKit column names
     feature_map = {
         'P_wave_duration': 'ECG_P_Duration',
         'P_wave_amplitude': 'ECG_P_Amplitude',
@@ -291,9 +330,8 @@ def extract_lead_specific_features(signals, frequency, record_path): #TODO: Kelv
         'T_wave_amplitude': 'ECG_T_Amplitude',
         'QT_interval': 'ECG_QT_Interval',
         'QTc_interval': 'ECG_QTc_Interval',
-        'RR_interval': None,  # Will be handled separately
+        'RR_interval': None,
     }
-    # Extract features for each individual lead group #TODO Kelvin see this
     for group_name, lead_names in LEAD_GROUPS.items():
         for lead_name in lead_names:
             if lead_name in LEAD_FEATURE_MAPPING:
@@ -301,14 +339,13 @@ def extract_lead_specific_features(signals, frequency, record_path): #TODO: Kelv
                 if lead_idx < signals.shape[1]:
                     try:
                         lead_signal = signals[:, lead_idx]
-                        # Basic signal statistics
                         signal_stats = calculate_comprehensive_stats(lead_signal)
                         for stat_name, stat_value in signal_stats.items():
-                            lead_features[f'{lead_name}_{stat_name}'] = stat_value
-                        # Neurokit2 processing for specific features
+                            col_name = f'{lead_name}_{stat_name}'
+                            if (selected_features is None) or (col_name in selected_features):
+                                lead_features[col_name] = stat_value
                         try:
                             ecg_signals, info = nk.ecg_process(lead_signal, sampling_rate=frequency)
-                            # Extract key morphological features based on lead specialization
                             if lead_name in ['V1', 'V2']:
                                 features_of_interest = ['ECG_P_Duration', 'ECG_P_Amplitude', 'ECG_QRS_Duration']
                             elif lead_name in ['V3', 'V4']:
@@ -327,23 +364,23 @@ def extract_lead_specific_features(signals, frequency, record_path): #TODO: Kelv
                                     if not feature_values.empty:
                                         feature_stats = calculate_comprehensive_stats(feature_values.values)
                                         for stat_name, stat_value in feature_stats.items():
-                                            lead_features[f'{lead_name}_{feature}_{stat_name}'] = stat_value
-                                        # For group aggregation, map back to group_feature_values
+                                            col_name = f'{lead_name}_{feature}_{stat_name}'
+                                            if (selected_features is None) or (col_name in selected_features):
+                                                lead_features[col_name] = stat_value
                                         for group_feat, nk_feat in feature_map.items():
                                             if nk_feat == feature and group_feat in group_feature_values[group_name]:
-                                                # Use mean for this lead
                                                 group_feature_values[group_name][group_feat].append(feature_values.mean())
-                            # R-peaks for HRV (only for rhythm lead)
                             if lead_name == 'II' and 'ECG_R_Peaks' in info:
                                 peaks = info['ECG_R_Peaks']
                                 if len(peaks) > 3:
-                                    rr_intervals = np.diff(peaks) / frequency * 1000  # ms
+                                    rr_intervals = np.diff(peaks) / frequency * 1000
                                     if len(rr_intervals) > 0:
-                                        # For group aggregation
                                         group_feature_values['rhythm_analysis']['RR_interval'].append(np.mean(rr_intervals))
                                         rr_stats = calculate_comprehensive_stats(rr_intervals)
                                         for stat_name, stat_value in rr_stats.items():
-                                            lead_features[f'{lead_name}_RR_{stat_name}'] = stat_value
+                                            col_name = f'{lead_name}_RR_{stat_name}'
+                                            if (selected_features is None) or (col_name in selected_features):
+                                                lead_features[col_name] = stat_value
                         except Exception as e:
                             if lead_idx < 5:
                                 print(f"Warning: NeuroKit processing failed for {lead_name}: {e}")
@@ -351,20 +388,25 @@ def extract_lead_specific_features(signals, frequency, record_path): #TODO: Kelv
                     except Exception as e:
                         print(f"Error processing lead {lead_name}: {e}")
                         continue
-    # Now compute lead group features (mean and median) for each group-feature
     for group_name, feats in group_feature_values.items():
         for feat, values in feats.items():
+            col_mean = f'{group_name}_{feat}_mean'
+            col_median = f'{group_name}_{feat}_median'
             if len(values) > 0:
-                lead_features[f'{group_name}_{feat}_mean'] = np.mean(values)
-                lead_features[f'{group_name}_{feat}_median'] = np.median(values)
+                if (selected_features is None) or (col_mean in selected_features):
+                    lead_features[col_mean] = np.mean(values)
+                if (selected_features is None) or (col_median in selected_features):
+                    lead_features[col_median] = np.median(values)
             else:
-                lead_features[f'{group_name}_{feat}_mean'] = np.nan
-                lead_features[f'{group_name}_{feat}_median'] = np.nan
+                if (selected_features is None) or (col_mean in selected_features):
+                    lead_features[col_mean] = np.nan
+                if (selected_features is None) or (col_median in selected_features):
+                    lead_features[col_median] = np.nan
     return lead_features
 
 # --- Step 2: Unified Feature Extraction Function ---
 
-def extract_all_features(record_relative_path: str, train_data_folder: Path) -> Union[pd.DataFrame, str]:
+def extract_all_features(record_relative_path: str, train_data_folder: Path, selected_features=None) -> Union[pd.DataFrame, str]:
     """
     Extracts a comprehensive set of features from an ECG record,
     including both global and lead-specific features.
@@ -384,70 +426,52 @@ def extract_all_features(record_relative_path: str, train_data_folder: Path) -> 
     all_features = {}
     successful_channels = []
     failure_count = 0
-    
     # Try to extract global features (use first successful channel)
     for channel in range(min(12, signals.shape[1])):
         try:
             ecg_signals, info = nk.ecg_process(signals[:, channel], sampling_rate=frequency)
             correct_waves = check_interval(info)
-
             if correct_waves.shape[0] == 0:
                 continue
-
-            # Morphological and ST slope features (global)
             morph_features = correct_waves.apply(lambda x: ecg_signal_features(x, frequency), axis=1, result_type='expand')
             morph_features['ST_slope'] = correct_waves.apply(lambda x: st_slope(ecg_signals, int(x['ECG_S_Peaks']), int(x['ECG_T_Onsets'])), axis=1)
-            
-            # HRV features (global)
             try:
                 hrv_features = nk.hrv_time(ecg_signals, sampling_rate=frequency)
             except Exception:
                 hrv_features = pd.DataFrame()
-            
-            # Wavelet features (global, from first lead)
             wavelet_features = extract_wavelet_features(record_path)
             wavelet_df = pd.DataFrame([wavelet_features]) if wavelet_features else pd.DataFrame()
-
-            # Enhanced global statistics
             agg_morph_features = pd.DataFrame()
             for col in morph_features.columns:
                 if morph_features[col].notna().any():
-                    col_stats = calculate_comprehensive_stats(morph_features[col].dropna().values)
-                    for stat_name, stat_value in col_stats.items():
-                        agg_morph_features[f'{col}_{stat_name}'] = [stat_value]
-
-            # Combine global features
-            aggregated_features = pd.concat([agg_morph_features, hrv_features, wavelet_df], axis=1)
+                    for stat_name, stat_value in calculate_comprehensive_stats(morph_features[col].dropna().values).items():
+                        col_name = f'{col}_{stat_name}'
+                        if (selected_features is None) or (col_name in selected_features):
+                            agg_morph_features[col_name] = [stat_value]
+            hrv_features_filtered = hrv_features[[c for c in hrv_features.columns if (selected_features is None) or (c in selected_features)]] if not hrv_features.empty else pd.DataFrame()
+            wavelet_df_filtered = wavelet_df[[c for c in wavelet_df.columns if (selected_features is None) or (c in selected_features)]] if not wavelet_df.empty else pd.DataFrame()
+            aggregated_features = pd.concat([agg_morph_features, hrv_features_filtered, wavelet_df_filtered], axis=1)
             successful_channels.append(channel)
-            break  # Use first successful channel for global features
-
+            break
         except Exception as e:
             if failure_count < 3:
                 print(f"Global feature extraction failed for {record_relative_path} channel {channel}: {e}")
             failure_count += 1
-    
-    # Extract lead-specific features
     try:
-        lead_specific_features = extract_lead_specific_features(signals, frequency, record_path)
+        lead_specific_features = extract_lead_specific_features(signals, frequency, record_path, selected_features)
         all_features.update(lead_specific_features)
     except Exception as e:
         print(f"Lead-specific feature extraction failed for {record_relative_path}: {e}")
-
-    # Combine all features
     if len(successful_channels) > 0:
-        # Convert global features to dict and merge
         if not aggregated_features.empty:
             agg_dict = aggregated_features.iloc[0].to_dict()
             all_features.update(agg_dict)
-        
-        # Create final DataFrame
         combined_features = pd.DataFrame([all_features])
         base_record_id = Path(record_relative_path).name
-        combined_features['exam_id'] = base_record_id  # Store as string, not int
+        combined_features['exam_id'] = base_record_id
         combined_features['relative_path'] = record_relative_path
         return combined_features
-    
-    return record_relative_path  # Return relative_path if all channels fail
+    return record_relative_path
 
 # --- Step 3: Main Execution Workflow ---
 
@@ -458,6 +482,9 @@ def main():
     parser.add_argument('--output', type=str, required=True, help='Path to the output folder')
     parser.add_argument('--seed', type=int, default=42, help='Seed for reproducibility')
     parser.add_argument('--jobs', type=int, default=-1, help='Number of jobs for parallel processing')
+    parser.add_argument('--dataset-type', type=str, choices=['strong', 'weak'], required=True, help='Which dataset to process: strong (PTB-XL/SaMi-Trop) or weak (CODE15)')
+    parser.add_argument('--feature-ranking-csv', type=str, default=None, help='Optional: Path to feature_importance_ranking.csv to select only ranked features')
+    parser.add_argument('--top-n', type=int, default=20, help='Number of top features to keep from ranking CSV (default: 20)')
     args = parser.parse_args()
 
     train_data_folder = Path(args.train)
@@ -468,30 +495,65 @@ def main():
 
     # --- Metadata Extraction from .hea files ---
     print("Extracting metadata from .hea files...")
-    record_stems = find_records(str(train_data_folder))
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import project_helper_code as helper_code
+    record_stems = helper_code.find_records(str(train_data_folder))
     metadata = []
     for record_id in tqdm(record_stems):
-        meta = extract_basic_features(str(train_data_folder / record_id))
-        if meta is None:
-            print(f"Skipping {record_id} at {train_data_folder}: missing or invalid metadata (age, sex, or chagas label)")
+        try:
+            header = helper_code.load_header(str(train_data_folder / record_id))
+            age, sex, chagas = helper_code.get_patient_info(header, allow_missing_label=True)
+            meta = {
+                'age': age,
+                'is_male': 1 if sex == 'Male' else 0,
+                'chagas': chagas,
+                'exam_id': Path(record_id).name,
+                'relative_path': record_id
+            }
+            metadata.append(meta)
+        except Exception as e:
+            print(f"Skipping {record_id}: {e}")
             continue
-        base_record_id = Path(record_id).name
-        meta['exam_id'] = base_record_id  # Store as string, not int
-        meta['relative_path'] = record_id  # <--- Add this line
-        metadata.append(meta)
     metadata_df = pd.DataFrame(metadata)
     print(f"Loaded metadata for {len(metadata_df)} records.")
     print("Unique values in 'chagas' column:", metadata_df['chagas'].unique())
+    STRONG_DATASETS = ["PTB-XL", "SaMi-Trop"]
+    WEAK_DATASETS = ["CODE15"]
+    def infer_dataset(path):
+        path_lower = str(path).lower()
+        if "ptb" in path_lower:
+            return "PTB-XL"
+        if "samitrop" in path_lower:
+            return "SaMi-Trop"
+        return "CODE15"
+    metadata_df['dataset'] = metadata_df['relative_path'].apply(infer_dataset)
 
-    # --- Data Balancing (now using metadata from .hea files) ---
-    # The metadata is now sourced directly from .hea files (age, sex, chagas label)
-    # Robustly identify negatives and positives regardless of type
+    # --- Dataset type selection and error checking ---
+    if args.dataset_type == 'strong':
+        # Only process strong records
+        filtered_metadata_df = metadata_df[metadata_df['dataset'].isin(STRONG_DATASETS)].copy()
+        # Error if any CODE15 records are present
+        if (filtered_metadata_df['dataset'] == 'CODE15').any():
+            raise RuntimeError("ERROR: CODE15 (weak) records found when running strong feature extraction. Only PTB-XL and SaMi-Trop should be present.")
+        print(f"Filtered to {len(filtered_metadata_df)} strong records (PTB-XL and SaMi-Trop).")
+    elif args.dataset_type == 'weak':
+        # Only process weak records
+        filtered_metadata_df = metadata_df[metadata_df['dataset'].isin(WEAK_DATASETS)].copy()
+        # Error if any PTB-XL or SaMi-Trop records are present
+        if (filtered_metadata_df['dataset'].isin(STRONG_DATASETS)).any():
+            raise RuntimeError("ERROR: PTB-XL or SaMi-Trop (strong) records found when running weak feature extraction. Only CODE15 should be present.")
+        print(f"Filtered to {len(filtered_metadata_df)} weak records (CODE15).")
+    else:
+        raise RuntimeError("Unknown dataset type. Use --dataset-type strong or weak.")
+
+    # --- Data Balancing (using only filtered records) ---
     def is_negative(val):
         return val in [False, 0, 'False', '0', 'false', 'FALSE']
     def is_positive(val):
         return val in [True, 1, 'True', '1', 'true', 'TRUE']
-    negatives = metadata_df[metadata_df['chagas'].apply(is_negative)]
-    positives = metadata_df[metadata_df['chagas'].apply(is_positive)]
+    negatives = filtered_metadata_df[filtered_metadata_df['chagas'].apply(is_negative)]
+    positives = filtered_metadata_df[filtered_metadata_df['chagas'].apply(is_positive)]
     n_positive = positives.shape[0]
 
     if negatives.shape[0] == 0 and positives.shape[0] == 0:
@@ -511,14 +573,24 @@ def main():
             negatives.sample(n=n_positive, random_state=args.seed),
             positives
         ])
-    records_to_process = balanced_df['relative_path'].values.tolist()  # Use relative_path for processing
+    records_to_process = balanced_df['relative_path'].values.tolist()  
     print(f"Dataset contains {balanced_df.shape[0]} records: {positives.shape[0]} positives and {negatives.shape[0]} negatives.")
     print("Sample of records to process:", records_to_process[:5])
-    
+    print(f"Total records to process: {len(records_to_process)}")
+    # --- Feature Selection Setup ---
+    selected_features = None
+    if args.feature_ranking_csv:
+        ranking_df = pd.read_csv(args.feature_ranking_csv)
+        top_n = args.top_n if args.top_n is not None else 20
+        selected_features = set(ranking_df['feature'].tolist()[:top_n])
+        print(f"Will only extract these top {top_n} features: {selected_features}")
+    else:
+        selected_features = None
+
     # --- Parallel Feature Extraction ---
     print("Starting feature extraction...")
     results = Parallel(n_jobs=args.jobs)(
-        delayed(extract_all_features)(record_id, train_data_folder) for record_id in tqdm(records_to_process)
+        delayed(extract_all_features)(record_id, train_data_folder, selected_features) for record_id in tqdm(records_to_process)
     )
 
     successful_features = [res for res in results if isinstance(res, pd.DataFrame)]
@@ -533,11 +605,40 @@ def main():
 
     df_features = pd.concat(successful_features, ignore_index=True)
     # Ensure exam_id is string in both DataFrames for merge
-    df_features['exam_id'] = df_features['exam_id'].astype(str)
-    balanced_df['exam_id'] = balanced_df['exam_id'].astype(str)
+    df_features['exam_id'] = df_features['exam_id'].astype(str).str.lower().str.replace(r'(_hr|_lr)$', '', regex=True)
+    balanced_df['exam_id'] = balanced_df['exam_id'].astype(str).str.lower().str.replace(r'(_hr|_lr)$', '', regex=True)
+    print("First 20 standardized exam_id values in df_features:", df_features['exam_id'].head(20).tolist())
+    print("First 20 standardized exam_id values in balanced_df:", balanced_df['exam_id'].head(20).tolist())
+    print("Number of unique standardized exam_id in df_features:", df_features['exam_id'].nunique())
+    print("Number of unique standardized exam_id in balanced_df:", balanced_df['exam_id'].nunique())
+    # Show intersection and difference for debugging
+    set_features = set(df_features['exam_id'])
+    set_balanced = set(balanced_df['exam_id'])
+    print("Number of exam_id in intersection:", len(set_features & set_balanced))
+    print("Number of exam_id only in df_features:", len(set_features - set_balanced))
+    print("Number of exam_id only in balanced_df:", len(set_balanced - set_features))
+    print("Example exam_id only in df_features:", list(set_features - set_balanced)[:10])
+    print("Example exam_id only in balanced_df:", list(set_balanced - set_features)[:10])
     df_final = df_features.merge(balanced_df, on='exam_id', how='inner')
+    print("Number of records after merge:", len(df_final))
     df_final.drop(columns=['HRV_SDANN1', 'HRV_SDNNI1', 'HRV_SDANN2', 'HRV_SDNNI2', 'HRV_SDANN5', 'HRV_SDNNI5'], inplace=True, errors='ignore')
     df_final.fillna(df_final.median(numeric_only=True), inplace=True)
+
+    # --- Feature Selection by Ranking CSV ---
+    if args.feature_ranking_csv:
+        print(f"Filtering features using ranking CSV: {args.feature_ranking_csv}")
+        ranking_df = pd.read_csv(args.feature_ranking_csv)
+        top_n = args.top_n if args.top_n is not None else 20
+        ranked_features = ranking_df['feature'].tolist()[:top_n]
+        # Always keep metadata columns
+        meta_cols = ['exam_id', 'relative_path', 'chagas', 'is_male', 'age', 'dataset']
+        # Only keep columns in ranked_features + meta_cols (if present)
+        keep_cols = [col for col in meta_cols if col in df_final.columns] + [f for f in ranked_features if f in df_final.columns]
+        missing_cols = [f for f in ranked_features if f not in df_final.columns]
+        if missing_cols:
+            print(f"Warning: The following top {top_n} ranked features are missing from the output and will be skipped: {missing_cols}")
+        df_final = df_final[keep_cols]
+        print(f"Final output will contain {len(keep_cols)} columns: {keep_cols}")
 
     # --- NaN Tracking ---
     nan_counts = df_features.isna().sum(axis=1)
