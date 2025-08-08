@@ -338,7 +338,7 @@ if __name__ == '__main__':
     print(f"Using split file: {SPLIT_FILE}")
 
     optimizer_hparams = {
-        'lr': 2e-5,
+        'lr': 1e-4,
         'warmup_steps': 700,
         'lr_end': 1e-7
     }
@@ -353,7 +353,7 @@ if __name__ == '__main__':
 
     model = FMChagasClassifier(
         ecg_fm_checkpoint_path=checkpoint_path,
-        freeze_encoder=True,
+        freeze_encoder=False,
         optimizer_hparams = optimizer_hparams
     )
     
@@ -365,7 +365,7 @@ if __name__ == '__main__':
         accelerator="auto",
         precision=PRECISION,
         devices=1,
-        logger=WandbLogger(project="ecg_transformer_chagas", name="foundation_model", entity="edwards_physionet"),
+        logger=WandbLogger(project="ecg_transformer_chagas", name="foundation_model_unfrozen", entity="edwards_physionet"),
         # logger=pl.loggers.TensorBoardLogger("lightning_logs/", name="ecg_transformer_final"),
         callbacks=[pl.callbacks.ModelCheckpoint(monitor=CHECKPOINT_MONITOR_METRIC, mode='min', filename='best-challenge-{epoch:02d}-{val_challenge_score:.4f}.ckpt'), 
                    pl.callbacks.DeviceStatsMonitor()]

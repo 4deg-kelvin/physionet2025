@@ -192,9 +192,9 @@ class ECGDataModule(pl.LightningDataModule):
         # ensure these attrs always exist
         full_dataset = ECGDataset(records_list, self.data_dir, is_training=True, seq_len=self.seq_len, windowing_method=self.windowing_method)
         # Split dataset
-        train_size = int(0.7 * len(full_dataset))
-        val_size = int(0.15 * len(full_dataset))
-        test_size = len(full_dataset) - train_size - val_size
+        train_size = int(0.85 * len(full_dataset))
+        val_size = len(full_dataset) - train_size #int(0.15 * len(full_dataset))
+        test_size = 0 #len(full_dataset) - train_size - val_size
         
         self.train_dataset, self.val_dataset, self.test_dataset = torch.utils.data.random_split(
             full_dataset, [train_size, val_size, test_size],
