@@ -127,7 +127,7 @@ class ECGFMFeatureExtractor(nn.Module):
 
 
 class FMChagasClassifier(pl.LightningModule):
-    def __init__(self, ecg_fm_checkpoint_path, freeze_encoder, optimizer_hparams):
+    def __init__(self, ecg_fm_checkpoint_path, freeze_encoder, optimizer_hparams, info_features=0):
         super().__init__()
         self.save_hyperparameters()
         self.feature_extractor = ECGFMFeatureExtractor(
@@ -141,7 +141,7 @@ class FMChagasClassifier(pl.LightningModule):
         # Classification head
         self.classifier = nn.Sequential(
             nn.Dropout(0.1),
-            nn.Linear(self.feature_dim, 256),
+            nn.Linear(self.feature_dim + self.hparams.info_features, 256),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(256, 1)
@@ -159,20 +159,30 @@ class FMChagasClassifier(pl.LightningModule):
         self.test_step_outputs = []
         self.test_step_labels = []
 
-    def forward(self, x):
+    def forward(self, x, info=None):
         # Extract features using ECG-FM
         features = self.feature_extractor(x)
+        
+        if self.hparams.info_features > 0 and info is not None:
+            features = torch.cat((features, info), dim=1)
+
         # Classify
         logits = self.classifier(features)
         return logits
 
     def _common_step(self, batch, batch_idx):
-        signals, labels = batch
+        # Unpack batch, which may or may not have info features
+        if self.hparams.info_features > 0:
+            signals, info, labels = batch
+        else:
+            signals, labels = batch
+            info = None
+            
         # Handle cases where the batch is empty after filtering
         if signals.numel() == 0:
             return None, None, None
 
-        logits = self(signals)
+        logits = self(signals, info)
         loss = self.criterion(logits, labels)
         preds = torch.sigmoid(logits)
         return loss, preds, labels
@@ -293,6 +303,12 @@ class FMChagasClassifier(pl.LightningModule):
 
 if __name__ == '__main__':
     
+    # add args parser for debug mode
+    import argparse
+    parser = argparse.ArgumentParser(description="Train ECG-FM for Chagas classification")
+    parser.add_argument('--debug', action='store_true', help="Run in debug mode with a smaller dataset")
+    args = parser.parse_args()
+
     data_folder='../training_data'
     model_folder='./ckpts'
     checkpoint_path='./ckpts/mimic_iv_ecg_finetuned.pt'
@@ -300,18 +316,30 @@ if __name__ == '__main__':
 
     # --- Hyperparameters ---
     DATA_DIR = "../training_data/" 
-    BATCH_SIZE = 16
+    BATCH_SIZE = 32
     # SEQ_LEN = utils.WINDOW_SIZE
     NUM_LEADS = 12
-    SPLIT_FILE = "../train_val_test_sets.csv"
     WINDOWING_METHOD = 'random'
     NUM_EPOCHS = 16
     CHECKPOINT_MONITOR_METRIC = 'val_challenge_score'
     PRECISION = "16-mixed"
-    SEQ_LENGTH = utils.UNIFIED_FREQUENCY * 5  
-    BATCH_SIZE = 16  # Smaller batch size due to ECG-FM memory requirements
+    SEQ_LENGTH = utils.UNIFIED_FREQUENCY * 10  
     EPOCHS = 50
     LR = 1e-4
+
+    # Add these values into the config dictionary
+    config = {
+        "data_dir": DATA_DIR,
+        "batch_size": BATCH_SIZE,
+        "seq_length": SEQ_LENGTH,
+        "num_leads": NUM_LEADS,
+        "windowing_method": WINDOWING_METHOD,
+        "num_epochs": NUM_EPOCHS,
+        "checkpoint_monitor_metric": CHECKPOINT_MONITOR_METRIC,
+        "precision": PRECISION,
+        "epochs": EPOCHS,
+        "lr": LR
+    }
 
     try:
         if torch.cuda.is_available():
@@ -329,13 +357,80 @@ if __name__ == '__main__':
         print("Please update the DATA_DIR variable to point to your dataset.")
         sys.exit(1)
 
-    print("\n--- Starting Training Script ---")
-    print(f"Using data directory: {DATA_DIR}")
-    # --- Setup Data and Model ---
-    record_files = helper_code.find_records_abs(DATA_DIR)
+# 2. Prepare data for fine-tuning
+    all_records = helper_code.find_records_abs(DATA_DIR)
+    if args.debug:
+        print("--- DEBUG MODE: Using a random subset of 1000 records. ---")
+        np.random.shuffle(all_records)
+        all_records = all_records[:10000]
+    print(f"{len(all_records)} records found in the dataset.")
+    records_meta = utils.prepare_stratification(all_records)
+    df = pd.DataFrame(records_meta)
     
-    print(f"Found {len(record_files)} records in '{DATA_DIR}'")
-    print(f"Using split file: {SPLIT_FILE}")
+    # --- Exclude records from code15_label_issues.csv ---
+    try:
+        issues_df = pd.read_csv('code15_label_issues.csv')
+        # Extract stem (filename without extension) from the full path for exclusion list
+        stems_to_exclude = set(issues_df['record_path'].apply(lambda x: os.path.splitext(os.path.basename(x))[0]))
+        
+        # Create a new 'base_record' column with the stem for matching
+        df['base_record'] = df['record'].apply(lambda x: os.path.splitext(os.path.basename(x))[0])
+        
+        initial_count = len(df)
+        # Filter out the records using the new column
+        df = df[~df['base_record'].isin(stems_to_exclude)]
+        final_count = len(df)
+        
+        print(f"Excluded {initial_count - final_count} records based on 'code15_label_issues.csv'.")
+        # Drop the temporary 'base_record' column
+        df = df.drop(columns=['base_record'])
+        
+    except FileNotFoundError:
+        print("Warning: 'code15_label_issues.csv' not found. No records will be excluded.")
+    
+    # --- Stratified Data Splitting ---
+    # Split the data into training (80%), validation (10%), and test (10%) sets.
+    # The splits are stratified by the 'label' column to maintain class distribution.
+    
+    # First, split into training and a temporary set (val + test)
+    train_df, temp_df = train_test_split(
+        df,
+        test_size=0.2,  # 20% for val and test
+        random_state=42,
+        stratify=df['label']
+    )
+    
+    # Next, split the temporary set into validation and test sets
+    val_df, test_df = train_test_split(
+        temp_df,
+        test_size=0.5,  # 50% of temp_df (which is 10% of original)
+        random_state=42,
+        stratify=temp_df['label']
+    )
+
+    # Convert to lists of record paths
+    train_records = train_df['record'].tolist()
+    val_records = val_df['record'].tolist()
+    test_records = test_df['record'].tolist()
+    
+    print(f"Training on {len(train_records)} records.")
+    print(f"Final training set positive ratio: {train_df['label'].value_counts(normalize=True).get(1, 0):.2%}")
+    print(f"Validating on {len(val_records)} records.")
+    print(f"Validation set positive ratio: {val_df['label'].value_counts(normalize=True).get(1, 0):.2%}")
+    print(f"Testing on {len(test_records)} records.")
+    print(f"Test set positive ratio: {test_df['label'].value_counts(normalize=True).get(1, 0):.2%}")
+
+    # 3. Create DataModule
+    data_module = ECGDataModule(
+        data_dir=DATA_DIR,
+        batch_size=BATCH_SIZE,
+        seq_len=SEQ_LENGTH,
+        windowing_method='entire_recording',
+
+    )
+    data_module.train_dataset = ECGDataset(train_records, DATA_DIR, is_training=True, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True)
+    data_module.val_dataset   = ECGDataset(val_records,   DATA_DIR, is_training=False, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True)
+    data_module.test_dataset  = ECGDataset(test_records,  DATA_DIR, is_training=False, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True)
 
     optimizer_hparams = {
         'lr': 2e-5,
@@ -343,18 +438,11 @@ if __name__ == '__main__':
         'lr_end': 1e-7
     }
 
-    data_module = ECGDataModule(
-        data_dir=DATA_DIR,
-        records_list=record_files,
-        split_file_path=SPLIT_FILE,
-        batch_size=BATCH_SIZE,
-        seq_len=SEQ_LENGTH
-    )
-
     model = FMChagasClassifier(
         ecg_fm_checkpoint_path=checkpoint_path,
         freeze_encoder=True,
-        optimizer_hparams = optimizer_hparams
+        optimizer_hparams = optimizer_hparams,
+        info_features=2 # Age and Sex
     )
     
     print("\n--- Model Summary ---")
@@ -365,14 +453,14 @@ if __name__ == '__main__':
         accelerator="auto",
         precision=PRECISION,
         devices=1,
-        logger=WandbLogger(project="ecg_transformer_chagas", name="foundation_model", entity="edwards_physionet"),
+        logger=WandbLogger(project="foundation_model", name=f"foundation_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}", entity="edwards_physionet"),
         # logger=pl.loggers.TensorBoardLogger("lightning_logs/", name="ecg_transformer_final"),
         callbacks=[pl.callbacks.ModelCheckpoint(monitor=CHECKPOINT_MONITOR_METRIC, mode='min', filename='best-challenge-{epoch:02d}-{val_challenge_score:.4f}.ckpt'), 
                    pl.callbacks.DeviceStatsMonitor()]
     )
 
     # --- Run Training and Testing ---
-    print(f"\n--- Starting Training with {len(record_files)} records from '{DATA_DIR}' ---")
+    print(f"\n--- Starting Training with {len(train_records)} records from '{DATA_DIR}' ---")
     trainer.fit(model, datamodule=data_module)
     print("\n--- Training Finished ---")
     
