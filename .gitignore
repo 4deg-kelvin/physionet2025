@@ -19,7 +19,7 @@ events.out*
 .vscode/
 all_results.pkl
 *.sav
-
+ckpts/
 holdout*
 *.page
 *.out

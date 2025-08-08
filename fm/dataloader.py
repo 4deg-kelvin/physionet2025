@@ -179,6 +179,8 @@ def collate_fn_skip_none(batch):
     # Use the default collate function on the filtered, valid batch
     return torch.utils.data.default_collate(batch)
 
+
+
 class ECGDataModule(pl.LightningDataModule):
     def __init__(self, data_dir, records_list=None, split_file_path=None, batch_size=32, seq_len=utils.WINDOW_SIZE, windowing_method='qrs'):
         super().__init__()
@@ -188,9 +190,19 @@ class ECGDataModule(pl.LightningDataModule):
         self.windowing_method = windowing_method
 
         # ensure these attrs always exist
-        self.train_dataset = None
-        self.val_dataset = None
-        self.test_dataset = None
+        full_dataset = ECGDataset(records_list, self.data_dir, is_training=True, seq_len=self.seq_len, windowing_method=self.windowing_method)
+        # Split dataset
+        train_size = int(0.7 * len(full_dataset))
+        val_size = int(0.15 * len(full_dataset))
+        test_size = len(full_dataset) - train_size - val_size
+        
+        self.train_dataset, self.val_dataset, self.test_dataset = torch.utils.data.random_split(
+            full_dataset, [train_size, val_size, test_size],
+            generator=torch.Generator().manual_seed(42)
+        )
+        # self.train_dataset = None
+        # self.val_dataset = None
+        # self.test_dataset = None
 
     def setup(self, stage=None):
         pass

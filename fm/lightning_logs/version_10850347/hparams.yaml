@@ -1,0 +1,4 @@
+ecg_fm_checkpoint_path: ./ckpts/mimic_iv_ecg_finetuned.pt
+num_classes: 1
+lr: 0.0001
+freeze_encoder: true
