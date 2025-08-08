@@ -314,6 +314,7 @@ def train(data_folder, model_folder, verbose):
         enable_checkpointing=False,  # Disable checkpointing for finetuning
         limit_val_batches=0,  # Disable validation loop
         limit_test_batches=0,  # Disable test loop
+        logger=False,  # Disable logging for finetuning
     )
     
     # Train

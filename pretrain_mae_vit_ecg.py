@@ -430,6 +430,7 @@ def train(data_folder, model_folder, verbose):
         'enable_checkpointing': False,  # Enable checkpointing
         'limit_val_batches': 0,  # Explicitly disable the validation loop
         'limit_test_batches': 0,  # Explicitly disable the test loop
+        'logger': False,  # Disable logging for pretraining
     }
 
     trainer = pl.Trainer(**trainer_kwargs)
