@@ -37,135 +37,135 @@ from fairseq_signals.models import build_model_from_checkpoint
 from fairseq_signals.models.classification.ecg_transformer_classifier import ECGTransformerClassificationModel
 import pytorch_lightning as pl
 
-class TPRMaxLoss(nn.Module):
-    def __init__(self, fraction_capacity=0.05, temperature=1.0):
-        super().__init__()
-        self.fraction_capacity = fraction_capacity
-        self.temperature = temperature
+# class TPRMaxLoss(nn.Module):
+#     def __init__(self, fraction_capacity=0.05, temperature=1.0):
+#         super().__init__()
+#         self.fraction_capacity = fraction_capacity
+#         self.temperature = temperature
         
-    def forward(self, outputs, labels):
-        batch_size = outputs.size(0)
-        k = max(1, int(self.fraction_capacity * batch_size))
+#     def forward(self, outputs, labels):
+#         batch_size = outputs.size(0)
+#         k = max(1, int(self.fraction_capacity * batch_size))
         
-        # Soft top-k selection using temperature-scaled softmax
-        scaled_outputs = outputs.squeeze() / self.temperature
-        weights = torch.softmax(scaled_outputs, dim=0)
+#         # Soft top-k selection using temperature-scaled softmax
+#         scaled_outputs = outputs.squeeze() / self.temperature
+#         weights = torch.softmax(scaled_outputs, dim=0)
         
-        # Approximate TPR: weighted sum of positive labels
-        total_positives = torch.sum(labels)
-        if total_positives == 0:
-            return torch.tensor(0.0, requires_grad=True)
+#         # Approximate TPR: weighted sum of positive labels
+#         total_positives = torch.sum(labels)
+#         if total_positives == 0:
+#             return torch.tensor(0.0, requires_grad=True)
         
-        # Weight the top predictions more heavily
-        top_k_weights = torch.zeros_like(weights)
-        _, top_k_indices = torch.topk(outputs.squeeze(), k)
-        top_k_weights[top_k_indices] = 1.0
+#         # Weight the top predictions more heavily
+#         top_k_weights = torch.zeros_like(weights)
+#         _, top_k_indices = torch.topk(outputs.squeeze(), k)
+#         top_k_weights[top_k_indices] = 1.0
         
-        captured_positives = torch.sum(top_k_weights * labels)
-        tpr = captured_positives / total_positives
+#         captured_positives = torch.sum(top_k_weights * labels)
+#         tpr = captured_positives / total_positives
         
-        # Maximize TPR (minimize negative TPR)
-        return -tpr
+#         # Maximize TPR (minimize negative TPR)
+#         return -tpr
     
-class TopKFocalLoss(nn.Module):
-    def __init__(self, fraction_capacity=0.05, alpha=0.25, gamma=2.0, top_k_weight=5.0):
-        super().__init__()
-        self.fraction_capacity = fraction_capacity
-        self.alpha = alpha
-        self.gamma = gamma
-        self.top_k_weight = top_k_weight
+# class TopKFocalLoss(nn.Module):
+#     def __init__(self, fraction_capacity=0.05, alpha=0.25, gamma=2.0, top_k_weight=5.0):
+#         super().__init__()
+#         self.fraction_capacity = fraction_capacity
+#         self.alpha = alpha
+#         self.gamma = gamma
+#         self.top_k_weight = top_k_weight
         
-    def forward(self, outputs, labels):
-        batch_size = outputs.size(0)
-        k = max(1, int(self.fraction_capacity * batch_size))
+#     def forward(self, outputs, labels):
+#         batch_size = outputs.size(0)
+#         k = max(1, int(self.fraction_capacity * batch_size))
         
-        # Standard focal loss
-        ce_loss = nn.functional.binary_cross_entropy_with_logits(
-            outputs.squeeze(), labels.float(), reduction='none'
-        )
-        pt = torch.exp(-ce_loss)
-        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+#         # Standard focal loss
+#         ce_loss = nn.functional.binary_cross_entropy_with_logits(
+#             outputs.squeeze(), labels.float(), reduction='none'
+#         )
+#         pt = torch.exp(-ce_loss)
+#         focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
         
-        # Get top-k predictions and weight them more heavily
-        _, top_k_indices = torch.topk(outputs.squeeze(), k)
-        weights = torch.ones_like(focal_loss)
-        weights[top_k_indices] *= self.top_k_weight
+#         # Get top-k predictions and weight them more heavily
+#         _, top_k_indices = torch.topk(outputs.squeeze(), k)
+#         weights = torch.ones_like(focal_loss)
+#         weights[top_k_indices] *= self.top_k_weight
         
-        return torch.mean(focal_loss * weights)
+#         return torch.mean(focal_loss * weights)
     
 
-class PairwiseHingeLoss(nn.Module):
-    def __init__(self, margin=1.0):
-        """
-        Initializes the Pairwise Hinge Loss module.
+# class PairwiseHingeLoss(nn.Module):
+#     def __init__(self, margin=1.0):
+#         """
+#         Initializes the Pairwise Hinge Loss module.
         
-        Args:
-            margin (float): The desired gap between positive and negative scores.
-        """
-        super(PairwiseHingeLoss, self).__init__()
-        self.margin = margin
+#         Args:
+#             margin (float): The desired gap between positive and negative scores.
+#         """
+#         super(PairwiseHingeLoss, self).__init__()
+#         self.margin = margin
 
-    def forward(self, y_pred, y_true):
-        """
-        Calculates the pairwise ranking loss.
+#     def forward(self, y_pred, y_true):
+#         """
+#         Calculates the pairwise ranking loss.
 
-        Args:
-            y_pred (torch.Tensor): Model predictions/scores. Shape: (batch_size,)
-            y_true (torch.Tensor): Ground truth labels (0s and 1s). Shape: (batch_size,)
+#         Args:
+#             y_pred (torch.Tensor): Model predictions/scores. Shape: (batch_size,)
+#             y_true (torch.Tensor): Ground truth labels (0s and 1s). Shape: (batch_size,)
 
-        Returns:
-            torch.Tensor: A scalar loss value.
-        """
-        # Find indices of positive (1) and negative (0) samples
-        positive_indices = torch.where(y_true == 1)[0]
-        negative_indices = torch.where(y_true == 0)[0]
+#         Returns:
+#             torch.Tensor: A scalar loss value.
+#         """
+#         # Find indices of positive (1) and negative (0) samples
+#         positive_indices = torch.where(y_true == 1)[0]
+#         negative_indices = torch.where(y_true == 0)[0]
         
-        # If there are no positive or no negative samples in the batch, loss is 0
-        if len(positive_indices) == 0 or len(negative_indices) == 0:
-            return torch.tensor(0.0, device=y_pred.device, requires_grad=True)
+#         # If there are no positive or no negative samples in the batch, loss is 0
+#         if len(positive_indices) == 0 or len(negative_indices) == 0:
+#             return torch.tensor(0.0, device=y_pred.device, requires_grad=True)
 
-        # Randomly sample one positive and one negative index
-        # This makes the process stochastic and efficient
-        rand_pos_idx = positive_indices[torch.randint(len(positive_indices), (1,))]
-        rand_neg_idx = negative_indices[torch.randint(len(negative_indices), (1,))]
+#         # Randomly sample one positive and one negative index
+#         # This makes the process stochastic and efficient
+#         rand_pos_idx = positive_indices[torch.randint(len(positive_indices), (1,))]
+#         rand_neg_idx = negative_indices[torch.randint(len(negative_indices), (1,))]
         
-        # Get the scores for the sampled pair
-        score_positive = y_pred[rand_pos_idx]
-        score_negative = y_pred[rand_neg_idx]
+#         # Get the scores for the sampled pair
+#         score_positive = y_pred[rand_pos_idx]
+#         score_negative = y_pred[rand_neg_idx]
         
-        # Calculate the hinge loss for the pair
-        loss = torch.clamp(self.margin - (score_positive - score_negative), min=0.0)
+#         # Calculate the hinge loss for the pair
+#         loss = torch.clamp(self.margin - (score_positive - score_negative), min=0.0)
         
-        return loss
+#         return loss
 
 
-class ListNetLoss(nn.Module):
-    def __init__(self):
-        super(ListNetLoss, self).__init__()
+# class ListNetLoss(nn.Module):
+#     def __init__(self):
+#         super(ListNetLoss, self).__init__()
 
-    def forward(self, y_pred, y_true):
-        """
-        Calculates the ListNet loss.
+#     def forward(self, y_pred, y_true):
+#         """
+#         Calculates the ListNet loss.
 
-        Args:
-            y_pred (torch.Tensor): Model predictions/scores. Shape: (batch_size,)
-            y_true (torch.Tensor): Ground truth labels (0s and 1s). Shape: (batch_size,)
+#         Args:
+#             y_pred (torch.Tensor): Model predictions/scores. Shape: (batch_size,)
+#             y_true (torch.Tensor): Ground truth labels (0s and 1s). Shape: (batch_size,)
 
-        Returns:
-            torch.Tensor: A scalar loss value.
-        """
-        # Create probability distributions from scores and labels using softmax
-        pred_probs = F.softmax(y_pred, dim=0)
-        true_probs = F.softmax(y_true, dim=0)
+#         Returns:
+#             torch.Tensor: A scalar loss value.
+#         """
+#         # Create probability distributions from scores and labels using softmax
+#         pred_probs = F.softmax(y_pred, dim=0)
+#         true_probs = F.softmax(y_true, dim=0)
         
-        # Add a small epsilon to true_probs to avoid log(0) which is -inf
-        true_probs = true_probs + 1e-9
+#         # Add a small epsilon to true_probs to avoid log(0) which is -inf
+#         true_probs = true_probs + 1e-9
         
-        # Compute the KL Divergence between the two distributions
-        # This is equivalent to cross-entropy: -sum(P_true * log(P_pred))
-        loss = -torch.sum(true_probs * torch.log(pred_probs))
+#         # Compute the KL Divergence between the two distributions
+#         # This is equivalent to cross-entropy: -sum(P_true * log(P_pred))
+#         loss = -torch.sum(true_probs * torch.log(pred_probs))
         
-        return loss
+#         return loss
 
 class TopKRankingLoss(nn.Module):
     def __init__(self, fraction_capacity=0.05, margin=1.0):
@@ -177,14 +177,12 @@ class TopKRankingLoss(nn.Module):
         batch_size = outputs.size(0)
         k = max(1, int(self.fraction_capacity * batch_size))
         
-        # Get top-k predictions
         _, top_k_indices = torch.topk(outputs.squeeze(), k)
         
-        # Create ranking loss: positive samples should be ranked higher
         loss = 0
         for i in range(batch_size):
             for j in range(batch_size):
-                if labels[i] == 1 and labels[j] == 0:  # pos should rank higher than neg
+                if labels[i] == 1 and labels[j] == 0:  
                     loss += torch.relu(self.margin - (outputs[i] - outputs[j]))
         
         # Additional penalty for missing positives in top-k
@@ -204,7 +202,7 @@ class ChallengeScoreLoss(nn.Module):
         self.ranking_loss = TopKRankingLoss(fraction_capacity)
         
     def forward(self, outputs, labels):
-        bce = self.bce_loss(outputs.squeeze(), labels.float())
+        bce = self.bce_loss(outputs, labels.float())
         ranking = self.ranking_loss(outputs, labels)
         return self.bce_weight * bce + self.ranking_weight * ranking
 
@@ -542,7 +540,7 @@ if __name__ == '__main__':
         accelerator="auto",
         precision=PRECISION,
         devices=1,
-        logger=WandbLogger(project="ecg_transformer_chagas", name="foundation_model_unfrozen", entity="edwards_physionet"),
+        logger=WandbLogger(project="ecg_transformer_chagas", name="foundation_model_unfrozen_custom_loss1", entity="edwards_physionet"),
         # logger=pl.loggers.TensorBoardLogger("lightning_logs/", name="ecg_transformer_final"),
         callbacks=[pl.callbacks.ModelCheckpoint(monitor=CHECKPOINT_MONITOR_METRIC, mode='min', filename='best-challenge-{epoch:02d}-{val_challenge_score:.4f}.ckpt'), 
                    pl.callbacks.DeviceStatsMonitor()]
