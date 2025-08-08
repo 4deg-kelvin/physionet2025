@@ -18,6 +18,7 @@ import wandb
 from pytorch_lightning.loggers import WandbLogger
 import time
 from sklearn.model_selection import train_test_split
+
 # --- Robust Path Handling ---
 # Handles running in different environments (e.g., script vs. notebook)
 # This allows the script to find your helper_code and utils modules
@@ -180,7 +181,6 @@ def collate_fn_skip_none(batch):
     return torch.utils.data.default_collate(batch)
 
 
-
 class ECGDataModule(pl.LightningDataModule):
     def __init__(self, data_dir, records_list=None, split_file_path=None, batch_size=32, seq_len=utils.WINDOW_SIZE, windowing_method='qrs'):
         super().__init__()
@@ -189,20 +189,27 @@ class ECGDataModule(pl.LightningDataModule):
         self.seq_len = seq_len
         self.windowing_method = windowing_method
 
-        # ensure these attrs always exist
+        # Create the full dataset
         full_dataset = ECGDataset(records_list, self.data_dir, is_training=True, seq_len=self.seq_len, windowing_method=self.windowing_method)
-        # Split dataset
-        train_size = int(0.85 * len(full_dataset))
-        val_size = len(full_dataset) - train_size #int(0.15 * len(full_dataset))
-        test_size = 0 #len(full_dataset) - train_size - val_size
-        
-        self.train_dataset, self.val_dataset, self.test_dataset = torch.utils.data.random_split(
-            full_dataset, [train_size, val_size, test_size],
-            generator=torch.Generator().manual_seed(42)
+
+        # Extract Chagas labels for stratification
+        labels = []
+        for i in range(len(full_dataset)):
+            _, label_tensor = full_dataset[i]  # Assuming the label is the second element in the tuple
+            labels.append(int(label_tensor.item()))  # Convert tensor to integer
+
+        # Stratified train/val/test split
+        train_indices, temp_indices, _, temp_labels = train_test_split(
+            range(len(full_dataset)), labels, test_size=0.3, stratify=labels, random_state=42
         )
-        # self.train_dataset = None
-        # self.val_dataset = None
-        # self.test_dataset = None
+        val_indices, test_indices = train_test_split(
+            temp_indices, test_size=0.5, stratify=temp_labels, random_state=42
+        )
+
+        # Create subsets for train, val, and test
+        self.train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
+        self.val_dataset = torch.utils.data.Subset(full_dataset, val_indices)
+        self.test_dataset = torch.utils.data.Subset(full_dataset, test_indices)
 
     def setup(self, stage=None):
         pass
