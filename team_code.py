@@ -24,6 +24,7 @@ import pathlib
 import helper_code
 import custom_helper_code
 import utils
+import fm
 from scipy.signal import resample
 import neurokit2 as nk
 
@@ -41,38 +42,41 @@ import finetuning_mae_vit_ecg
 
 # Train your model.
 def train_model(data_folder, model_folder, verbose):
-    pretrain_mae_vit_ecg.train(data_folder, model_folder, verbose)
-    finetuning_mae_vit_ecg.train(data_folder, model_folder, verbose)
+    fm.train_model(data_folder, model_folder)
 
 # Load your trained models. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function. If you do not train one of the models, then you can return None for the model.
 def load_model(model_folder, verbose):
-    model = finetuning_mae_vit_ecg.load_model(model_folder, verbose)
-    # move model to GPU if available
-    if torch.cuda.is_available():
-        model = model.to('cuda:0' if torch.cuda.is_available() else 'cpu')
+    ckpt_path = os.path.join(model_folder, 'foundation_model_finetuned.ckpt')
+    if not os.path.isfile(ckpt_path):
+        raise FileNotFoundError(f"Checkpoint not found at {ckpt_path}")
+    model = fm.load_finetuned_model(ckpt_path, strict=False)
+    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    model = model.to(device)
     return model
 
 # Run your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def run_model(record, model, verbose):
-    record_path = record
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    if model is None:
+        raise ValueError("Model is None; cannot run inference.")
+    device = next(model.parameters()).device
     try:
         signal, wide_feats = utils.preprocess_signal(
-            record_path, windowing_method='entire_recording', is_training=False
+            record, windowing_method='entire_recording', is_training=False
         )
-        sig_t = torch.FloatTensor(signal).unsqueeze(0).to(device)
-        wf_t  = torch.FloatTensor(wide_feats).unsqueeze(0).to(device)
+        sig_t = torch.as_tensor(signal, dtype=torch.float32, device=device).unsqueeze(0)
+        wf_t  = torch.as_tensor(wide_feats, dtype=torch.float32, device=device).unsqueeze(0)
 
-        # Attempt to call forward(x, info); fallback to forward(x)
-        try:
-            logits = model(sig_t, wf_t)
-        except TypeError:
-            logits = model(sig_t)
+        with torch.no_grad():
+            # Prefer forward(x, info) if available
+            try:
+                logits = model(sig_t, wf_t)
+            except TypeError:
+                logits = model(sig_t)
 
-        prob = torch.sigmoid(logits).item()
-        pred = 1 if prob > 0.5 else 0
+            prob = torch.sigmoid(logits).item()
+            pred = 1 if prob > 0.5 else 0
         return pred, prob
 
     # IMPORTANT: if you get a NotImplementedError specifically, something bad happened (ie, you 
