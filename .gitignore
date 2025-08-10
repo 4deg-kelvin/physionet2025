@@ -1,11 +1,12 @@
 outputs/
 outputs2/
 *.pyc
-*.txt
 *.ckpt
 events.out.tfevents.*
 hparams.yaml
-model*/
 lightning_logs/
 __pycache__/
 *.ckpt
+
+!fairseq-signals
+!fairseq-signals/*
