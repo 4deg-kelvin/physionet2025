@@ -273,17 +273,12 @@ def load_checkpoint_to_cpu(path, arg_overrides = None, load_on_all_ranks = False
             setattr(args, arg_name, arg_val)
     
     if "cfg" in state and state["cfg"] is not None:
-
-        # hack to be able to set Namespace in dict config. this should be removed when we update to newer
-        # omegaconf version that supports object flags, or when we migrate all existing models
-        from omegaconf import _utils
-
-        old_primitive = _utils.is_primitive_type
-        _utils.is_primitive_type = lambda _: True
-
-        state["cfg"] = OmegaConf.create(state["cfg"])
-
-        _utils.is_primitive_type = old_primitive
+        # Allow non-primitive objects without relying on private OmegaConf APIs
+        try:
+            state["cfg"] = OmegaConf.create(state["cfg"], flags={"allow_objects": True})
+        except TypeError:
+            # Older OmegaConf versions do not support the flags kwarg
+            state["cfg"] = OmegaConf.create(state["cfg"])
         OmegaConf.set_struct(state["cfg"], True)
 
         if arg_overrides is not None:
