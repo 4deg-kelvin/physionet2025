@@ -19,7 +19,7 @@ from pytorch_lightning.loggers import WandbLogger
 
 # import model_checkpoint
 import time
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 
 # --- Standard Imports ---
 import helper_code
@@ -36,6 +36,7 @@ import torch.nn as nn
 from fairseq_signals.models import build_model_from_checkpoint
 from fairseq_signals.models.classification.ecg_transformer_classifier import ECGTransformerClassificationModel
 import pytorch_lightning as pl
+import shutil
 
 # class TPRMaxLoss(nn.Module):
 #     def __init__(self, fraction_capacity=0.05, temperature=1.0):
@@ -784,7 +785,11 @@ if __name__ == '__main__':
         devices=1,
         logger=WandbLogger(project="foundation_model", name=f"foundation_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}", entity="edwards_physionet"),
         # logger=pl.loggers.TensorBoardLogger("lightning_logs/", name="ecg_transformer_final"),
-        callbacks=[pl.callbacks.ModelCheckpoint(monitor=CHECKPOINT_MONITOR_METRIC, mode='min', filename='best-challenge-{epoch:02d}-{val_challenge_score:.4f}.ckpt'), 
+        callbacks=[pl.callbacks.ModelCheckpoint(
+            monitor=CHECKPOINT_MONITOR_METRIC,
+            mode='max',  # was 'min' – challenge score is a higher-is-better metric
+            filename='best-challenge-{epoch:02d}-{val_challenge_score:.4f}.ckpt'
+        ),
                    pl.callbacks.DeviceStatsMonitor()]
     )
 
@@ -810,6 +815,7 @@ def train_model(data_folder, model_folder):
     LR = 1e-4
     LOSS_TYPE = 'bce'
     CHECKPOINT_MONITOR_METRIC = 'val_challenge_score'
+    N_FOLDS = 5  # k-fold cross validation
 
     # Add these values into the config dictionary
     config = {
@@ -845,100 +851,145 @@ def train_model(data_folder, model_folder):
     records_meta = utils.prepare_stratification(all_records)
     df = pd.DataFrame(records_meta)
     
-    # --- Exclude records from code15_label_issues.csv ---
-    try:
-        issues_df = pd.read_csv('code15_label_issues.csv')
-        # Extract stem (filename without extension) from the full path for exclusion list
-        stems_to_exclude = set(issues_df['record_path'].apply(lambda x: os.path.splitext(os.path.basename(x))[0]))
+    # # --- Exclude records from code15_label_issues.csv ---
+    # try:
+    #     issues_df = pd.read_csv('code15_label_issues.csv')
+    #     # Extract stem (filename without extension) from the full path for exclusion list
+    #     stems_to_exclude = set(issues_df['record_path'].apply(lambda x: os.path.splitext(os.path.basename(x))[0]))
         
-        # Create a new 'base_record' column with the stem for matching
-        df['base_record'] = df['record'].apply(lambda x: os.path.splitext(os.path.basename(x))[0])
+    #     # Create a new 'base_record' column with the stem for matching
+    #     df['base_record'] = df['record'].apply(lambda x: os.path.splitext(os.path.basename(x))[0])
         
-        initial_count = len(df)
-        # Filter out the records using the new column
-        df = df[~df['base_record'].isin(stems_to_exclude)]
-        final_count = len(df)
+    #     initial_count = len(df)
+    #     # Filter out the records using the new column
+    #     df = df[~df['base_record'].isin(stems_to_exclude)]
+    #     final_count = len(df)
         
-        print(f"Excluded {initial_count - final_count} records based on 'code15_label_issues.csv'.")
-        # Drop the temporary 'base_record' column
-        df = df.drop(columns=['base_record'])
+    #     print(f"Excluded {initial_count - final_count} records based on 'code15_label_issues.csv'.")
+    #     # Drop the temporary 'base_record' column
+    #     df = df.drop(columns=['base_record'])
         
-    except FileNotFoundError:
-        print("Warning: 'code15_label_issues.csv' not found. No records will be excluded.")
+    # except FileNotFoundError:
+    #     print("Warning: 'code15_label_issues.csv' not found. No records will be excluded.")
     
     # --- Stratified Data Splitting ---
     # Split the data into training (80%), validation (10%), and test (10%) sets.
     # The splits are stratified by the 'label' column to maintain class distribution.
     
-    # First, split into training and a temporary set (val + test)
-    train_df, val_df = train_test_split(
-        df,
-        test_size=0.1,  # 20% for val and test
-        random_state=42,
-        stratify=df['label']
-    )
-    
-    # Convert to lists of record paths
-    train_records = train_df['record'].tolist()
-    val_records = val_df['record'].tolist()
-    
-    print(f"Training on {len(train_records)} records.")
-    print(f"Final training set positive ratio: {train_df['label'].value_counts(normalize=True).get(1, 0):.2%}")
-    print(f"Validating on {len(val_records)} records.")
-    print(f"Validation set positive ratio: {val_df['label'].value_counts(normalize=True).get(1, 0):.2%}")
+    # Exclude records from source 'CODE-15%'
+    df = df[df['source'] != 'CODE-15%'].reset_index(drop=True)
+    y = df['label'].values
+    skf = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=42)
 
-    # 3. Create DataModule
-    data_module = ECGDataModule(
-        data_dir=DATA_DIR,
-        batch_size=BATCH_SIZE,
-        seq_len=SEQ_LENGTH,
-        windowing_method='entire_recording',
+    fold_results = []
+    best_global_score = float('-inf')
+    best_global_ckpt = None
+    unified_ckpt_path = os.path.join(model_folder, 'foundation_model_finetuned.ckpt')
 
-    )
-    data_module.train_dataset = ECGDataset(train_records, DATA_DIR, is_training=True, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True)
-    data_module.val_dataset   = ECGDataset(val_records,   DATA_DIR, is_training=False, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True)
-    # disable test dataset
-    data_module.test_dataset  = None
+    for fold, (train_idx, val_idx) in enumerate(skf.split(df['record'], y), start=1):
+        print(f"\n===== Fold {fold}/{N_FOLDS} =====")
+        pl.seed_everything(42 + fold)
 
-    optimizer_hparams = {
-        'lr': 1e-4,
-        'warmup_steps': 700,
-        'lr_end': 1e-7
-    }
+        train_records = df.loc[train_idx, 'record'].tolist()
+        val_records   = df.loc[val_idx, 'record'].tolist()
 
-    model = FMChagasClassifier(
-        ecg_fm_checkpoint_path=checkpoint_path,
-        freeze_encoder=True,
-        optimizer_hparams=optimizer_hparams,
-        info_features=2 # Age and Sex
-    )
-    
-    # model checkpoint monitoring val_challenge_score, save best and copy to fixed filename
-    ckpt_callback = pl.callbacks.ModelCheckpoint(
-        dirpath=model_folder,
-        filename='foundation_model_finetuned',
-        monitor=CHECKPOINT_MONITOR_METRIC,
-        mode='max',
-        save_top_k=1,
-        save_last=False
-    )
+        print(f"Fold {fold}: {len(train_records)} train / {len(val_records)} val")
+        pos_ratio_train = df.loc[train_idx, 'label'].mean()
+        pos_ratio_val   = df.loc[val_idx, 'label'].mean()
+        print(f"  Train positive ratio: {pos_ratio_train:.2%}")
+        print(f"  Val   positive ratio: {pos_ratio_val:.2%}")
 
-    trainer = pl.Trainer(
-        max_epochs=NUM_EPOCHS,
-        accelerator="auto",
-        devices=1,
-        callbacks=[ckpt_callback],
-        logger=False,
-        limit_test_batches=0
-    )
+        # DataModule per fold
+        data_module = ECGDataModule(
+            data_dir=DATA_DIR,
+            batch_size=BATCH_SIZE,
+            seq_len=SEQ_LENGTH,
+            windowing_method='entire_recording',
+        )
+        data_module.train_dataset = ECGDataset(
+            train_records, DATA_DIR, is_training=True,
+            seq_len=SEQ_LENGTH, windowing_method='entire_recording',
+            include_wide_feats=True
+        )
+        data_module.val_dataset = ECGDataset(
+            val_records, DATA_DIR, is_training=False,
+            seq_len=SEQ_LENGTH, windowing_method='entire_recording',
+            include_wide_feats=True
+        )
+        data_module.test_dataset = None  # no test set during CV
 
-    # --- Run Training ---
-    print(f"\n--- Starting Training with {len(train_records)} records from '{DATA_DIR}' ---")
-    trainer.fit(model, datamodule=data_module)
-    print("\n--- Training Finished ---")
+        optimizer_hparams = {
+            'lr': LR,
+            'warmup_steps': 700,
+            'lr_end': 1e-7
+        }
 
+        model = FMChagasClassifier(
+            ecg_fm_checkpoint_path=checkpoint_path,
+            freeze_encoder=True,
+            optimizer_hparams=optimizer_hparams,
+            info_features=2,
+            loss_type=LOSS_TYPE
+        )
 
+        ckpt_callback = pl.callbacks.ModelCheckpoint(
+            dirpath=model_folder,
+            filename=f'foundation_model_finetuned_fold{fold}',
+            monitor=CHECKPOINT_MONITOR_METRIC,
+            mode='max',
+            save_top_k=1,
+            save_last=False,
+            save_weights_only=True,
+        )
 
+        trainer = pl.Trainer(
+            max_epochs=NUM_EPOCHS,
+            accelerator="auto",
+            devices=1,
+            callbacks=[ckpt_callback],
+            logger=False,
+            limit_test_batches=0
+        )
+
+        print(f"\n--- Training Fold {fold} ---")
+        trainer.fit(model, datamodule=data_module)
+
+        best_ckpt = ckpt_callback.best_model_path
+        if best_ckpt:
+            print(f"Best checkpoint (fold {fold}): {best_ckpt}")
+            # Re-run validation on best checkpoint to capture logged metrics
+            val_metrics = trainer.validate(model=model, datamodule=data_module, ckpt_path=best_ckpt, verbose=False)
+            fold_score = val_metrics[0].get('val_challenge_score', None) if val_metrics else None
+        else:
+            print(f"No best checkpoint saved for fold {fold}.")
+            fold_score = None
+
+        if best_ckpt:
+            # After val_metrics extraction
+            if fold_score is not None and fold_score > best_global_score:
+                best_global_score = fold_score
+                best_global_ckpt = best_ckpt
+                try:
+                    shutil.copyfile(best_ckpt, unified_ckpt_path)
+                    print(f"Updated best global checkpoint (fold {fold}, score {fold_score:.4f}) -> {unified_ckpt_path}")
+                except Exception as e:
+                    print(f"Warning: failed to copy best checkpoint for fold {fold}: {e}")
+
+        fold_results.append({
+            'fold': fold,
+            'best_checkpoint': best_ckpt,
+            'val_challenge_score': fold_score,
+            'train_pos_ratio': pos_ratio_train,
+            'val_pos_ratio': pos_ratio_val
+        })
+
+    print("\n===== Cross-Validation Complete =====")
+    if best_global_ckpt is not None:
+        print(f"Best overall fold checkpoint: {best_global_ckpt}")
+        print(f"Best overall challenge score: {best_global_score:.4f}")
+        print(f"Unified saved checkpoint: {unified_ckpt_path}")
+    else:
+        print("No valid fold produced a checkpoint with a challenge score.")
 def load_finetuned_model(ckpt_path, map_location=None, strict=False, override_hparams=None):
     """
     Load a fine-tuned FMChagasClassifier from a Lightning .ckpt file.
