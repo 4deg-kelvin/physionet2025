@@ -40,7 +40,8 @@ import helper_code
 import utils
 
 class ECGDataset(Dataset):
-    def __init__(self, records_list, data_dir, is_training=True, seq_len=5000, windowing_method='qrs', no_labels=False, include_wide_feats=False):
+    def __init__(self, records_list, data_dir, is_training=True, seq_len=5000, windowing_method='qrs', no_labels=False, include_wide_feats=False,
+                 normalize_leads=False, stats_csv_path='ecg_statistics.csv'):
         self.records_list = records_list
         self.data_dir = data_dir
         self.is_training = is_training
@@ -48,6 +49,22 @@ class ECGDataset(Dataset):
         self.windowing_method = windowing_method
         self.no_labels = no_labels
         self.include_wide_feats = include_wide_feats
+        self.normalize_leads = normalize_leads
+        self.stats_csv_path = stats_csv_path
+        self.global_stats_available = False
+        try:
+            if os.path.isfile(self.stats_csv_path):
+                stats_df = pd.read_csv(self.stats_csv_path, index_col=0)
+                # Expect columns: 'mean' and 'std'
+                self.lead_means = stats_df['mean'].values.astype(np.float32)
+                self.lead_stds = stats_df['std'].replace(0, 1.0).values.astype(np.float32)
+                assert self.lead_means.shape[0] == 12 and self.lead_stds.shape[0] == 12, "Expected 12 leads in stats file."
+                self.global_stats_available = True
+            else:
+                print(f"Warning: stats file '{self.stats_csv_path}' not found. Skipping global normalization.")
+        except Exception as e:
+            print(f"Warning: failed to load stats file '{self.stats_csv_path}': {e}")
+            self.global_stats_available = False
 
     def __len__(self):
         return len(self.records_list)
@@ -107,7 +124,13 @@ class ECGDataset(Dataset):
 
             # Clean signal and correct polarity
             cleaned_leads = [nk.ecg_clean(lead, sampling_rate=utils.UNIFIED_FREQUENCY) for lead in signal]
-            signal = np.stack(cleaned_leads)
+            signal = np.stack(cleaned_leads)  # shape (num_leads, num_samples)
+
+            # Apply per-lead global mean/std normalization if available (before window extraction)
+            if self.global_stats_available:
+                # Broadcast subtraction/division: (12, N)
+                signal = (signal - self.lead_means[:, None]) / self.lead_stds[:, None]
+
             # try:
             #     signal, _ = utils.correct_12_lead_polarity_lead_II_ref(signal, utils.UNIFIED_FREQUENCY)
             # except Exception as e:
@@ -141,7 +164,7 @@ class ECGDataset(Dataset):
                 tqdm.write(f"Error extracting features for record {self.records_list[idx]}: {e}")
                 return None # Return None if feature extraction fails
 
-            # Extract windows from the signal
+            # Extract windows
             if utils.USE_ONE_WINDOW:
                 windows = utils.get_windows(signal, method=self.windowing_method, window_size=self.seq_len)
                 if len(windows) == 0:
@@ -150,10 +173,11 @@ class ECGDataset(Dataset):
                 signal = windows[0]
             else:
                 raise NotImplementedError("Multiple windows not implemented yet. Set USE_ONE_WINDOW to True for now.")
-            
-            # Normalize each lead between -1 and 1
-            signal = utils.normalize(signal, smooth=1e-8)
-    
+
+            # Only apply local normalization if global stats were NOT applied
+            if not self.global_stats_available:
+                signal = utils.normalize(signal, smooth=1e-8)
+
             # MODIFIED: Return a 3-tuple including the wide_feats tensor
             if self.include_wide_feats:
                 return torch.FloatTensor(signal.copy()), torch.FloatTensor(wide_feats), torch.FloatTensor([label])

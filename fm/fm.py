@@ -166,7 +166,89 @@ import pytorch_lightning as pl
 #         loss = -torch.sum(true_probs * torch.log(pred_probs))
         
 #         return loss
-
+class PercentileRankingLoss(nn.Module):
+    """
+    Maintains running percentile estimates using exponential moving average.
+    More memory efficient than GlobalTopKLoss.
+    """
+    def __init__(self, top_percent=0.05, margin=1.0, momentum=0.99, warmup_steps=100):
+        super().__init__()
+        self.top_percent = top_percent
+        self.margin = margin
+        self.momentum = momentum
+        self.warmup_steps = warmup_steps
+        
+        # Running percentile estimates
+        self.register_buffer('running_threshold', torch.tensor(0.0))
+        self.register_buffer('running_pos_mean', torch.tensor(0.0))
+        self.register_buffer('running_neg_mean', torch.tensor(0.0))
+        self.register_buffer('step', torch.tensor(0))
+        
+        # Percentile tracker (simple histogram approach)
+        self.register_buffer('score_bins', torch.linspace(-10, 10, 100))
+        self.register_buffer('score_counts', torch.zeros(100))
+        
+    def update_statistics(self, scores):
+        """Update running estimates of score distribution"""
+        with torch.no_grad():
+            self.step += 1
+            
+            # Update histogram
+            hist = torch.histc(scores, bins=100, min=-10, max=10)
+            if self.step < self.warmup_steps:
+                # During warmup, average the histograms
+                self.score_counts = ((self.step - 1) * self.score_counts + hist) / self.step
+            else:
+                # After warmup, use EMA
+                self.score_counts = self.momentum * self.score_counts + (1 - self.momentum) * hist
+            
+            # Compute percentile from histogram
+            cumsum = torch.cumsum(self.score_counts, dim=0)
+            total = cumsum[-1]
+            if total > 0:
+                percentile_idx = (1 - self.top_percent) * total
+                idx = torch.searchsorted(cumsum, percentile_idx)
+                idx = min(idx, len(self.score_bins) - 1)
+                self.running_threshold = self.score_bins[idx]
+    
+    def forward(self, logits, labels):
+        logits = logits.squeeze(-1)
+        labels = labels.squeeze(-1)
+        
+        # Update distribution statistics
+        self.update_statistics(logits.detach())
+        
+        pos_mask = labels == 1
+        neg_mask = labels == 0
+        
+        if not pos_mask.any() or not neg_mask.any():
+            return F.binary_cross_entropy_with_logits(logits, labels.float())
+        
+        pos_scores = logits[pos_mask]
+        neg_scores = logits[neg_mask]
+        
+        # Use running threshold after warmup
+        if self.step > self.warmup_steps and self.running_threshold != 0:
+            threshold = self.running_threshold
+        else:
+            # During warmup, use batch statistics
+            k = max(1, int(len(logits) * self.top_percent))
+            sorted_scores, _ = torch.sort(logits, descending=True)
+            threshold = sorted_scores[min(k-1, len(logits)-1)]
+        
+        # Ranking losses
+        pos_loss = F.relu(threshold + self.margin - pos_scores).mean()
+        neg_loss = F.relu(neg_scores - threshold + self.margin).mean()
+        
+        # Additional: maximize gap between pos and neg means
+        gap_loss = F.relu(self.margin - (pos_scores.mean() - neg_scores.mean()))
+        
+        total_loss = pos_loss + neg_loss + 0.1 * gap_loss
+        
+        # BCE for stability
+        bce_loss = F.binary_cross_entropy_with_logits(logits, labels.float())
+        
+        return 0.5 * total_loss + 0.5 * bce_loss
 class TopKRankingLoss(nn.Module):
     def __init__(self, fraction_capacity=0.05, margin=1.0):
         super().__init__()
@@ -205,6 +287,66 @@ class ChallengeScoreLoss(nn.Module):
         bce = self.bce_loss(outputs, labels.float())
         ranking = self.ranking_loss(outputs, labels)
         return self.bce_weight * bce + self.ranking_weight * ranking
+
+class DAM_Momentum(nn.Module):
+    """
+    DAM with momentum updates for primal variables
+    """
+    def __init__(self, margin=1.0, momentum=0.9):
+        super().__init__()
+        self.margin = margin
+        self.momentum = momentum
+        
+        # Initialize primal variables
+        self.register_buffer('a', torch.zeros(1))
+        self.register_buffer('b', torch.zeros(1)) 
+        self.register_buffer('alpha', torch.zeros(1))
+        
+        # Momentum buffers
+        self.register_buffer('a_momentum', torch.zeros(1))
+        self.register_buffer('b_momentum', torch.zeros(1))
+        self.register_buffer('alpha_momentum', torch.zeros(1))
+        
+    def forward(self, logits, labels, lr=0.1):
+        p = labels.float().mean()
+        
+        pos_mask = labels == 1
+        neg_mask = labels == 0
+        
+        # Compute gradients w.r.t. primal variables
+        if pos_mask.any():
+            pos_preds = logits[pos_mask]
+            grad_a = 2 * (1 - p) * (self.a - pos_preds.mean().detach())
+            
+            # Momentum update for a
+            self.a_momentum = self.momentum * self.a_momentum + (1 - self.momentum) * grad_a
+            self.a = self.a - lr * self.a_momentum
+            
+            pos_loss = (1 - p) * ((pos_preds - self.a) ** 2).mean()
+        else:
+            pos_loss = 0
+            
+        if neg_mask.any():
+            neg_preds = logits[neg_mask]
+            grad_b = 2 * p * (self.b - neg_preds.mean().detach())
+            
+            # Momentum update for b
+            self.b_momentum = self.momentum * self.b_momentum + (1 - self.momentum) * grad_b
+            self.b = self.b - lr * self.b_momentum
+            
+            neg_loss = p * ((neg_preds - self.b) ** 2).mean()
+        else:
+            neg_loss = 0
+        
+        # Update alpha (threshold)
+        grad_alpha = 2 * ((1 - p) * self.a - p * self.b).detach()
+        self.alpha_momentum = self.momentum * self.alpha_momentum + (1 - self.momentum) * grad_alpha
+        self.alpha = self.alpha - lr * self.alpha_momentum
+        
+        # Compute final loss
+        loss = pos_loss + neg_loss - p * (1 - p) * self.margin ** 2
+        
+        return loss
 
 class ECGFMFeatureExtractor(nn.Module):
     """
@@ -296,7 +438,8 @@ class ECGFMFeatureExtractor(nn.Module):
 
 
 class FMChagasClassifier(pl.LightningModule):
-    def __init__(self, ecg_fm_checkpoint_path, freeze_encoder, optimizer_hparams, info_features=0):
+    def __init__(self, ecg_fm_checkpoint_path, freeze_encoder, optimizer_hparams, info_features=0,
+                 loss_type='percentile', loss_top_percent=0.05, loss_margin=1.0, loss_momentum=0.99, loss_warmup_steps=100):
         super().__init__()
         self.save_hyperparameters()
         self.feature_extractor = ECGFMFeatureExtractor(
@@ -315,7 +458,15 @@ class FMChagasClassifier(pl.LightningModule):
             nn.Dropout(0.1),
             nn.Linear(256, 1)
         )
-        self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([utils.POS_WEIGHT]))
+        if self.hparams.loss_type == 'bce':
+            self.criterion = nn.BCEWithLogitsLoss()
+        else:
+            self.criterion = PercentileRankingLoss(
+                top_percent=self.hparams.loss_top_percent,
+                margin=self.hparams.loss_margin,
+                momentum=self.hparams.loss_momentum,
+                warmup_steps=self.hparams.loss_warmup_steps
+            )
         
         self.train_acc = Accuracy(task="binary")
         self.val_acc = Accuracy(task="binary")
@@ -352,6 +503,8 @@ class FMChagasClassifier(pl.LightningModule):
             return None, None, None
 
         logits = self(signals, info)
+        
+        # The loss function handles squeezing internally.
         loss = self.criterion(logits, labels)
         
         return loss, logits, labels
@@ -470,12 +623,16 @@ class FMChagasClassifier(pl.LightningModule):
         }
 # --- 4. Training Script ---
 
+# set default loss type
+
+
 if __name__ == '__main__':
     
     # add args parser for debug mode
     import argparse
     parser = argparse.ArgumentParser(description="Train ECG-FM for Chagas classification")
     parser.add_argument('--debug', action='store_true', help="Run in debug mode with a smaller dataset")
+
     args = parser.parse_args()
 
     data_folder='../training_data'
@@ -488,13 +645,13 @@ if __name__ == '__main__':
     BATCH_SIZE = 32
     # SEQ_LEN = utils.WINDOW_SIZE
     NUM_LEADS = 12
-    WINDOWING_METHOD = 'random'
+    WINDOWING_METHOD = 'entire_recording'
     NUM_EPOCHS = 16
     CHECKPOINT_MONITOR_METRIC = 'val_challenge_score'
-    PRECISION = "16-mixed"
     SEQ_LENGTH = utils.UNIFIED_FREQUENCY * 10  
     EPOCHS = 50
     LR = 1e-4
+    LOSS_TYPE = 'bce'
 
     # Add these values into the config dictionary
     config = {
@@ -505,9 +662,10 @@ if __name__ == '__main__':
         "windowing_method": WINDOWING_METHOD,
         "num_epochs": NUM_EPOCHS,
         "checkpoint_monitor_metric": CHECKPOINT_MONITOR_METRIC,
-        "precision": PRECISION,
+        # "precision": PRECISION,
         "epochs": EPOCHS,
-        "lr": LR
+        "lr": LR, 
+        'loss_type': LOSS_TYPE,
     }
 
     try:
@@ -536,6 +694,8 @@ if __name__ == '__main__':
     records_meta = utils.prepare_stratification(all_records)
     df = pd.DataFrame(records_meta)
     
+    # Exclude records from source 'CODE-15%'
+    # df = df[df['source'] != 'CODE-15%'] 
     # --- Exclude records from code15_label_issues.csv ---
     try:
         issues_df = pd.read_csv('code15_label_issues.csv')
@@ -610,8 +770,9 @@ if __name__ == '__main__':
     model = FMChagasClassifier(
         ecg_fm_checkpoint_path=checkpoint_path,
         freeze_encoder=True,
-        optimizer_hparams = optimizer_hparams,
-        info_features=2 # Age and Sex
+        optimizer_hparams=optimizer_hparams,
+        info_features=2,  # Age and Sex
+        loss_type=LOSS_TYPE
     )
     
     print("\n--- Model Summary ---")
@@ -620,7 +781,6 @@ if __name__ == '__main__':
     trainer = pl.Trainer(
         max_epochs=NUM_EPOCHS,
         accelerator="auto",
-        precision=PRECISION,
         devices=1,
         logger=WandbLogger(project="foundation_model", name=f"foundation_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}", entity="edwards_physionet"),
         # logger=pl.loggers.TensorBoardLogger("lightning_logs/", name="ecg_transformer_final"),
@@ -636,6 +796,296 @@ if __name__ == '__main__':
     print("\n--- Starting Testing ---")
     trainer.test(model, datamodule=data_module)
     print("\n--- Testing Finished ---")
+if __name__ == '__main__':
+    checkpoint_path='mimic_iv_ecg_finetuned.pt'
+
+    # --- Hyperparameters ---
+    DATA_DIR = data_folder
+    BATCH_SIZE = 32
+    # SEQ_LEN = utils.WINDOW_SIZE
+    NUM_LEADS = 12
+    WINDOWING_METHOD = 'entire_recording'
+    NUM_EPOCHS = 16
+    SEQ_LENGTH = utils.UNIFIED_FREQUENCY * 10  
+    LR = 1e-4
+    LOSS_TYPE = 'bce'
+
+    # Add these values into the config dictionary
+    config = {
+        "data_dir": DATA_DIR,
+        "batch_size": BATCH_SIZE,
+        "seq_length": SEQ_LENGTH,
+        "num_leads": NUM_LEADS,
+        "windowing_method": WINDOWING_METHOD,
+        "num_epochs": NUM_EPOCHS,
+        "checkpoint_monitor_metric": CHECKPOINT_MONITOR_METRIC,
+        "epochs": EPOCHS,
+        "lr": LR, 
+        "loss_type": LOSS_TYPE
+    }
+
+    try:
+        if torch.cuda.is_available():
+            if torch.cuda.get_device_capability()[0] >= 8:
+                print("Setting TF32 matmul precision for Ampere GPUs")
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.set_float32_matmul_precision('high')
+            else:
+                print("Warning: Not an Ampere GPU. Some precision settings may not be optimal.")
+    except AttributeError:
+        print("Warning: TF32 matmul precision setting not available. Skipping this step.")
+
+    if not os.path.isdir(DATA_DIR):
+        print(f"Error: Data directory not found at '{DATA_DIR}'")
+        print("Please update the DATA_DIR variable to point to your dataset.")
+        sys.exit(1)
+
+# 2. Prepare data for fine-tuning
+    all_records = helper_code.find_records_abs(DATA_DIR)
+    print(f"{len(all_records)} records found in the dataset.")
+    records_meta = utils.prepare_stratification(all_records)
+    df = pd.DataFrame(records_meta)
+    
+    # # --- Exclude records from code15_label_issues.csv ---
+    # try:
+    #     issues_df = pd.read_csv('code15_label_issues.csv')
+    #     # Extract stem (filename without extension) from the full path for exclusion list
+    #     stems_to_exclude = set(issues_df['record_path'].apply(lambda x: os.path.splitext(os.path.basename(x))[0]))
+        
+    #     # Create a new 'base_record' column with the stem for matching
+    #     df['base_record'] = df['record'].apply(lambda x: os.path.splitext(os.path.basename(x))[0])
+        
+    #     initial_count = len(df)
+    #     # Filter out the records using the new column
+    #     df = df[~df['base_record'].isin(stems_to_exclude)]
+    #     final_count = len(df)
+        
+    #     print(f"Excluded {initial_count - final_count} records based on 'code15_label_issues.csv'.")
+    #     # Drop the temporary 'base_record' column
+    #     df = df.drop(columns=['base_record'])
+        
+    # except FileNotFoundError:
+    #     print("Warning: 'code15_label_issues.csv' not found. No records will be excluded.")
+    
+    # --- Stratified Data Splitting ---
+    # Split the data into training (80%), validation (10%), and test (10%) sets.
+    # The splits are stratified by the 'label' column to maintain class distribution.
+    
+    # First, split into training and a temporary set (val + test)
+    train_df = df
+    # Convert to lists of record paths
+    train_records = train_df['record'].tolist()
+
+    # Stratify split for train/val/test
+    train_df, temp_df = train_test_split(
+        train_df,
+        test_size=0.2,  # 20% for val and test
+        random_state=42,
+        stratify=train_df['label']
+    )
+    
+    # Next, split the temporary set into validation and test sets
+    val_df, test_df = train_test_split(
+        temp_df,
+        test_size=0.5,  # 50% of temp_df (which is 10% of original)
+        random_state=42,
+        stratify=temp_df['label']
+    )
+    
+    # Convert to lists of record paths
+    val_records = val_df['record'].tolist()
+    test_records = test_df['record'].tolist()
+
+    
+    print(f"Training on {len(train_records)} records.")
+    print(f"Final training set positive ratio: {train_df['label'].value_counts(normalize=True).get(1, 0):.2%}")
+
+    # 3. Create DataModule
+    data_module = ECGDataModule(
+        data_dir=DATA_DIR,
+        batch_size=BATCH_SIZE,
+        seq_len=SEQ_LENGTH,
+        windowing_method='entire_recording',
+    )
+    data_module.train_dataset = ECGDataset(train_records, DATA_DIR, is_training=True, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True, normalize_leads=True)
+    data_module.val_dataset   = ECGDataset(val_records,   DATA_DIR, is_training=False, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True)
+    data_module.test_dataset  = ECGDataset(test_records,  DATA_DIR, is_training=False, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True)
+
+    optimizer_hparams = {
+        'lr': 1e-4,
+        'warmup_steps': 700,
+        'lr_end': 1e-7
+    }
+
+    model = FMChagasClassifier(
+        ecg_fm_checkpoint_path=checkpoint_path,
+        freeze_encoder=True,
+        optimizer_hparams=optimizer_hparams,
+        info_features=2 # Age and Sex
+    )
+    
+    # Create checkpoint callback
+    checkpoint_callback = pl.callbacks.ModelCheckpoint(
+        monitor=CHECKPOINT_MONITOR_METRIC,
+        mode='max',
+        save_top_k=1,
+        filename='best-{epoch:02d}-{val_challenge_score:.4f}'
+    )
+
+    # Create a WandbLogger
+    wandb_logger = WandbLogger(
+        project="foundation_model",
+        name=f"foundation_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        entity="edwards_physionet"
+    )
+    
+    trainer = pl.Trainer(
+        max_epochs=NUM_EPOCHS,
+        accelerator="auto",
+        devices=1,
+        logger=wandb_logger,
+        callbacks=[checkpoint_callback])
+
+    # --- Run Training and Testing ---
+    print(f"\n--- Starting Training with {len(train_records)} records from '{DATA_DIR}' ---")
+    trainer.fit(model, datamodule=data_module)
+    print("\n--- Training Finished ---")
+
+    # Save the model to model_folder
+    final_checkpoint_path = os.path.join(model_folder, "foundation_model_finetuned.ckpt")
+    trainer.save_checkpoint(final_checkpoint_path, weights_only=True)
+    print(f"Model weights saved to {final_checkpoint_path}")
+    
+def train_model(data_folder, model_folder):
+    checkpoint_path='mimic_iv_ecg_finetuned.pt'
+
+    # --- Hyperparameters ---
+    DATA_DIR = data_folder
+    BATCH_SIZE = 16
+    # SEQ_LEN = utils.WINDOW_SIZE
+    NUM_LEADS = 12
+    WINDOWING_METHOD = 'entire_recording'
+    NUM_EPOCHS = 16
+    SEQ_LENGTH = utils.UNIFIED_FREQUENCY * 10  
+    LR = 1e-4
+    LOSS_TYPE = 'bce'
+
+    # Add these values into the config dictionary
+    config = {
+        "data_dir": DATA_DIR,
+        "batch_size": BATCH_SIZE,
+        "seq_length": SEQ_LENGTH,
+        "num_leads": NUM_LEADS,
+        "windowing_method": WINDOWING_METHOD,
+        "num_epochs": NUM_EPOCHS,
+        "checkpoint_monitor_metric": CHECKPOINT_MONITOR_METRIC,
+        "epochs": EPOCHS,
+        "lr": LR, 
+        "loss_type": LOSS_TYPE
+    }
+
+    try:
+        if torch.cuda.is_available():
+            if torch.cuda.get_device_capability()[0] >= 8:
+                print("Setting TF32 matmul precision for Ampere GPUs")
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.set_float32_matmul_precision('high')
+            else:
+                print("Warning: Not an Ampere GPU. Some precision settings may not be optimal.")
+    except AttributeError:
+        print("Warning: TF32 matmul precision setting not available. Skipping this step.")
+
+    if not os.path.isdir(DATA_DIR):
+        print(f"Error: Data directory not found at '{DATA_DIR}'")
+        print("Please update the DATA_DIR variable to point to your dataset.")
+        sys.exit(1)
+
+# 2. Prepare data for fine-tuning
+    all_records = helper_code.find_records_abs(DATA_DIR)
+    print(f"{len(all_records)} records found in the dataset.")
+    records_meta = utils.prepare_stratification(all_records)
+    df = pd.DataFrame(records_meta)
+    
+    # # --- Exclude records from code15_label_issues.csv ---
+    # try:
+    #     issues_df = pd.read_csv('code15_label_issues.csv')
+    #     # Extract stem (filename without extension) from the full path for exclusion list
+    #     stems_to_exclude = set(issues_df['record_path'].apply(lambda x: os.path.splitext(os.path.basename(x))[0]))
+        
+    #     # Create a new 'base_record' column with the stem for matching
+    #     df['base_record'] = df['record'].apply(lambda x: os.path.splitext(os.path.basename(x))[0])
+        
+    #     initial_count = len(df)
+    #     # Filter out the records using the new column
+    #     df = df[~df['base_record'].isin(stems_to_exclude)]
+    #     final_count = len(df)
+        
+    #     print(f"Excluded {initial_count - final_count} records based on 'code15_label_issues.csv'.")
+    #     # Drop the temporary 'base_record' column
+    #     df = df.drop(columns=['base_record'])
+        
+    # except FileNotFoundError:
+    #     print("Warning: 'code15_label_issues.csv' not found. No records will be excluded.")
+    
+    # --- Stratified Data Splitting ---
+    # Split the data into training (80%), validation (10%), and test (10%) sets.
+    # The splits are stratified by the 'label' column to maintain class distribution.
+    
+    # First, split into training and a temporary set (val + test)
+    train_df = df
+    # Convert to lists of record paths
+    train_records = train_df['record'].tolist()
+
+    
+    print(f"Training on {len(train_records)} records.")
+    print(f"Final training set positive ratio: {train_df['label'].value_counts(normalize=True).get(1, 0):.2%}")
+
+    # 3. Create DataModule
+    data_module = ECGDataModule(
+        data_dir=DATA_DIR,
+        batch_size=BATCH_SIZE,
+        seq_len=SEQ_LENGTH,
+        windowing_method='entire_recording',
+
+    )
+    data_module.train_dataset = ECGDataset(train_records, DATA_DIR, is_training=True, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True,)
+    data_module.val_dataset   = None
+    data_module.test_dataset  = None
+
+    optimizer_hparams = {
+        'lr': 1e-4,
+        'warmup_steps': 700,
+        'lr_end': 1e-7
+    }
+
+    model = FMChagasClassifier(
+        ecg_fm_checkpoint_path=checkpoint_path,
+        freeze_encoder=True,
+        optimizer_hparams=optimizer_hparams,
+        info_features=2 # Age and Sex
+    )
+    
+    
+    trainer = pl.Trainer(
+        max_epochs=NUM_EPOCHS,
+        accelerator="auto",
+        devices=1,
+        # logger=pl.loggers.TensorBoardLogger("lightning_logs/", name="ecg_transformer_final"),
+        callbacks=[],
+        logger=False
+        
+    )
+
+    # --- Run Training and Testing ---
+    print(f"\n--- Starting Training with {len(train_records)} records from '{DATA_DIR}' ---")
+    trainer.fit(model, datamodule=data_module)
+    print("\n--- Training Finished ---")
+
+    # Save the model to model_folder
+    final_checkpoint_path = os.path.join(model_folder, "foundation_model_finetuned.ckpt")
+    trainer.save_checkpoint(final_checkpoint_path, weights_only=True)
+    print(f"Model weights saved to {final_checkpoint_path}")
+    
 
 # def train_model(data_folder, model_folder, checkpoint_path, verbose):
 #     pl.seed_everything(42)  # For reproducibility
@@ -706,3 +1156,30 @@ if __name__ == '__main__':
 #     checkpoint_path='./ckpts/mimic_iv_ecg_finetuned.pt',
 #     verbose=True
 # )
+
+def load_finetuned_model(ckpt_path, map_location=None, strict=True, override_hparams=None):
+    """
+    Load a fine-tuned FMChagasClassifier from a Lightning .ckpt file.
+
+    Args:
+        ckpt_path (str): Path to the .ckpt file (e.g., 'foundation_model_finetuned.ckpt').
+        map_location (str or torch.device, optional): Device mapping for loading.
+            Defaults to 'cuda' if available, else 'cpu'.
+        strict (bool): Strict state_dict loading. Default True.
+        override_hparams (dict, optional): Optional kwargs to override saved hparams,
+            e.g., {'loss_type': 'bce'}.
+
+    Returns:
+        FMChagasClassifier: Model loaded with weights, set to eval() mode.
+    """
+    if map_location is None:
+        map_location = 'cuda' if torch.cuda.is_available() else 'cpu'
+    override_hparams = override_hparams or {}
+    model = FMChagasClassifier.load_from_checkpoint(
+        ckpt_path,
+        map_location=map_location,
+        strict=strict,
+        **override_hparams
+    )
+    model.eval()
+    return model
