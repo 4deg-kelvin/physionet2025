@@ -6,6 +6,8 @@ from torchmetrics.classification import Accuracy
 import math
 
 import utils
+from wavelnet import WaveletConv, create_daubechies_wavelet
+
 # --- Building Blocks (Refactored) ---
 
 class SE_Module(nn.Module):
@@ -230,17 +232,17 @@ class SE_ECGNet(nn.Module):
             
         return nn.Sequential(*layers)
 
-    def forward(self, x, info=None):
-        # Assert that the input data's channel dimension matches the model's configuration
-        assert x.shape[1] == self.in_channels, \
-            f"Input tensor has {x.shape[1]} leads (channels), but the model was instantiated with in_channels={self.in_channels}. Please ensure they match."
-
+    def extract_features(self, x, info=None):
+        """
+        Run the shared backbone up to (but not including) the final fc layer,
+        returning the feature vector.
+        """
         out = x.unsqueeze(1)
         out = self.conv1(out)
         out = self.bn1(out)
         out = self.relu(out)
         out = self.block1(out)
-        
+
         branch_outputs = []
         for i in range(len(self.struct)):
             sep = self.block2_list[i](out)
@@ -249,14 +251,127 @@ class SE_ECGNet(nn.Module):
             sep = self.avgpool(sep)
             sep = sep.view(sep.size(0), -1)
             branch_outputs.append(sep)
-            
-        out = torch.cat(branch_outputs, dim=1)
-        
+
+        features = torch.cat(branch_outputs, dim=1)
         if self.info_features > 0 and info is not None:
-            out = torch.cat([out, info], dim=1)
-            
-        out = self.fc(out)
-        return out
+            features = torch.cat([features, info], dim=1)
+        return features
+
+    def forward(self, x, info=None):
+        features = self.extract_features(x, info)
+        return self.fc(features)
+
+
+class WaveletSE_ECGNet(SE_ECGNet):
+    """
+    SE_ECGNet with a learnable WaveletConv applied to each lead as the first step.
+    This version corrects the initialization to handle the transformed input shape.
+    """
+    def __init__(self, *args,
+                 wavelet_name: str = 'db6',
+                 wavelet_kernel_size: int = 129,
+                 wavelet_out_channels: int = 4,
+                 **kwargs):
+        
+        # --- FIX STARTS HERE ---
+        # The key is to update the `in_channels` for the parent SE_ECGNet.
+        # The parent model needs to know the number of effective channels *after*
+        # the wavelet transformation.
+        
+        # Get the original number of leads from kwargs.
+        original_in_channels = kwargs.get('in_channels', 12) # Default to 12 if not provided
+        
+        # Calculate the new effective number of channels for the backbone.
+        new_in_channels = original_in_channels * wavelet_out_channels
+        
+        # Update kwargs with the new, correct in_channels value before calling super().__init__.
+        kwargs['in_channels'] = new_in_channels
+        
+        # Now, initialize the parent class with the corrected number of channels.
+        # The parent will now correctly size its layers, including the BatchNorm1d.
+        super().__init__(*args, **kwargs)
+        # --- FIX ENDS HERE ---
+
+        # Build the wavelet layer. This part is independent of the fix and was correct.
+        # It operates on each lead individually (in_channels=1).
+        mother = create_daubechies_wavelet(name=wavelet_name, kernel_size=wavelet_kernel_size)
+        self.wavelet_conv = WaveletConv(
+            in_channels=1,
+            out_channels=wavelet_out_channels,
+            kernel_size=wavelet_kernel_size,
+            mother_wavelet=mother
+        )
+        self.wavelet_relu = nn.ReLU(inplace=True)
+
+    def extract_features(self, x, info=None):
+        # x: [batch, original_leads, seq_len]
+        b, L, T = x.shape
+        
+        # Apply wavelet convolution to each lead separately.
+        # Reshape to [batch * leads, 1, seq_len] to process each lead as a single channel.
+        xw = x.view(b * L, 1, T)
+        xw = self.wavelet_relu(self.wavelet_conv(xw))
+        _, Cw, Tw = xw.shape
+        
+        # Reshape back to [batch, new_channels, new_seq_len]
+        # new_channels = original_leads * wavelet_out_channels
+        x_transformed = xw.view(b, L * Cw, Tw)
+        
+        # Now call the parent's feature extractor on this transformed tensor.
+        # The parent is now correctly configured to handle this larger channel dimension.
+        return super().extract_features(x_transformed, info)
+class Wavelet_Pooled_SE_ECGNet(SE_ECGNet):
+    """
+    SE_ECGNet with a learnable WaveletConv and a subsequent pooling layer
+    to reduce sequence length and improve training speed.
+    """
+    def __init__(self, *args,
+                 wavelet_name: str = 'db6',
+                 wavelet_kernel_size: int = 129,
+                 wavelet_out_channels: int = 32,
+                 **kwargs):
+        
+        # The key is to update the `in_channels` for the parent SE_ECGNet.
+        original_in_channels = kwargs.get('in_channels', 12)
+        new_in_channels = original_in_channels * wavelet_out_channels
+        kwargs['in_channels'] = new_in_channels
+        
+        # Initialize the parent class with the corrected number of channels.
+        super().__init__(*args, **kwargs)
+
+        # Build the wavelet layer.
+        mother = create_daubechies_wavelet(name=wavelet_name, kernel_size=wavelet_kernel_size)
+        self.wavelet_conv = WaveletConv(
+            in_channels=1,
+            out_channels=wavelet_out_channels,
+            kernel_size=wavelet_kernel_size,
+            mother_wavelet=mother
+        )
+        self.wavelet_relu = nn.ReLU(inplace=True)
+        
+        # --- 1. DEFINE THE POOLING LAYER HERE ---
+        # This layer will reduce the sequence length by a factor of 4.
+        self.post_wavelet_pool = nn.AvgPool1d(kernel_size=4, stride=4)
+
+
+    def extract_features(self, x, info=None):
+        # x: [batch, original_leads, seq_len]
+        b, L, T = x.shape
+        
+        # Apply wavelet convolution to each lead separately.
+        xw = x.view(b * L, 1, T)
+        xw = self.wavelet_relu(self.wavelet_conv(xw))
+        
+        # --- 2. APPLY THE POOLING LAYER HERE ---
+        # This is the optimal place to downsample, right after feature extraction.
+        xw = self.post_wavelet_pool(xw)
+        
+        # Reshape back to [batch, new_channels, new_seq_len]
+        _, Cw, Tw = xw.shape
+        x_transformed = xw.view(b, L * Cw, Tw)
+        
+        # Now call the parent's feature extractor on this smaller, transformed tensor.
+        return super().extract_features(x_transformed, info)
 
 
 # --- PyTorch Lightning Module ---
@@ -265,20 +380,70 @@ class LitSE_ECGNet(pl.LightningModule):
     """
     PyTorch Lightning wrapper for the SE_ECGNet model.
     """
-    def __init__(self, num_classes=1, learning_rate=3.33e-5, weight_decay=1e-4, in_channels=12, info_features=0, struct=[(1, 3), (1, 5), (1, 7)], warmup_steps=500, total_steps=10000):
+    def __init__(self,
+                 num_classes=1,
+                 learning_rate=3.33e-5,
+                 weight_decay=1e-4,
+                 in_channels=12,
+                 info_features=2,
+                 struct=[(1, 3), (1, 5), (1, 7)],
+                 warmup_steps=500,
+                 total_steps=10000,
+                 use_wavelet_cnn: bool = False,
+                 wavelet_name: str = 'db6',
+                 wavelet_kernel_size: int = 129,
+                 wavelet_out_channels: int = 32,
+                 no_pooling: bool = True,  # New parameter to control pooling
+                 do_multitask: bool = False,
+                 rbbb_loss_weight: float = 0.25,
+                 d1avb_loss_weight: float = 0.25): # <-- REMOVED chagas_loss_weight from signature
         super().__init__()
         # For binary classification, num_classes should be 1.
         if num_classes != 1:
             raise ValueError("For binary classification, `num_classes` must be 1.")
+        
+        # --- ROBUST WEIGHTING LOGIC ---
+        # This ensures weights are positive and sum to 1.0, preventing negative loss issues.
+        if do_multitask:
+            if rbbb_loss_weight < 0 or d1avb_loss_weight < 0:
+                raise ValueError("Auxiliary loss weights must be non-negative.")
+            if rbbb_loss_weight + d1avb_loss_weight >= 1.0:
+                raise ValueError("The sum of auxiliary loss weights must be less than 1.0.")
+            # Calculate the main task weight implicitly.
+            self.chagas_loss_weight = 1.0 - rbbb_loss_weight - d1avb_loss_weight
+        
         self.save_hyperparameters()
         
-        # FIX: Pass the in_channels hyperparameter to the underlying model
-        self.model = SE_ECGNet(
-            num_classes=self.hparams.num_classes,
-            in_channels=self.hparams.in_channels,
-            info_features=self.hparams.info_features,
-            struct=self.hparams.struct
-        )
+        # choose backbone
+        if self.hparams.use_wavelet_cnn:
+            if self.hparams.no_pooling:
+                self.model = WaveletSE_ECGNet(
+                    num_classes=self.hparams.num_classes,
+                    in_channels=self.hparams.in_channels,
+                    info_features=self.hparams.info_features,
+                    struct=self.hparams.struct,
+                    wavelet_name=self.hparams.wavelet_name,
+                    wavelet_kernel_size=self.hparams.wavelet_kernel_size,
+                    wavelet_out_channels=self.hparams.wavelet_out_channels
+                )
+            else:
+                self.model = Wavelet_Pooled_SE_ECGNet(
+                    num_classes=self.hparams.num_classes,
+                    in_channels=self.hparams.in_channels,
+                    info_features=self.hparams.info_features,
+                    struct=self.hparams.struct,
+                    wavelet_name=self.hparams.wavelet_name,
+                    wavelet_kernel_size=self.hparams.wavelet_kernel_size,
+                    wavelet_out_channels=self.hparams.wavelet_out_channels
+                )
+
+        else:
+            self.model = SE_ECGNet(
+                num_classes=self.hparams.num_classes,
+                in_channels=self.hparams.in_channels,
+                info_features=self.hparams.info_features,
+                struct=self.hparams.struct
+            )
         
         # Use BCEWithLogitsLoss for binary classification
         self.criterion = nn.BCEWithLogitsLoss()
@@ -297,48 +462,101 @@ class LitSE_ECGNet(pl.LightningModule):
         self.validation_step_outputs = []
         self.test_step_outputs = []
 
+        if self.hparams.do_multitask:
+            # assume `self.model.fc` is your primary head
+            head_dim = self.model.fc.in_features
+            self.rbbb_head = nn.Linear(head_dim, 1)
+            self.d1avb_head = nn.Linear(head_dim, 1)
+
+
     def forward(self, x, info=None):
-        return self.model(x, info)
+        if not self.hparams.do_multitask:
+            # single‐task: delegate to the base model
+            return self.model(x, info)
+
+        # multi‐task: use raw features to drive all three heads
+        features = self.model.extract_features(x, info)
+        main_logits = self.model.fc(features)
+        rbbb_logits = self.rbbb_head(features)
+        d1avb_logits = self.d1avb_head(features)
+        return main_logits, rbbb_logits, d1avb_logits
+
 
     def _common_step(self, batch, batch_idx):
-        if len(batch) == 3:
-            x, info, y = batch
+        if batch is None: # Handle empty batches from collate_fn
+            return None, None, None
+
+        if self.hparams.do_multitask:
+            signals, info, chagas_labels, rbbb_labels, d1avb_labels = batch
+            chagas_logits, rbbb_logits, d1avb_logits = self(signals, info)
         else:
-            x, y = batch
-            info = None
-        
-        logits = self(x, info)
-        # Reshape logits and labels for BCEWithLogitsLoss
-        # logits: [batch, 1] -> [batch], y: [batch] -> [batch]
-        logits = logits.squeeze(1)
-        y = y.float() # Ensure labels are float
-        y = y.squeeze(1) if y.dim() > 1 else y
-        
-        loss = self.criterion(logits, y)
-        return loss, logits, y
+            signals, info, chagas_labels = batch
+            chagas_logits = self(signals, info)
+
+        if signals.numel() == 0:
+            return None, None, None
+
+        # Always calculate the primary Chagas loss
+        chagas_logits = chagas_logits.squeeze(-1)
+        chagas_labels = chagas_labels.float().squeeze(-1)
+        supervised_chagas_loss = self.criterion(chagas_logits, chagas_labels)
+
+        # In training and multitask, combine losses
+        if self.training and self.hparams.do_multitask:
+            bce_loss_fn = nn.BCEWithLogitsLoss()
+            rbbb_loss = torch.tensor(0.0, device=self.device)
+            d1avb_loss = torch.tensor(0.0, device=self.device)
+
+            # Squeeze to handle potential extra dims and create boolean mask
+            rbbb_mask = (rbbb_labels != -1).squeeze()
+            rbbb_mask = (rbbb_labels != -1).squeeze()
+            if rbbb_mask.any():
+                # --- FIX IS HERE ---
+                # Squeeze the labels *before* applying the mask to align shapes.
+                rbbb_loss = bce_loss_fn(rbbb_logits.squeeze(-1)[rbbb_mask], rbbb_labels.squeeze(-1)[rbbb_mask].float())
+
+            d1avb_mask = (d1avb_labels != -1).squeeze()
+            if d1avb_mask.any():
+                # --- AND HERE ---
+                d1avb_loss = bce_loss_fn(d1avb_logits.squeeze(-1)[d1avb_mask], d1avb_labels.squeeze(-1)[d1avb_mask].float())
+
+            # Use the robustly calculated weights
+            total_loss = (self.chagas_loss_weight * supervised_chagas_loss +
+                          self.hparams.rbbb_loss_weight * rbbb_loss +
+                          self.hparams.d1avb_loss_weight * d1avb_loss)
+            
+            # Log all losses during training
+            self.log('train_loss', total_loss, on_step=True, on_epoch=True, prog_bar=True)
+            self.log('train_chagas_loss', supervised_chagas_loss, on_step=True, on_epoch=True)
+            if rbbb_mask.any(): self.log('train_rbbb_loss', rbbb_loss, on_step=True, on_epoch=True)
+            if d1avb_mask.any(): self.log('train_1davb_loss', d1avb_loss, on_step=True, on_epoch=True)
+        else:
+            # For validation/testing, or single-task training, loss is just the supervised Chagas loss
+            total_loss = supervised_chagas_loss
+
+        return total_loss, chagas_logits, chagas_labels
 
     def training_step(self, batch, batch_idx):
-        loss, logits, y = self._common_step(batch, batch_idx)
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
-        
-        # Pass integer labels to metrics
-        self.train_accuracy(logits, y.long())
-        self.log('train_acc', self.train_accuracy, on_step=True, on_epoch=True, prog_bar=True)
-        
-        self.train_auroc(logits, y.long())
-        self.log('train_auroc', self.train_auroc, on_step=True, on_epoch=True, prog_bar=True)
-        
+        loss, logits, labels = self._common_step(batch, batch_idx)
+        if loss is None:
+            return None
+        # The logging is now handled inside _common_step for multitask training
+        if not (self.training and self.hparams.do_multitask):
+            self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss, logits, y = self._common_step(batch, batch_idx)
-        self.log('val_loss', loss, prog_bar=True)
+        if loss is None:
+            return
+            
+        self.log('val_loss', loss, prog_bar=False, on_step=False, on_epoch=True)
         
-        self.val_accuracy(logits, y.long())
-        self.log('val_acc', self.val_accuracy, prog_bar=True)
+        self.val_accuracy.update(logits, y.long())
+        self.log('val_acc', self.val_accuracy, prog_bar=True, on_step=False, on_epoch=True)
         
-        self.val_auroc(logits, y.long())
-        self.log('val_auroc', self.val_auroc, prog_bar=True)
+        self.val_auroc.update(logits, y.long())
+        self.log('val_auroc', self.val_auroc, prog_bar=False, on_step=False, on_epoch=True)
         
         self.validation_step_outputs.append({'logits': logits, 'labels': y})
 
@@ -346,10 +564,11 @@ class LitSE_ECGNet(pl.LightningModule):
         self.validation_step_outputs.clear()
 
     def on_validation_epoch_end(self):
+        if not self.validation_step_outputs:
+            return
         all_logits = torch.cat([x['logits'] for x in self.validation_step_outputs])
         all_labels = torch.cat([x['labels'] for x in self.validation_step_outputs])
         
-        # Apply sigmoid to get probabilities for the challenge score
         all_probs = torch.sigmoid(all_logits)
         
         challenge_score = utils.compute_challenge_score(all_labels.cpu().long(), all_probs.cpu())
@@ -357,13 +576,16 @@ class LitSE_ECGNet(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         loss, logits, y = self._common_step(batch, batch_idx)
-        self.log('test_loss', loss)
+        if loss is None:
+            return
+
+        self.log('test_loss', loss, on_step=False, on_epoch=True)
         
-        self.test_accuracy(logits, y.long())
-        self.log('test_acc', self.test_accuracy)
+        self.test_accuracy.update(logits, y.long())
+        self.log('test_acc', self.test_accuracy, on_step=False, on_epoch=True)
         
-        self.test_auroc(logits, y.long())
-        self.log('test_auroc', self.test_auroc)
+        self.test_auroc.update(logits, y.long())
+        self.log('test_auroc', self.test_auroc, on_step=False, on_epoch=True)
         
         self.test_step_outputs.append({'logits': logits, 'labels': y})
 
@@ -371,10 +593,11 @@ class LitSE_ECGNet(pl.LightningModule):
         self.test_step_outputs.clear()
 
     def on_test_epoch_end(self):
+        if not self.test_step_outputs:
+            return
         all_logits = torch.cat([x['logits'] for x in self.test_step_outputs])
         all_labels = torch.cat([x['labels'] for x in self.test_step_outputs])
         
-        # Apply sigmoid to get probabilities for the challenge score
         all_probs = torch.sigmoid(all_logits)
         
         challenge_score = utils.compute_challenge_score(all_labels.cpu().long(), all_probs.cpu())
@@ -382,25 +605,20 @@ class LitSE_ECGNet(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
-            self.parameters(), 
+            self.parameters(),
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay
         )
-        
-        def lr_lambda(current_step):
-            if current_step < self.hparams.warmup_steps:
-                return float(current_step) / float(max(1, self.hparams.warmup_steps))
-            progress = float(current_step - self.hparams.warmup_steps) / float(max(1, self.hparams.total_steps - self.hparams.warmup_steps))
-            return 0.5 * (1.0 + math.cos(math.pi * progress))
 
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-        
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=self.trainer.max_epochs
+        )
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval": "step",
-                "frequency": 1,
+                "interval": "epoch",
             },
         }
 
@@ -446,6 +664,10 @@ if __name__ == '__main__':
     )
 
     print("--- Starting Dummy Training ---")
+    trainer.fit(lit_model, train_dataloaders=dummy_train_loader, val_dataloaders=dummy_val_loader)
+    print("\n--- Starting Dummy Testing ---")
+    trainer.test(lit_model, dataloaders=dummy_test_loader)
+    print("\nDummy run complete.")
     trainer.fit(lit_model, train_dataloaders=dummy_train_loader, val_dataloaders=dummy_val_loader)
     print("\n--- Starting Dummy Testing ---")
     trainer.test(lit_model, dataloaders=dummy_test_loader)

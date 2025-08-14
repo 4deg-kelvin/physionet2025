@@ -18,6 +18,7 @@ import wandb
 from pytorch_lightning.loggers import WandbLogger
 import time
 from sklearn.model_selection import train_test_split
+
 # --- Robust Path Handling ---
 # Handles running in different environments (e.g., script vs. notebook)
 # This allows the script to find your helper_code and utils modules
@@ -39,18 +40,52 @@ import helper_code
 import utils
 
 class ECGDataset(Dataset):
-    def __init__(self, records_list, data_dir, is_training=True, seq_len=5000, windowing_method='qrs'):
+    def __init__(self, records_list, data_dir, is_training=True, seq_len=5000, windowing_method='qrs', no_labels=False, include_wide_feats=False,
+                 normalize_leads=False, stats_csv_path='ecg_statistics.csv', multitask_csv_path='code15_exams.csv', do_multitask=False):
         self.records_list = records_list
         self.data_dir = data_dir
         self.is_training = is_training
         self.seq_len = seq_len
         self.windowing_method = windowing_method
+        self.no_labels = no_labels
+        self.include_wide_feats = include_wide_feats
+        self.normalize_leads = normalize_leads
+        self.stats_csv_path = stats_csv_path
+        self.global_stats_available = False
+        self.multitask_labels = {}
+        self.do_multitask = do_multitask
+
+        if self.do_multitask:
+            # Load multitask labels from code15_exams.csv
+            try:
+                if os.path.isfile(multitask_csv_path):
+                    df = pd.read_csv(multitask_csv_path)
+                    # Use exam_id as string for robust matching
+                    df['exam_id'] = df['exam_id'].astype(str)
+                    self.multitask_labels = df.set_index('exam_id')[['RBBB', '1dAVb']].to_dict('index')
+                    print(f"Successfully loaded {len(self.multitask_labels)} records from {multitask_csv_path} for multi-task learning.")
+            except Exception as e:
+                print(f"Warning: Could not load or process {multitask_csv_path}: {e}. Multi-task labels will not be available.")
+
+        try:
+            if os.path.isfile(self.stats_csv_path):
+                stats_df = pd.read_csv(self.stats_csv_path, index_col=0)
+                # Expect columns: 'mean' and 'std'
+                self.lead_means = stats_df['mean'].values.astype(np.float32)
+                self.lead_stds = stats_df['std'].replace(0, 1.0).values.astype(np.float32)
+                assert self.lead_means.shape[0] == 12 and self.lead_stds.shape[0] == 12, "Expected 12 leads in stats file."
+                self.global_stats_available = True
+            else:
+                print(f"Warning: stats file '{self.stats_csv_path}' not found. Skipping global normalization.")
+        except Exception as e:
+            print(f"Warning: failed to load stats file '{self.stats_csv_path}': {e}")
+            self.global_stats_available = False
 
     def __len__(self):
         return len(self.records_list)
 
     def __getitem__(self, idx):
-        record_path = os.path.join(self.data_dir, self.records_list[idx])
+        record_path = self.records_list[idx] # This is now an absolute path
         try:
             # --- FIX: Load header and signal separately for robustness ---
             try:
@@ -61,7 +96,7 @@ class ECGDataset(Dataset):
 
             except Exception as e:
                 # If loading fails for any reason, skip this record
-                tqdm.write(f"Error loading record {self.records_list[idx]}: {e}. Skipping.")
+                tqdm.write(f"Error loading record {record_path}: {e}. Skipping.")
                 return None
 
 
@@ -69,13 +104,18 @@ class ECGDataset(Dataset):
             # Get frequency and check if the signal is long enough to be useful
             # Only exclude records if we're not training 
             orig_freq = metadata['fs']
-            if signal.shape[1] < orig_freq * utils.MIN_SIGNAL_DURATION and self.is_training:
-                tqdm.write(f"Skipping record {self.records_list[idx]} due to insufficient length: {signal.shape[1]} samples.")
-                return None # Return None to be filtered out by the custom collate function
+            # if signal.shape[1] < orig_freq * utils.MIN_SIGNAL_DURATION and self.is_training:
+            #     tqdm.write(f"Skipping record {record_path} due to insufficient length: {signal.shape[1]} samples.")
+            #     return None # Return None to be filtered out by the custom collate function
             
             # --- ADDED: Get and process demographic data as wide features ---
-            age, sex, label = helper_code.get_patient_info(header_text, allow_missing_label=False)
-            assert label is not None and label == 0 or label == 1, f"Invalid label {label} for record {self.records_list[idx]}"
+            age, sex, label = None, None, None
+            if self.no_labels:
+                age, sex = helper_code.get_patient_info(header_text, allow_missing_label=True, get_label=False)
+                label = -1 # Use -1 to indicate no label
+            else:
+                age, sex, label = helper_code.get_patient_info(header_text, allow_missing_label=False)
+                assert label is not None and label == 0 or label == 1, f"Invalid label {label} for record {record_path}"
     
             # Process and normalize age. Use a neutral value for missing data.
             if age is None or np.isnan(age):
@@ -91,6 +131,17 @@ class ECGDataset(Dataset):
             else: # 'female'
                 numerical_sex = 1.0
 
+            # Get multitask labels if enabled
+            if self.do_multitask:
+                exam_id = os.path.splitext(os.path.basename(record_path))[0]
+                multitask_info = self.multitask_labels.get(exam_id)
+                if multitask_info:
+                    rbbb_label = float(multitask_info['RBBB'])
+                    d1avb_label = float(multitask_info['1dAVb'])
+                else:
+                    rbbb_label = -1.0  # Sentinel value for missing label
+                    d1avb_label = -1.0 # Sentinel value for missing label
+
             # wide_feats is a 2D tensor with age, sex, and computed_features
             # Standardize sampling frequency
             if orig_freq != utils.UNIFIED_FREQUENCY:
@@ -99,11 +150,17 @@ class ECGDataset(Dataset):
 
             # Clean signal and correct polarity
             cleaned_leads = [nk.ecg_clean(lead, sampling_rate=utils.UNIFIED_FREQUENCY) for lead in signal]
-            signal = np.stack(cleaned_leads)
+            signal = np.stack(cleaned_leads)  # shape (num_leads, num_samples)
+
+            # Apply per-lead global mean/std normalization if available (before window extraction)
+            if self.global_stats_available:
+                # Broadcast subtraction/division: (12, N)
+                signal = (signal - self.lead_means[:, None]) / self.lead_stds[:, None]
+
             # try:
             #     signal, _ = utils.correct_12_lead_polarity_lead_II_ref(signal, utils.UNIFIED_FREQUENCY)
             # except Exception as e:
-            #     tqdm.write(f"Error correcting polarity for record {self.records_list[idx]}: {e}")
+            #     tqdm.write(f"Error correcting polarity for record {record_path}: {e}")
             created_features = False
             created_wide = False
             try:
@@ -117,7 +174,7 @@ class ECGDataset(Dataset):
                 #             if computed_features is not None:
                 #                 break
                 # if computed_features is None:
-                #     tqdm.write(f"Skipping record {self.records_list[idx]} because no features could be computed.")
+                #     tqdm.write(f"Skipping record {record_path} because no features could be computed.")
                 #     return None
 
                 # # Fill nan values in computed features with 0
@@ -130,26 +187,35 @@ class ECGDataset(Dataset):
                 # created_wide = True
 
             except Exception as e:
-                tqdm.write(f"Error extracting features for record {self.records_list[idx]}: {e}")
+                tqdm.write(f"Error extracting features for record {record_path}: {e}")
                 return None # Return None if feature extraction fails
 
-            # Extract windows from the signal
+            # Extract windows
             if utils.USE_ONE_WINDOW:
                 windows = utils.get_windows(signal, method=self.windowing_method, window_size=self.seq_len)
                 if len(windows) == 0:
-                    tqdm.write(f"Skipping record {self.records_list[idx]} because no windows could be extracted.")
+                    tqdm.write(f"Skipping record {record_path} because no windows could be extracted.")
                     return None # Return None if windowing fails
                 signal = windows[0]
             else:
                 raise NotImplementedError("Multiple windows not implemented yet. Set USE_ONE_WINDOW to True for now.")
-            
-            # Normalize each lead between -1 and 1
-            signal = utils.normalize(signal, smooth=1e-8)
-    
-            # MODIFIED: Return a 3-tuple including the wide_feats tensor
-            return torch.FloatTensor(signal.copy()), torch.FloatTensor(wide_feats), torch.FloatTensor([label])
+
+            # Only apply local normalization if global stats were NOT applied
+            if not self.global_stats_available:
+                signal = utils.normalize(signal, smooth=1e-8)
+
+            # Return tuple based on configuration
+            if self.include_wide_feats:
+                base_tuple = (torch.FloatTensor(signal.copy()), torch.FloatTensor(wide_feats), torch.FloatTensor([label]))
+            else:
+                base_tuple = (torch.FloatTensor(signal.copy()), torch.FloatTensor([label]))
+
+            if self.do_multitask:
+                return base_tuple + (torch.FloatTensor([rbbb_label]), torch.FloatTensor([d1avb_label]))
+            else:
+                return base_tuple
         except Exception as e:
-            tqdm.write(f"Error processing record {self.records_list[idx]}: {e}. Skipping.")
+            tqdm.write(f"Error processing record {record_path}: {e}. Skipping.")
             return None
 
 def collate_fn_skip_none(batch):
@@ -163,13 +229,15 @@ def collate_fn_skip_none(batch):
     # If the entire batch was filtered out (e.g., all records were short),
     # return empty tensors to prevent a crash in the training loop.
     if not batch:
-        return torch.tensor([]), torch.tensor([])
+        # Cannot determine structure, so return None and let the trainer skip it.
+        return None
 
     # Use the default collate function on the filtered, valid batch
     return torch.utils.data.default_collate(batch)
 
+
 class ECGDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, records_list=None, split_file_path=None, batch_size=32, seq_len=utils.WINDOW_SIZE, windowing_method='qrs'):
+    def __init__(self, data_dir, batch_size=32, seq_len=utils.WINDOW_SIZE, windowing_method='entire_recording'):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
@@ -180,9 +248,10 @@ class ECGDataModule(pl.LightningDataModule):
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
-
+        self.predict_dataset = None
     def setup(self, stage=None):
         pass
+
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10),
