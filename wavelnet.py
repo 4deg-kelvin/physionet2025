@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping
-import xgboost as xgb
 from sklearn.metrics import accuracy_score
 import numpy as np
 import math
