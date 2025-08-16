@@ -216,7 +216,7 @@ def train_se(data_folder, model_folder):
     DATA_DIR = data_folder
     MODEL_DIR = model_folder
     BATCH_SIZE = 32
-    EPOCHS = 1
+    EPOCHS = 16
     LR = 1e-4
     WEIGHT_DECAY = 1e-5
     SEQ_SECONDS = 10
