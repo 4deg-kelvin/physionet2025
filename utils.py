@@ -7,6 +7,7 @@ from tqdm.contrib.concurrent import thread_map
 import custom_helper_code
 from scipy.signal import resample
 import os
+import torch  # add for GPU path
 
 
 UNIFIED_FREQUENCY = 500
@@ -502,21 +503,43 @@ def normalize(seq, smooth=1e-8):
     ''' Normalize each sequence between -1 and 1 '''
     return 2 * (seq - np.min(seq, axis=1)[None].T) / (np.max(seq, axis=1) - np.min(seq, axis=1) + smooth)[None].T - 1
 
-def compute_challenge_score(labels, outputs, fraction_capacity = 0.05, num_permutations = 10**4, seed=12345):
-    '''Compute the physionet 2025 challenge score based on the provided labels and outputs.
-    NOTE: This function is modified to work with numpy 1.26 (as the original used a new np.argsort, specifically
-    with the standalone stable keyword argument that wasn't present for versions before np 2.0))
-    '''
+def compute_challenge_score(labels, outputs, fraction_capacity = 0.05,
+                            num_permutations = 10**4, seed=12345,
+                            use_gpu=False):
+    '''Compute the physionet 2025 challenge score based on the provided labels and outputs.'''
     # Check the data.
     assert len(labels) == len(outputs)
     num_instances = len(labels)
     capacity = int(fraction_capacity * num_instances)
 
-    # Convert the data to NumPy arrays, as needed, for easier indexing.
+    # Convert the data
     labels = np.asarray(labels, dtype=np.float64)
     outputs = np.asarray(outputs, dtype=np.float64)
 
-    # Permute the labels and outputs so that we can approximate the expected confusion matrix for "tied" probabilities.
+    # GPU‐accelerated path
+    if use_gpu and torch.cuda.is_available():
+        device = torch.device('cuda')
+        torch.manual_seed(seed)
+        labs = torch.tensor(labels, device=device)
+        outs = torch.tensor(outputs, device=device)
+        tp = torch.zeros(num_permutations, device=device)
+        fp = torch.zeros_like(tp)
+        fn = torch.zeros_like(tp)
+        tn = torch.zeros_like(tp)
+        for i in range(num_permutations):
+            perm = torch.randperm(num_instances, device=device)
+            plab = labs[perm]
+            pout = outs[perm]
+            idx = torch.argsort(pout, stable=True, descending=True)
+            ol = plab[idx]
+            tp[i] = (ol[:capacity] == 1).sum()
+            fp[i] = (ol[:capacity] == 0).sum()
+            fn[i] = (ol[capacity:] == 1).sum()
+            tn[i] = (ol[capacity:] == 0).sum()
+        tp, fp, fn, tn = tp.float().mean().item(), fp.float().mean().item(), fn.float().mean().item(), tn.float().mean().item()
+        return tp / (tp + fn) if (tp + fn) > 0 else float('nan')
+
+    # CPU / NumPy path
     tp = np.zeros(num_permutations)
     fp = np.zeros(num_permutations)
     fn = np.zeros(num_permutations)
