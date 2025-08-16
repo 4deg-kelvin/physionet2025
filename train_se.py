@@ -227,7 +227,6 @@ def train_se(data_folder, model_folder):
     D1AVB_WEIGHT = 0.25
     USE_WAVELET_CNN = False
 
-    os.makedirs(MODEL_DIR, exist_ok=True)
 
     # --- prepare splits ---
     records = custom_helper_code.find_records_abs(DATA_DIR)
@@ -288,8 +287,9 @@ def train_se(data_folder, model_folder):
     trainer = pl.Trainer(
         max_epochs=EPOCHS,
         accelerator='auto',
+        default_root_dir=model_folder,
         logger=False,
-        callbacks=[ckpt_cb, early_stopping_cb], 
+        callbacks=[ckpt_cb, early_stopping_cb],
         limit_test_batches=0
     )
 

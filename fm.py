@@ -924,13 +924,19 @@ def train_model(data_folder, model_folder, is_submission=True):
             max_epochs=NUM_EPOCHS,
             accelerator="auto",
             devices=1,
-            # logger=pl.loggers.TensorBoardLogger("lightning_logs/", name="ecg_transformer_final"),
+            default_root_dir=model_folder,
+            logger=False,
             callbacks=[],
-            logger=False, 
             limit_val_batches=0
-            
         )
     else:
+        checkpoint_cb = pl.callbacks.ModelCheckpoint(
+            monitor=CHECKPOINT_MONITOR_METRIC,
+            mode='max',
+            save_top_k=1,
+            filename='foundation_model_finetuned',
+            dirpath=model_folder
+         )
         trainer = pl.Trainer(
             max_epochs=NUM_EPOCHS,
             accelerator="auto",
