@@ -10,3 +10,15 @@ __pycache__/
 
 !fairseq-signals
 !fairseq-signals/*
+.github/
+github/
+
+# Uncommitted files
+venv/
+EDA/
+random_forest/
+results/
+training_data/
+transformers-autoencoder/
+xgboost-cleandata/
+pipeline.log
