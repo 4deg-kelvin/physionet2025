@@ -739,7 +739,7 @@ def train_model(data_folder, model_folder, is_submission=True):
     df = pd.DataFrame(records_meta)
 
     # If not submission mode, do a stratified train/val/test split on labels
-    if not is_submission:
+    if is_submission is False:
         from sklearn.model_selection import train_test_split
         train_df, temp_df = train_test_split(
             df, test_size=0.2, stratify=df['label'], random_state=42
