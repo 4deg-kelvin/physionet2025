@@ -44,6 +44,7 @@ RUN gdown 1uI2J_gMk0eh0vu3MbKPBEoupgakZ06j2
 
 # This is for fairseq
 RUN python -m pip install -e fairseq-signals/
+RUN python -m pip install "transformers==4.53.0"
 
 RUN pip install torch --index-url https://download.pytorch.org/whl/cu118
 
