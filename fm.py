@@ -495,6 +495,28 @@ if __name__ == '__main__':
         'loss_type': LOSS_TYPE,
     }
 
+    # Define comprehensive augmentation configuration
+    augmentations_config = {
+        'powerline': {
+            'prob': 0.5,  # 50% chance to apply powerline interference
+            'frequencies': [50, 60],  # Common powerline frequencies (Hz)
+            'freq_std': 1.0,  # Standard deviation for frequency variation
+            'snr_range': [10, 30],  # SNR range in dB (10-30 dB)
+            'harmonics': True  # Include 2nd and 3rd harmonics
+        },
+        'temporal': {
+            'prob': 1.0,  # Always apply temporal augmentation during training
+            'crop_range': [0.8, 1.0],  # Crop to 80-100% of original length
+            'shift_range': 0.1  # Temporal shift up to 10% of signal length
+        },
+        'general': {
+            'sample_rate': 500,  # ECG sampling rate
+            'target_length': 5000,  # Target output length (10 seconds at 500 Hz)
+            'amplitude_range': [-5.0, 5.0],  # Valid ECG amplitude range in mV
+            'verbose': True  # Enable verbose logging for debugging
+        }
+    }
+
     try:
         if torch.cuda.is_available():
             if torch.cuda.get_device_capability()[0] >= 8:
@@ -512,7 +534,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
 # 2. Prepare data for fine-tuning
-    all_records = helper_code.find_records_abs(DATA_DIR)
+    all_records = custom_helper_code.find_records_abs(DATA_DIR)
     if args.debug:
         print("--- DEBUG MODE: Using a random subset of 1000 records. ---")
         np.random.shuffle(all_records)
@@ -585,9 +607,9 @@ if __name__ == '__main__':
         batch_size=BATCH_SIZE,
         seq_len=SEQ_LENGTH,
         windowing_method='entire_recording',
-
+        aug_config=augmentations_config  # Pass augmentation config
     )
-    data_module.train_dataset = ECGDataset(train_records, DATA_DIR, is_training=True, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True)
+    data_module.train_dataset = ECGDataset(train_records, DATA_DIR, is_training=True, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True, aug_config=augmentations_config)
     data_module.val_dataset   = ECGDataset(val_records,   DATA_DIR, is_training=False, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True)
     data_module.test_dataset  = ECGDataset(test_records,  DATA_DIR, is_training=False, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True)
 
@@ -662,6 +684,28 @@ def train_model(data_folder, model_folder, is_submission=True):
         "loss_type": LOSS_TYPE
     }
 
+    # Define augmentation configuration for training
+    augmentations_config = {
+        'powerline': {
+            'prob': 0.5,
+            'frequencies': [50, 60],
+            'freq_std': 1.0,
+            'snr_range': [10, 30],
+            'harmonics': True
+        },
+        'temporal': {
+            'prob': 1.0,
+            'crop_range': [0.8, 1.0],
+            'shift_range': 0.1
+        },
+        'general': {
+            'sample_rate': 500,
+            'target_length': 5000,
+            'amplitude_range': [-5.0, 5.0],
+            'verbose': False  # Less verbose for production training
+        }
+    }
+
     try:
         if torch.cuda.is_available():
             if torch.cuda.get_device_capability()[0] >= 8:
@@ -712,12 +756,12 @@ def train_model(data_folder, model_folder, is_submission=True):
         batch_size=BATCH_SIZE,
         seq_len=SEQ_LENGTH,
         windowing_method='entire_recording',
-
+        aug_config=augmentations_config if not is_submission else None  # Only use augmentations for non-submission training
     )
     data_module.train_dataset = ECGDataset(
         train_records, DATA_DIR, is_training=True,
         seq_len=SEQ_LENGTH, windowing_method='entire_recording',
-        include_wide_feats=True
+        include_wide_feats=True, aug_config=augmentations_config if not is_submission else None
     )
     if not is_submission:
         data_module.val_dataset   = ECGDataset(val_records,   DATA_DIR, is_training=False,

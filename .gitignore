@@ -1,12 +1,46 @@
 outputs/
 outputs2/
 *.pyc
-*.ckpt
 events.out.tfevents.*
 hparams.yaml
 lightning_logs/
 __pycache__/
+
+# Model checkpoints
 *.ckpt
 
+# macOS
+.DS_Store
+
+# Python virtualenv
+venv/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Test / build caches
+.pytest_cache/
+.mypy_cache/
+
+# Data / outputs (large, not committed)
+
+# Keep fairseq-signals tracked (it's included in repo)
 !fairseq-signals
 !fairseq-signals/*
+
+# Repo meta
+.github/
+github/
+
+# Project-specific large/uncommitted directories
+EDA/
+random_forest/
+results/
+training_data/
+transformers-autoencoder/
+xgboost-cleandata/
+pipeline.log
