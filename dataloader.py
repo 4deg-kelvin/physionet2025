@@ -62,9 +62,13 @@ class ECGDataset(Dataset):
             try:
                 if os.path.isfile(multitask_csv_path):
                     df = pd.read_csv(multitask_csv_path)
-                    # Use exam_id as string for robust matching
                     df['exam_id'] = df['exam_id'].astype(str)
-                    self.multitask_labels = df.set_index('exam_id')[['RBBB', '1dAVb']].to_dict('index')
+                    # Robustly select columns that exist; primary: RBBB, 1dAVb; secondary: AF, SB; ignore ST by design
+                    available_cols = [c for c in ['RBBB', '1dAVb', 'AF', 'SB'] if c in df.columns]
+                    if not available_cols:
+                        print(f"Warning: No expected columns found in {multitask_csv_path}.")
+                        available_cols = []
+                    self.multitask_labels = df.set_index('exam_id')[available_cols].to_dict('index')
                     print(f"Successfully loaded {len(self.multitask_labels)} records from {multitask_csv_path} for multi-task learning.")
             except Exception as e:
                 print(f"Warning: Could not load or process {multitask_csv_path}: {e}. Multi-task labels will not be available.")
@@ -85,6 +89,52 @@ class ECGDataset(Dataset):
 
     def __len__(self):
         return len(self.records_list)
+
+    # Convert CSV field to 0/1 robustly (handles 'True'/'False', bools, numbers, NaN)
+    def _to01(self, v):
+        if pd.isna(v):
+            return 0
+        if isinstance(v, bool):
+            return int(v)
+        if isinstance(v, (int, np.integer)):
+            return 1 if v == 1 else 0
+        if isinstance(v, (float, np.floating)):
+            return 1 if int(v) == 1 else 0
+        if isinstance(v, str):
+            s = v.strip().lower()
+            if s in ("true", "1", "yes", "y", "t"):
+                return 1
+            if s in ("false", "0", "no", "n", "f", ""):
+                return 0
+        return 0
+
+    # --- Soft label computation per provided strategy ---
+    def _compute_soft_label(self, chagas_label, has_rbbb, has_1davb, has_af, has_sb):
+        """
+        Returns a soft label in [0, 1] using:
+          - Base score from primary indicators (RBBB, 1dAVb) and original Chagas label
+          - +0.05 per secondary indicator (AF, SB)
+          - Cap at 0.98 only when original label is positive
+        """
+        # Base score
+        if chagas_label == 1:
+            if has_rbbb and has_1davb:
+                base = 0.95
+            elif has_rbbb or has_1davb:
+                base = 0.85
+            else:
+                base = 0.60
+            adj = 0.05 * (int(has_af) + int(has_sb))
+            return min(base + adj, 0.98)
+        else:
+            if not has_rbbb and not has_1davb:
+                base = 0.05
+            elif has_rbbb and has_1davb:
+                base = 0.40
+            else:
+                base = 0.15
+            adj = 0.05 * (int(has_af) + int(has_sb))
+            return base + adj
 
     def __getitem__(self, idx):
         record_path = self.records_list[idx] # This is now an absolute path
@@ -138,11 +188,16 @@ class ECGDataset(Dataset):
                 exam_id = os.path.splitext(os.path.basename(record_path))[0]
                 multitask_info = self.multitask_labels.get(exam_id)
                 if multitask_info:
-                    rbbb_label = float(multitask_info['RBBB'])
-                    d1avb_label = float(multitask_info['1dAVb'])
+                    # CSV contains 'True'/'False'; convert to 0/1
+                    rbbb_label = float(self._to01(multitask_info.get('RBBB', 'False')))
+                    d1avb_label = float(self._to01(multitask_info.get('1dAVb', 'False')))
+                    af_label   = float(self._to01(multitask_info.get('AF', 'False')))
+                    sb_label   = float(self._to01(multitask_info.get('SB', 'False')))
                 else:
-                    rbbb_label = -1.0  # Sentinel value for missing label
-                    d1avb_label = -1.0 # Sentinel value for missing label
+                    rbbb_label = -1.0  # Sentinel for missing exam_id
+                    d1avb_label = -1.0
+                    af_label = 0.0
+                    sb_label = 0.0
 
             # wide_feats is a 2D tensor with age, sex, and computed_features
             # Standardize sampling frequency
@@ -206,11 +261,21 @@ class ECGDataset(Dataset):
             if not self.global_stats_available:
                 signal = utils.normalize(signal, smooth=1e-8)
 
-            # Return tuple based on configuration
-            if self.include_wide_feats:
-                base_tuple = (torch.FloatTensor(signal.copy()), torch.FloatTensor(wide_feats), torch.FloatTensor([label]))
+            # --- Soft labeling: replace hard label with soft label when possible ---
+            if not self.no_labels and self.do_multitask and ('multitask_info' in locals()) and (multitask_info is not None):
+                has_rbbb = bool(rbbb_label == 1.0)
+                has_1davb = bool(d1avb_label == 1.0)
+                has_af = bool(af_label == 1.0)
+                has_sb = bool(sb_label == 1.0)
+                soft_label = float(self._compute_soft_label(int(label), has_rbbb, has_1davb, has_af, has_sb))
             else:
-                base_tuple = (torch.FloatTensor(signal.copy()), torch.FloatTensor([label]))
+                soft_label = float(label)
+
+            # Return tuple based on configuration (use soft_label)
+            if self.include_wide_feats:
+                base_tuple = (torch.FloatTensor(signal.copy()), torch.FloatTensor(wide_feats), torch.FloatTensor([soft_label]))
+            else:
+                base_tuple = (torch.FloatTensor(signal.copy()), torch.FloatTensor([soft_label]))
 
             if self.do_multitask:
                 return base_tuple + (torch.FloatTensor([rbbb_label]), torch.FloatTensor([d1avb_label]))
