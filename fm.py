@@ -38,135 +38,6 @@ from fairseq_signals.models.classification.ecg_transformer_classifier import ECG
 import pytorch_lightning as pl
 import shutil
 
-# class TPRMaxLoss(nn.Module):
-#     def __init__(self, fraction_capacity=0.05, temperature=1.0):
-#         super().__init__()
-#         self.fraction_capacity = fraction_capacity
-#         self.temperature = temperature
-        
-#     def forward(self, outputs, labels):
-#         batch_size = outputs.size(0)
-#         k = max(1, int(self.fraction_capacity * batch_size))
-        
-#         # Soft top-k selection using temperature-scaled softmax
-#         scaled_outputs = outputs.squeeze() / self.temperature
-#         weights = torch.softmax(scaled_outputs, dim=0)
-        
-#         # Approximate TPR: weighted sum of positive labels
-#         total_positives = torch.sum(labels)
-#         if total_positives == 0:
-#             return torch.tensor(0.0, requires_grad=True)
-        
-#         # Weight the top predictions more heavily
-#         top_k_weights = torch.zeros_like(weights)
-#         _, top_k_indices = torch.topk(outputs.squeeze(), k)
-#         top_k_weights[top_k_indices] = 1.0
-        
-#         captured_positives = torch.sum(top_k_weights * labels)
-#         tpr = captured_positives / total_positives
-        
-#         # Maximize TPR (minimize negative TPR)
-#         return -tpr
-    
-# class TopKFocalLoss(nn.Module):
-#     def __init__(self, fraction_capacity=0.05, alpha=0.25, gamma=2.0, top_k_weight=5.0):
-#         super().__init__()
-#         self.fraction_capacity = fraction_capacity
-#         self.alpha = alpha
-#         self.gamma = gamma
-#         self.top_k_weight = top_k_weight
-        
-#     def forward(self, outputs, labels):
-#         batch_size = outputs.size(0)
-#         k = max(1, int(self.fraction_capacity * batch_size))
-        
-#         # Standard focal loss
-#         ce_loss = nn.functional.binary_cross_entropy_with_logits(
-#             outputs.squeeze(), labels.float(), reduction='none'
-#         )
-#         pt = torch.exp(-ce_loss)
-#         focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
-        
-#         # Get top-k predictions and weight them more heavily
-#         _, top_k_indices = torch.topk(outputs.squeeze(), k)
-#         weights = torch.ones_like(focal_loss)
-#         weights[top_k_indices] *= self.top_k_weight
-        
-#         return torch.mean(focal_loss * weights)
-    
-
-# class PairwiseHingeLoss(nn.Module):
-#     def __init__(self, margin=1.0):
-#         """
-#         Initializes the Pairwise Hinge Loss module.
-        
-#         Args:
-#             margin (float): The desired gap between positive and negative scores.
-#         """
-#         super(PairwiseHingeLoss, self).__init__()
-#         self.margin = margin
-
-#     def forward(self, y_pred, y_true):
-#         """
-#         Calculates the pairwise ranking loss.
-
-#         Args:
-#             y_pred (torch.Tensor): Model predictions/scores. Shape: (batch_size,)
-#             y_true (torch.Tensor): Ground truth labels (0s and 1s). Shape: (batch_size,)
-
-#         Returns:
-#             torch.Tensor: A scalar loss value.
-#         """
-#         # Find indices of positive (1) and negative (0) samples
-#         positive_indices = torch.where(y_true == 1)[0]
-#         negative_indices = torch.where(y_true == 0)[0]
-        
-#         # If there are no positive or no negative samples in the batch, loss is 0
-#         if len(positive_indices) == 0 or len(negative_indices) == 0:
-#             return torch.tensor(0.0, device=y_pred.device, requires_grad=True)
-
-#         # Randomly sample one positive and one negative index
-#         # This makes the process stochastic and efficient
-#         rand_pos_idx = positive_indices[torch.randint(len(positive_indices), (1,))]
-#         rand_neg_idx = negative_indices[torch.randint(len(negative_indices), (1,))]
-        
-#         # Get the scores for the sampled pair
-#         score_positive = y_pred[rand_pos_idx]
-#         score_negative = y_pred[rand_neg_idx]
-        
-#         # Calculate the hinge loss for the pair
-#         loss = torch.clamp(self.margin - (score_positive - score_negative), min=0.0)
-        
-#         return loss
-
-
-# class ListNetLoss(nn.Module):
-#     def __init__(self):
-#         super(ListNetLoss, self).__init__()
-
-#     def forward(self, y_pred, y_true):
-#         """
-#         Calculates the ListNet loss.
-
-#         Args:
-#             y_pred (torch.Tensor): Model predictions/scores. Shape: (batch_size,)
-#             y_true (torch.Tensor): Ground truth labels (0s and 1s). Shape: (batch_size,)
-
-#         Returns:
-#             torch.Tensor: A scalar loss value.
-#         """
-#         # Create probability distributions from scores and labels using softmax
-#         pred_probs = F.softmax(y_pred, dim=0)
-#         true_probs = F.softmax(y_true, dim=0)
-        
-#         # Add a small epsilon to true_probs to avoid log(0) which is -inf
-#         true_probs = true_probs + 1e-9
-        
-#         # Compute the KL Divergence between the two distributions
-#         # This is equivalent to cross-entropy: -sum(P_true * log(P_pred))
-#         loss = -torch.sum(true_probs * torch.log(pred_probs))
-        
-#         return loss
 class PercentileRankingLoss(nn.Module):
     """
     Maintains running percentile estimates using exponential moving average.
@@ -366,76 +237,30 @@ class ECGFMFeatureExtractor(nn.Module):
     
     def forward(self, x):
         """
-        Extract features from ECG-FM encoder
+        Extract AoL features from ECG-FM encoder
         Args:
             x: (batch_size, 12, seq_length) ECG signals
         Returns:
-            features: (batch_size, embed_dim) pooled features
+            features: (batch_size, embed_dim) AoL pooled features
         """
-        # Single 5-second segment
         with torch.no_grad():
+            # Forward through the ECG-FM model
             out = self.ecg_fm_model(source=x)
-            encoder_out = out['encoder_out']
-            pooled_features = torch.div(encoder_out.sum(dim=1), (encoder_out != 0).sum(dim=1))
-        
-        return pooled_features
-
-# class FMChagasClassifier(pl.LightningModule):
-#     """
-#     Chagas disease classifier using ECG-FM pretrained features.
-#     """
-#     def __init__(self, ecg_fm_checkpoint_path, num_classes=1, lr=1e-4, freeze_encoder=True):
-#         super().__init__()
-#         self.save_hyperparameters()
-        
-#         # ECG-FM feature extractor
-#         self.feature_extractor = ECGFMFeatureExtractor(
-#             ecg_fm_checkpoint_path, 
-#             freeze_encoder=freeze_encoder
-#         )
-        
-#         # Get feature dimension from ECG-FM (typically 768)
-#         self.feature_dim = 768  # ECG-FM embedding dimension
-        
-#         # Classification head
-#         self.classifier = nn.Sequential(
-#             nn.Dropout(0.1),
-#             nn.Linear(self.feature_dim, 256),
-#             nn.ReLU(),
-#             nn.Dropout(0.1),
-#             nn.Linear(256, num_classes)
-#         )
-        
-#         self.criterion = nn.BCEWithLogitsLoss()
-        
-#     def forward(self, x):
-#         # Extract features using ECG-FM
-#         features = self.feature_extractor(x)
-#         # Classify
-#         logits = self.classifier(features)
-#         return logits
-    
-#     def _common_step(self, batch, batch_idx):
-#         signals, labels = batch[0], batch[1]
-#         logits = self(signals)
-#         loss = self.criterion(logits, labels.float())
-#         probs = torch.sigmoid(logits)
-#         return loss, probs, labels
-    
-#     def training_step(self, batch, batch_idx):
-#         loss, probs, labels = self._common_step(batch, batch_idx)
-#         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
-#         return loss
-    
-#     def validation_step(self, batch, batch_idx):
-#         loss, probs, labels = self._common_step(batch, batch_idx)
-#         self.log('val_loss', loss, on_epoch=True, prog_bar=True)
-#         return {'val_loss': loss, 'probs': probs, 'labels': labels}
-    
-#     def configure_optimizers(self):
-#         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=0.01)
-#         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs)
-#         return [optimizer], [scheduler]
+            encoder = self.ecg_fm_model.encoder.encoder
+            features = self.ecg_fm_model.encoder.feature_extractor(x)
+            features = self.ecg_fm_model.encoder.post_extract_proj(features.transpose(1,2)).transpose(1,2)
+            features = self.ecg_fm_model.encoder.conv_pos(features)
+            features = self.ecg_fm_model.encoder.layer_norm(features)
+            # features: (batch, seq_len, embed_dim)
+            hidden_states = []
+            out = features
+            for layer in encoder.layers:
+                out = layer(out)
+                hidden_states.append(out)
+            # Stack and average pool across layers
+            stacked = torch.stack(hidden_states, dim=0)  # [12, batch, seq_len, 768]
+            aol_features = stacked.mean(dim=0).mean(dim=1)  # [batch, 768]
+        return aol_features
 
 
 class FMChagasClassifier(pl.LightningModule):
