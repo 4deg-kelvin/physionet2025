@@ -4,7 +4,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
-from dataclasses import _MISSING_TYPE
 from hydra.core.config_store import ConfigStore
 from fairseq_signals.dataclass.configs import Config
 from omegaconf import DictConfig, OmegaConf
@@ -15,16 +14,12 @@ def hydra_init(cfg_name = "config") -> None:
     cs = ConfigStore.instance()
     cs.store(name = cfg_name, node = Config)
 
-    for k, f in Config.__dataclass_fields__.items():
-        if isinstance(f.default, _MISSING_TYPE):
-            node_to_store = f.type
-        else:
-            node_to_store = f.default
-        
+    for k in Config.__dataclass_fields__:
+        v = Config.__dataclass_fields__[k].default
         try:
-            cs.store(name = k, node = node_to_store)
+            cs.store(name = k, node = v)
         except BaseException:
-            logger.error(f"{k} - {node_to_store}")
+            logger.error(f"{k} - {v}")
             raise
 
 def add_defaults(cfg: DictConfig) -> None:
