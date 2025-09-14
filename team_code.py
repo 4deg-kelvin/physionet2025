@@ -21,12 +21,15 @@ import torch
 import numpy as np
 import argparse
 import pathlib
-
 import helper_code
 import custom_helper_code
 import utils
-from train_se import train_se, load_model as se_load_model, run_model as se_run_model
-import ensemble  # new import
+import fm
+from scipy.signal import resample
+import neurokit2 as nk
+
+import pretrain_mae_vit_ecg
+import finetuning_mae_vit_ecg
 
 ################################################################################
 #
@@ -39,24 +42,52 @@ import ensemble  # new import
 
 # Train your model.
 def train_model(data_folder, model_folder, verbose):
-    # prepare separate subfolders
-    # train both FM and SE models
-    ensemble.train_ensemble(data_folder, model_folder)
+    fm.train_model(data_folder, model_folder)
 
 # Load your trained models. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function. If you do not train one of the models, then you can return None for the model.
 def load_model(model_folder, verbose):
-    fm_folder = os.path.join(model_folder, "fm")
-    se_folder = os.path.join(model_folder, "se")
-    # returns (fm_model, se_model)
-    return ensemble.load_ensemble_models(model_folder)
+    ckpt_path = os.path.join(model_folder, 'foundation_model_finetuned.ckpt')
+    if not os.path.isfile(ckpt_path):
+        raise FileNotFoundError(f"Checkpoint not found at {ckpt_path}")
+    model = fm.load_finetuned_model(ckpt_path, strict=False)
+    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    model = model.to(device)
+    return model
 
 # Run your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
-def run_model(record, model_tuple, verbose):
-    fm_model, se_model = model_tuple
-    # delegate to ensemble inference
-    return ensemble.run_ensemble(record, fm_model, se_model)
+def run_model(record, model, verbose):
+    if model is None:
+        raise ValueError("Model is None; cannot run inference.")
+    device = next(model.parameters()).device
+    try:
+        signal, wide_feats = utils.preprocess_signal(
+            record, windowing_method='entire_recording', is_training=False
+        )
+        sig_t = torch.as_tensor(signal, dtype=torch.float32, device=device).unsqueeze(0)
+        wf_t  = torch.as_tensor(wide_feats, dtype=torch.float32, device=device).unsqueeze(0)
+
+        with torch.no_grad():
+            # Prefer forward(x, info) if available
+            try:
+                logits = model(sig_t, wf_t)
+            except TypeError:
+                logits = model(sig_t)
+
+            prob = torch.sigmoid(logits).item()
+            pred = 1 if prob > 0.5 else 0
+        return pred, prob
+
+    # IMPORTANT: if you get a NotImplementedError specifically, something bad happened (ie, you 
+    # chose the wrong preprocessing steps, etc, so you should NOT proceed with ANY prediction, therefore we 
+    # end the program here for debugging purposes.)
+    except NotImplementedError as e:
+        raise NotImplementedError(f"run_model error: {e}")
+    except Exception as e:
+        if verbose:
+            print(f"run_model error: {e}")
+        return None, None
 
 
 ################################################################################
