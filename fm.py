@@ -265,7 +265,7 @@ class ECGFMFeatureExtractor(nn.Module):
 
 class FMChagasClassifier(pl.LightningModule):
     def __init__(self, ecg_fm_checkpoint_path, freeze_encoder, optimizer_hparams, info_features=0,
-                 loss_type='bce', loss_top_percent=0.05, loss_margin=1.0, loss_momentum=0.99, loss_warmup_steps=100):
+                 loss_type='bce', loss_top_percent=0.05, loss_margin=1.0, loss_momentum=0.99, loss_warmup_steps=100, pos_weight=5.0):
         super().__init__()
         self.save_hyperparameters()
         self.feature_extractor = ECGFMFeatureExtractor(
@@ -285,7 +285,8 @@ class FMChagasClassifier(pl.LightningModule):
             nn.Linear(256, 1)
         )
         if self.hparams.loss_type == 'bce':
-            self.criterion = nn.BCEWithLogitsLoss()
+            # Weighted BCE loss: positive cases get pos_weight
+            self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(self.hparams.pos_weight))
         else:
             self.criterion = PercentileRankingLoss(
                 top_percent=self.hparams.loss_top_percent,

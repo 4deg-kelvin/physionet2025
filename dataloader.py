@@ -256,8 +256,19 @@ class ECGDataModule(pl.LightningDataModule):
 
 
     def train_dataloader(self):
+        # Weighted sampling: oversample positive cases by a factor of 5
+        labels = []
+        for item in self.train_dataset:
+            if isinstance(item, (tuple, list)) and len(item) > 2:
+                labels.append(item[2])
+            elif hasattr(item, 'label'):
+                labels.append(item.label)
+            else:
+                labels.append(0)
+        sample_weights = [5 if l == 1 else 1 for l in labels]
+        sampler = torch.utils.data.WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10),
-                          persistent_workers=True, shuffle=True, pin_memory=True, collate_fn=collate_fn_skip_none)
+                          persistent_workers=True, sampler=sampler, pin_memory=True, collate_fn=collate_fn_skip_none)
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10),
