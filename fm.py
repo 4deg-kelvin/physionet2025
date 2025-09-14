@@ -229,40 +229,51 @@ class ECGFMFeatureExtractor(nn.Module):
         # Load pretrained ECG-FM model
         self.ecg_fm_model = build_model_from_checkpoint(checkpoint_path)
         self.ecg_fm_model.eval()
-        
         # Freeze encoder weights if specified
         if freeze_encoder:
             for param in self.ecg_fm_model.parameters():
                 param.requires_grad = False
-    
+        # Infer embedding dim
+        enc = self.ecg_fm_model.encoder
+        self.post_proj = getattr(enc, "post_extract_proj", None)
+        embed_dim = None
+        if self.post_proj is not None and hasattr(self.post_proj, "out_features"):
+            embed_dim = int(self.post_proj.out_features)
+        if embed_dim is None:
+            try:
+                # wav2vec-style conv feature_extractor
+                conv_layers = enc.feature_extractor.conv_layers
+                last_conv = conv_layers[-1][0] if isinstance(conv_layers[-1], (list, tuple)) else conv_layers[-1]
+                embed_dim = int(last_conv.out_channels)
+            except Exception:
+                embed_dim = getattr(enc, "embed_dim", getattr(enc, "encoder_embed_dim", None))
+        if embed_dim is None:
+            raise RuntimeError("Cannot infer ECG-FM embedding dimension from checkpoint.")
+        self.embed_dim = embed_dim
+        # Only use model's layer_norm if shapes align
+        self.model_layer_norm = getattr(enc, "layer_norm", None)
+        self.use_model_layer_norm = hasattr(self.model_layer_norm, "normalized_shape") and \
+            int(self.model_layer_norm.normalized_shape[0]) == self.embed_dim
+
     def forward(self, x):
         """
-        Extract AoL features from ECG-FM encoder
+        Extract features from ECG-FM encoder and pool over time.
         Args:
-            x: (batch_size, 12, seq_length) ECG signals
+            x: (batch, 12, seq_len)
         Returns:
-            features: (batch_size, embed_dim) AoL pooled features
+            (batch, embed_dim)
         """
-        with torch.no_grad():
-            # Forward through the ECG-FM model
-            out = self.ecg_fm_model(source=x)
-            encoder = self.ecg_fm_model.encoder.encoder
-            features = self.ecg_fm_model.encoder.feature_extractor(x)
-            features = self.ecg_fm_model.encoder.post_extract_proj(features.transpose(1,2)).transpose(1,2)
-            features = self.ecg_fm_model.encoder.conv_pos(features)
-            features = self.ecg_fm_model.encoder.layer_norm(features)
-            # features: (batch, seq_len, embed_dim)
-            hidden_states = []
-            out = features
-            for layer in encoder.layers:
-                out = layer(out)
-                hidden_states.append(out)
-            # Stack and average pool across layers
-            stacked = torch.stack(hidden_states, dim=0)  # [12, batch, seq_len, 768]
-            aol_features = stacked.mean(dim=0).mean(dim=1)  # [batch, 768]
-        return aol_features
-
-
+        enable_grad = any(p.requires_grad for p in self.ecg_fm_model.parameters())
+        with torch.set_grad_enabled(self.training and enable_grad):
+            feats = self.ecg_fm_model.encoder.feature_extractor(x)      # (B, C, T)
+            feats = feats.transpose(1, 2)                                # (B, T, C)
+            if self.post_proj is not None:
+                feats = self.post_proj(feats)                            # (B, T, embed_dim)
+            # If post_proj is None, feats.last_dim should already equal embed_dim from conv out_channels
+            if self.use_model_layer_norm:
+                feats = self.model_layer_norm(feats)                     # only if normalized_shape matches
+            pooled = feats.mean(dim=1)                                   # (B, embed_dim)
+        return pooled
 
 class FMChagasClassifier(pl.LightningModule):
     def __init__(self, ecg_fm_checkpoint_path, freeze_encoder, optimizer_hparams, info_features=0,
@@ -270,30 +281,30 @@ class FMChagasClassifier(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.feature_extractor = ECGFMFeatureExtractor(
-            ecg_fm_checkpoint_path, 
+            ecg_fm_checkpoint_path,
             freeze_encoder=freeze_encoder
         )
-        
-        self.feature_dim = 768  # ECG-FM embedding dimension
+        # Use extracted embed dim instead of hard-coded 768
+        self.feature_dim = int(self.feature_extractor.embed_dim)
 
-        # Demographic encode
+        # Demographic encoder -> outputs gamma||beta with size 2*feature_dim
         self.dem_encoder = nn.Sequential(
             nn.Linear(2, 16),
             nn.ReLU(),
-            nn.Linear(16, 1536),
+            nn.Linear(16, 2 * self.feature_dim),
             nn.ReLU()
         )
 
-        # Classification head
+        # Classification head: input = feature_dim (info is fused via FiLM)
         self.classifier = nn.Sequential(
             nn.Dropout(0.1),
-            nn.Linear(self.feature_dim + self.hparams.info_features, 256),
+            nn.Linear(self.feature_dim, 256),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(256, 1)
         )
+
         if self.hparams.loss_type == 'bce':
-            # Weighted BCE loss: positive cases get pos_weight
             self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(self.hparams.pos_weight))
         else:
             self.criterion = PercentileRankingLoss(
@@ -313,81 +324,71 @@ class FMChagasClassifier(pl.LightningModule):
         self.validation_step_labels = []
         self.test_step_outputs = []
         self.test_step_labels = []
-        super().__init__()
-        self.save_hyperparameters()
-        self.feature_extractor = ECGFMFeatureExtractor(
-            ecg_fm_checkpoint_path, 
-            freeze_encoder=freeze_encoder
-        )
-        
-        # Get feature dimension from ECG-FM (typically 768)
-        self.feature_dim = 768  # ECG-FM embedding dimension
-        
-        # Classification head
-        self.classifier = nn.Sequential(
-            nn.Dropout(0.1),
-            nn.Linear(self.feature_dim + self.hparams.info_features, 256),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(256, 1)
-        )
-        if self.hparams.loss_type == 'bce':
-            # Weighted BCE loss: positive cases get pos_weight
-            self.criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(self.hparams.pos_weight))
-        else:
-            self.criterion = PercentileRankingLoss(
-                top_percent=self.hparams.loss_top_percent,
-                margin=self.hparams.loss_margin,
-                momentum=self.hparams.loss_momentum,
-                warmup_steps=self.hparams.loss_warmup_steps
-            )
-        
-        self.train_acc = Accuracy(task="binary")
-        self.val_acc = Accuracy(task="binary")
-        self.test_acc = Accuracy(task="binary")
-        self.val_auroc = AUROC(task="binary")
-        self.test_auroc = AUROC(task="binary")
-
-        self.validation_step_outputs = []
-        self.validation_step_labels = []
-        self.test_step_outputs = []
-        self.test_step_labels = []
+        # Track FiLM usage/strength from last forward
+        self._last_film_metrics = {
+            "film_used": torch.tensor(0.0),
+            "gamma_abs_mean": torch.tensor(0.0),
+            "beta_abs_mean": torch.tensor(0.0),
+            "delta_abs_mean": torch.tensor(0.0),
+        }
 
     def forward(self, x, info=None):
         # Extract features using ECG-FM
-        features = self.feature_extractor(x)  # [batch, 768]
-
-        # info: [batch, 2] (age, sex)
+        features = self.feature_extractor(x)  # (B, feature_dim)
         if info is None:
-            raise ValueError("Demographic info (age, sex) must be provided for demographic encoding.")
-
-        # Demographic encoder: outputs gamma and beta
-        dem_out = self.dem_encoder(info)  # [batch, 1536]
-        gamma, beta = dem_out[:, :features.shape[1]], dem_out[:, features.shape[1]:]
-        # Modulate features
-        mod_features = gamma * features + beta  # [batch, 768]
-
-        # Classify
+            # No demographic info provided: skip FiLM, use raw features
+            mod_features = features
+            # Update FiLM metrics
+            self._last_film_metrics = {
+                "film_used": torch.tensor(0.0, device=features.device),
+                "gamma_abs_mean": torch.tensor(0.0, device=features.device),
+                "beta_abs_mean": torch.tensor(0.0, device=features.device),
+                "delta_abs_mean": torch.tensor(0.0, device=features.device),
+            }
+        else:
+            # Demographic encoder: outputs gamma and beta (FiLM)
+            dem_out = self.dem_encoder(info)                      # (B, 2*feature_dim)
+            gamma, beta = dem_out[:, :features.shape[1]], dem_out[:, features.shape[1]:]
+            mod_features = gamma * features + beta                # (B, feature_dim)
+            # Update FiLM metrics
+            self._last_film_metrics = {
+                "film_used": torch.tensor(1.0, device=features.device),
+                "gamma_abs_mean": gamma.abs().mean().detach(),
+                "beta_abs_mean": beta.abs().mean().detach(),
+                "delta_abs_mean": (mod_features - features).abs().mean().detach(),
+            }
         logits = self.classifier(mod_features)
         return logits
 
     def _common_step(self, batch, batch_idx):
-        # Unpack batch, which may or may not have info features
-        if self.hparams.info_features > 0:
-            signals, info, labels = batch
+        # Robustly unpack batch: supports (signals, labels) or (signals, info, labels)
+        if batch is None:
+            return None, None, None
+        if isinstance(batch, (list, tuple)):
+            if len(batch) == 3:
+                signals, info, labels = batch
+            elif len(batch) == 2:
+                signals, labels = batch
+                info = None
+            else:
+                raise ValueError(f"Unexpected batch structure: len={len(batch)}")
         else:
-            signals, labels = batch
-            info = None
-            
+            raise ValueError(f"Unexpected batch type: {type(batch)}")
+
         # Handle cases where the batch is empty after filtering
         if signals.numel() == 0:
             return None, None, None
 
         logits = self(signals, info)
-        
-        # The loss function handles squeezing internally.
         loss = self.criterion(logits, labels)
-        
+
+        # Log FiLM usage and strength
+        m = self._last_film_metrics
+        self.log('film_used', m["film_used"], on_step=True, prog_bar=True)
+        self.log('film_gamma_abs_mean', m["gamma_abs_mean"], on_step=True, prog_bar=False)
+        self.log('film_beta_abs_mean', m["beta_abs_mean"], on_step=True, prog_bar=False)
+        self.log('film_delta_abs_mean', m["delta_abs_mean"], on_step=True, prog_bar=False)
+
         return loss, logits, labels
 
     def training_step(self, batch, batch_idx):
@@ -577,9 +578,6 @@ if __name__ == '__main__':
     records_meta = utils.prepare_stratification(all_records)
     df = pd.DataFrame(records_meta)
 
-    # Exclude records where 'source' is CODE-15%
-    df = df[df['source'] != 'CODE-15%']
-    
     # Exclude records from source 'CODE-15%'
     # df = df[df['source'] != 'CODE-15%'] 
     # --- Exclude records from code15_label_issues.csv ---
@@ -756,12 +754,42 @@ def train_model(data_folder, model_folder, is_submission=True):
         print(f"Validating on {len(val_records)} records.")
         print(f"Testing on {len(test_records)} records.")
     else:
-        # submission mode: train on all records
-        train_records = df['record'].tolist()
-        print(f"Training on {len(train_records)} records.")
+        # submission mode: oversample positives by a factor of five using the df created
+        # from utils.prepare_stratification (df has columns ['record', 'label', ...])
+        pos_df = df[df['label'] == 1]
+        neg_df = df[df['label'] == 0]
+        # replicate positives 4 extra times to reach 5x total
+        oversampled_df = pd.concat([neg_df, pos_df] + [pos_df] * 4, ignore_index=True)
+        # shuffle deterministically
+        oversampled_df = oversampled_df.sample(frac=1.0, random_state=42).reset_index(drop=True)
+        train_records = oversampled_df['record'].tolist()
+        print(
+            f"Training on {len(train_records)} records after 5x positive oversampling "
+            f"(pos: {len(pos_df)} -> {len(pos_df) * 5}, neg: {len(neg_df)})."
+        )
         val_records = []
         test_records = []
-
+# Define comprehensive augmentation configuration
+    augmentations_config = {
+        'powerline': {
+            'prob': 0.5,  # 50% chance to apply powerline interference
+            'frequencies': [50, 60],  # Common powerline frequencies (Hz)
+            'freq_std': 1.0,  # Standard deviation for frequency variation
+            'snr_range': [10, 30],  # SNR range in dB (10-30 dB)
+            'harmonics': True  # Include 2nd and 3rd harmonics
+        },
+        'temporal': {
+            'prob': 1.0,  # Always apply temporal augmentation during training
+            'crop_range': [0.8, 1.0],  # Crop to 80-100% of original length
+            'shift_range': 0.1  # Temporal shift up to 10% of signal length
+        },
+        'general': {
+            'sample_rate': 500,  # ECG sampling rate
+            'target_length': 5000,  # Target output length (10 seconds at 500 Hz)
+            'amplitude_range': [-5.0, 5.0],  # Valid ECG amplitude range in mV
+            'verbose': False  # Enable verbose logging for debugging
+        }
+    }
     # 3. Create DataModule
     data_module = ECGDataModule(
         data_dir=DATA_DIR,
@@ -773,7 +801,7 @@ def train_model(data_folder, model_folder, is_submission=True):
     data_module.train_dataset = ECGDataset(
         train_records, DATA_DIR, is_training=True,
         seq_len=SEQ_LENGTH, windowing_method='entire_recording',
-        include_wide_feats=True
+        include_wide_feats=True, aug_config=augmentations_config
     )
     if not is_submission:
         data_module.val_dataset   = ECGDataset(val_records,   DATA_DIR, is_training=False,
@@ -796,9 +824,9 @@ def train_model(data_folder, model_folder, is_submission=True):
 
     model = FMChagasClassifier(
         ecg_fm_checkpoint_path=checkpoint_path,
-        freeze_encoder=True,
+        freeze_encoder=False,  # Unfreeze encoder for training in train_model
         optimizer_hparams=optimizer_hparams,
-        info_features=2 # Age and Sex
+        info_features=0 # Age and Sex
     )
     
     if is_submission:
