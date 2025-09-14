@@ -624,6 +624,22 @@ class LitSE_ECGNet(pl.LightningModule):
 
 
 if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="SE-ECGNet Model")
+    parser.add_argument('--generate-dummy-data', action='store_true', 
+                        help="Generate dummy data for testing (only use for debugging)")
+    args = parser.parse_args()
+    
+    if not args.generate_dummy_data:
+        print("Error: This script will not run without actual data.")
+        print("Use --generate-dummy-data flag only for testing purposes.")
+        print("For actual training, use the main training pipeline.")
+        exit(1)
+    
+    print("WARNING: Running with dummy data for testing purposes only!")
+    print("This should not be used for actual model training.")
+    
     # --- Example Usage for Binary Classification ---
     
     BATCH_SIZE, NUM_CLASSES, NUM_LEADS, SEQ_LENGTH, INFO_FEATURES = 4, 1, 12, 5000, 10

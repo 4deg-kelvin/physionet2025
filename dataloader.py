@@ -43,7 +43,7 @@ import utils
 
 class ECGDataset(Dataset):
     def __init__(self, records_list, data_dir, is_training=True, seq_len=5000, windowing_method='qrs', no_labels=False, include_wide_feats=False,
-                 normalize_leads=False, stats_csv_path='ecg_statistics.csv', multitask_csv_path='code15_exams.csv', do_multitask=False):
+                 normalize_leads=False, stats_csv_path='ecg_statistics.csv', multitask_csv_path='code15_exams.csv', do_multitask=False, aug_config=None):
         self.records_list = records_list
         self.data_dir = data_dir
         self.is_training = is_training
@@ -56,6 +56,12 @@ class ECGDataset(Dataset):
         self.global_stats_available = False
         self.multitask_labels = {}
         self.do_multitask = do_multitask
+        
+        # Initialize augmentation pipeline
+        self.augmenter = None
+        if self.is_training and aug_config:
+            from augmentations import ECGAugmentations  # Import locally
+            self.augmenter = ECGAugmentations(config=aug_config)
 
         if self.do_multitask:
             # Load multitask labels from code15_exams.csv
@@ -154,7 +160,16 @@ class ECGDataset(Dataset):
             cleaned_leads = [nk.ecg_clean(lead, sampling_rate=utils.UNIFIED_FREQUENCY) for lead in signal]
             signal = np.stack(cleaned_leads)  # shape (num_leads, num_samples)
 
-            # Apply per-lead global mean/std normalization if available (before window extraction)
+            # Convert to torch tensor for augmentation
+            signal_tensor = torch.FloatTensor(signal.copy())
+            
+            # Apply augmentation after cleaning but before windowing
+            if self.augmenter:
+                signal_tensor = self.augmenter(signal_tensor)
+                # Convert back to numpy for further processing
+                signal = signal_tensor.numpy()
+
+            # Apply per-lead global mean/std normalization if available (after augmentation)
             if self.global_stats_available:
                 # Broadcast subtraction/division: (12, N)
                 signal = (signal - self.lead_means[:, None]) / self.lead_stds[:, None]
@@ -192,15 +207,16 @@ class ECGDataset(Dataset):
                 tqdm.write(f"Error extracting features for record {record_path}: {e}")
                 return None # Return None if feature extraction fails
 
-            # Extract windows
-            if utils.USE_ONE_WINDOW:
+            # Extract windows (skip if augmenter already handled length)
+            if utils.USE_ONE_WINDOW and not self.augmenter:
                 windows = utils.get_windows(signal, method=self.windowing_method, window_size=self.seq_len)
                 if len(windows) == 0:
                     tqdm.write(f"Skipping record {record_path} because no windows could be extracted.")
                     return None # Return None if windowing fails
                 signal = windows[0]
-            else:
+            elif not utils.USE_ONE_WINDOW:
                 raise NotImplementedError("Multiple windows not implemented yet. Set USE_ONE_WINDOW to True for now.")
+            # If augmenter was used, signal already has correct length (5000 samples)
 
             # Only apply local normalization if global stats were NOT applied
             if not self.global_stats_available:
@@ -239,12 +255,13 @@ def collate_fn_skip_none(batch):
 
 
 class ECGDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, batch_size=32, seq_len=utils.WINDOW_SIZE, windowing_method='entire_recording'):
+    def __init__(self, data_dir, batch_size=32, seq_len=utils.WINDOW_SIZE, windowing_method='entire_recording', aug_config=None):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.seq_len = seq_len
         self.windowing_method = windowing_method
+        self.aug_config = aug_config
 
         # ensure these attrs always exist
         self.train_dataset = None
