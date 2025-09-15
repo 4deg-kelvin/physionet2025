@@ -33,6 +33,7 @@ import custom_helper_code
 
 import torch
 import torch.nn as nn
+
 from fairseq_signals.models import build_model_from_checkpoint
 from fairseq_signals.models.classification.ecg_transformer_classifier import ECGTransformerClassificationModel
 import pytorch_lightning as pl
@@ -696,7 +697,7 @@ def train_model(data_folder, model_folder, is_submission=True):
     # SEQ_LEN = utils.WINDOW_SIZE
     NUM_LEADS = 12
     WINDOWING_METHOD = 'entire_recording'
-    NUM_EPOCHS = 10
+    NUM_EPOCHS = 11
     SEQ_LENGTH = utils.UNIFIED_FREQUENCY * 10  
     CHECKPOINT_MONITOR_METRIC = 'val_challenge_score'
     LR = 1e-4
