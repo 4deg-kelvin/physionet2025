@@ -35,6 +35,7 @@ venv/
 # Repo meta
 .github/
 github/
+wandb/
 
 # Project-specific large/uncommitted directories
 EDA/
