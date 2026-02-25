@@ -48,10 +48,8 @@ COPY . .
 # 1o4zghwYD4j61SgazijwtKRfyCZyOjkyz is the mae_vit_ecg pretrained model
 # 1c_uJOo08AYPb60wRFnrhp9LPMUmuFqly is the pretrained model for MAE
 # 1uI2J_gMk0eh0vu3MbKPBEoupgakZ06j2 is for FAIRSEQ FOUNDATION MODEL 
-RUN gdown 1uI2J_gMk0eh0vu3MbKPBEoupgakZ06j2 && \
-RUN python -m pip install  -e fairseq-signals/
+RUN gdown 1uI2J_gMk0eh0vu3MbKPBEoupgakZ06j2
+
+RUN python -m pip install -e fairseq-signals/
 
 RUN  python -m pip install "transformers==4.53.0"     
-
-
-
