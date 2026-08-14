@@ -599,7 +599,13 @@ class ECGFMFeatureExtractor(nn.Module):
         if len(self._layer_outputs) != num_layers:
             # Only reachable if a layer was skipped (encoder layerdrop while in train
             # mode). Previously this silently mis-paired weights with layers via zip().
-            raise RuntimeError(
+            #
+            # NotImplementedError, not RuntimeError: this is a systematic configuration
+            # failure, not a bad record. team_code.run_model catches broad Exception and
+            # degrades to (None, None) -- which scores 0 -- but deliberately re-raises
+            # NotImplementedError as "do not emit predictions". A RuntimeError here would
+            # silently score every record 0 instead of stopping the run.
+            raise NotImplementedError(
                 f"Captured {len(self._layer_outputs)} layer outputs but expected "
                 f"{num_layers}. The encoder is in train mode with layerdrop active; "
                 f"layer aggregation requires every layer to run."
@@ -1667,6 +1673,11 @@ def train_model(data_folder, model_folder):
         # only skips the sanity check; without this, Lightning still calls
         # val_dataloader() at the end of epoch 1 and gets DataLoader(None).
         limit_val_batches=0,
+        # Without this, Lightning attaches a default ModelCheckpoint. With no logger it
+        # resolves to default_root_dir/checkpoints -- i.e. the CWD, /challenge -- and
+        # writes a full checkpoint there every epoch, outside model_folder. The only
+        # checkpoint this path should produce is the explicit save_checkpoint below.
+        enable_checkpointing=False,
     )
 
     # --- Run Training and Testing ---

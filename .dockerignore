@@ -1,0 +1,51 @@
+# Keep the build context small. `COPY ./ /challenge` copies everything not listed
+# here, and a large context both slows the build and invalidates the copy layer.
+#
+# Deliberately NOT excluded: code15_exams.csv, train_val_test_sets.csv and
+# code15_label_issues.csv. They are large (~43 MB combined) but they are committed
+# data the code resolves by bare relative name against WORKDIR, so excluding them
+# would break those paths inside the container.
+
+# Version control -- by far the largest context item, and never needed at runtime.
+.git/
+.gitignore
+
+# Python bytecode and caches
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Virtualenvs
+venv/
+.venv/
+
+# Editors
+.vscode/
+.idea/
+.DS_Store
+
+# Training artifacts and logs -- regenerated inside the container.
+# *.pt matters specifically: the backbone is downloaded to /opt/ecgfm and symlinked
+# to /challenge/mimic_iv_ecg_finetuned.pt. A local copy of that file at the repo
+# root would be copied over the link target's path and break the symlink step.
+*.ckpt
+*.pt
+*.pth
+lightning_logs/
+events.out.tfevents.*
+hparams.yaml
+wandb/
+outputs/
+outputs2/
+results/
+pipeline.log
+
+# Local-only data and scratch directories
+training_data/
+EDA/
+random_forest/
+transformers-autoencoder/
+xgboost-cleandata/

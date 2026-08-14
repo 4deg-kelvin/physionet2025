@@ -1,0 +1,8 @@
+# The Dockerfile must keep LF endings. It is authored on Windows but executed on
+# the organizers' Linux box; if CRLF ever got committed, every RUN line would fail
+# there with `\r: command not found`.
+Dockerfile      text eol=lf
+*.sh            text eol=lf
+
+# Large committed CSVs -- never try to merge or diff these as text.
+*.csv           -diff
