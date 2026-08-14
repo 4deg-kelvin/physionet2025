@@ -24,6 +24,14 @@ REFERENCE_POLARITY_LEAD_IDX = 1  # Lead II is the reference lead for polarity ch
 MIN_SIGNAL_DURATION = 2  # seconds, minimum duration of the signal to even be used for training
 np.random.seed(42)  # For reproducibility
 
+# Lead order the ECG-FM backbone was pretrained on -- see
+# fairseq-signals/scripts/preprocess/ecg/preprocess.py. All three challenge datasets
+# (CODE-15, SaMi-Trop, PTB-XL) happen to already emit this order, so reordering is a
+# no-op today; it is enforced so a differently-ordered source in the hidden test set
+# cannot silently feed the backbone scrambled channels.
+ECG_FM_LEAD_ORDER = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF',
+                     'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
+
 MEAN_AGE_TRAIN = 53.78590876196458
 STD_AGE_TRAIN = 20.76942829983386
 
@@ -104,7 +112,25 @@ def preprocess_signal(record_path, windowing_method='entire_recording', is_train
     """
     signal, metadata = custom_helper_code.load_signals(record_path)
     header_text = custom_helper_code.load_header(record_path)
+
+    # Enforce the backbone's expected lead order rather than trusting the file's.
+    # reorder_signal works on (num_samples, num_leads), i.e. before the transpose.
+    sig_names = metadata.get('sig_name') if hasattr(metadata, 'get') else None
+    if sig_names:
+        signal = custom_helper_code.reorder_signal(
+            signal, list(sig_names), list(ECG_FM_LEAD_ORDER)
+        )
+
     signal = signal.T  # (num_leads, num_samples)
+
+    # A record that cannot supply all 12 leads is unusable by a 12-lead model. Treat it
+    # as a skippable record (the caller's convention for None) rather than letting a
+    # short channel dimension reach the encoder.
+    if signal.shape[0] != len(ECG_FM_LEAD_ORDER):
+        print(f"Skipping record {record_path}: got {signal.shape[0]} leads, "
+              f"expected {len(ECG_FM_LEAD_ORDER)}.")
+        return None, None
+
     orig_freq = metadata['fs']
 
     if is_training:
@@ -133,6 +159,10 @@ def preprocess_signal(record_path, windowing_method='entire_recording', is_train
 
     cleaned = [nk.ecg_clean(lead, sampling_rate=UNIFIED_FREQUENCY) for lead in signal]
     signal = np.stack(cleaned)
+
+    # Normalize BEFORE windowing, so the statistics come from the whole recording.
+    # Must stay identical to dataloader.ECGDataset.__getitem__.
+    signal = zscore_per_record(signal)
     # try:
     #     signal, _ = correct_12_lead_polarity_lead_II_ref(signal,UNIFIED_FREQUENCY)
     # except:
@@ -149,7 +179,6 @@ def preprocess_signal(record_path, windowing_method='entire_recording', is_train
         print(f"No windows found for record {record_path}.")
         return None, None
     signal = windows[0]
-    signal = normalize(signal, smooth=1e-8)
 
     return signal, wide_feats
 
@@ -502,6 +531,30 @@ def get_windows(signal, window_size, method='random', num_windows=1, stride=None
 def normalize(seq, smooth=1e-8):
     ''' Normalize each sequence between -1 and 1 '''
     return 2 * (seq - np.min(seq, axis=1)[None].T) / (np.max(seq, axis=1) - np.min(seq, axis=1) + smooth)[None].T - 1
+
+def zscore_per_record(signal):
+    '''Per-lead z-score computed within a single record.
+
+    This is what the ECG-FM backbone was pretrained on -- see
+    fairseq-signals/scripts/preprocess/ecg/preprocess.py:169-196, which subtracts each
+    lead's mean and divides by its std over the whole record before segmenting.
+    Constant (flat) leads map to 0 rather than NaN, matching that pipeline's
+    constant_lead_strategy='zero' -- ECG-FM's random-lead-masking objective masks with
+    zeros, so a dead lead reads as "masked".
+
+    Must be applied BEFORE windowing so the statistics come from the whole recording,
+    as in pretraining. Both the training path (dataloader.ECGDataset) and the inference
+    path (preprocess_signal below) must call this identically; if they diverge the
+    model is served a distribution it never saw, and nothing will crash to tell you.
+
+    Args:
+        signal (np.ndarray): shape (num_leads, num_samples).
+    Returns:
+        np.ndarray: same shape, each lead zero-mean unit-std (or all-zero if constant).
+    '''
+    sig = signal - signal.mean(axis=1, keepdims=True)
+    std = sig.std(axis=1, keepdims=True)
+    return np.divide(sig, std, out=np.zeros_like(sig), where=std != 0)
 
 def compute_challenge_score(labels, outputs, fraction_capacity = 0.05,
                             num_permutations = 10**4, seed=12345,

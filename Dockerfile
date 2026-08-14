@@ -35,8 +35,10 @@ COPY requirements_linux.txt .
 # It will only re-run if you change requirements_linux.txt.
 RUN pip install -r requirements_linux.txt
 
-# Also install torch in this cached section
-RUN pip install torch --index-url https://download.pytorch.org/whl/cu118
+# Also install torch in this cached section.
+# Pinned: torch>=2.6 flips torch.load to weights_only=True, which breaks loading the
+# fairseq-signals ECG-FM checkpoint (its `cfg` is an OmegaConf object).
+RUN pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu118
 
 # 3. NOW, copy the rest of your project code.
 # Changes to your scripts will only invalidate the cache from this point onward.

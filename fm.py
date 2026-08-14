@@ -510,14 +510,19 @@ class ECGFMFeatureExtractor(nn.Module):
         #   .encoder (ECGTransformerModel)
         #     .encoder (TransformerEncoder)
         #       .layers (nn.ModuleList of TransformerEncoderLayer)
-        self.transformer_encoder = self.ecg_fm_model.encoder.encoder
+        # NB: exposed as a property, not an attribute. Assigning an already-registered
+        # submodule to a second attribute name makes state_dict() emit the entire
+        # ~85M-parameter transformer stack twice (state_dict does not dedupe modules
+        # the way named_parameters does), roughly doubling the saved checkpoint.
         num_layers = len(self.transformer_encoder.layers)
 
         # Learnable layer weights (initialized to zeros → uniform softmax)
         self.layer_weights = nn.Parameter(torch.zeros(num_layers))
 
-        # Storage for hook outputs (populated during forward pass)
-        self._layer_outputs = []
+        # Storage for hook outputs (populated during forward pass), keyed by layer index
+        # rather than appended, so a skipped layer cannot silently shift the mapping
+        # between layer_weights[i] and the layer it is supposed to weight.
+        self._layer_outputs = {}
 
         # Register forward hooks on each TransformerEncoderLayer
         self._hooks = []
@@ -530,14 +535,33 @@ class ECGFMFeatureExtractor(nn.Module):
             for p in self.ecg_fm_model.parameters():
                 p.requires_grad = False
 
+    @property
+    def transformer_encoder(self):
+        """The 12-layer TransformerEncoder stack, reached through its real owner."""
+        return self.ecg_fm_model.encoder.encoder
+
     def _make_hook(self, layer_idx):
         """Create a forward hook that captures the output of a transformer layer."""
         def hook_fn(module, input, output):
             # Each TransformerEncoderLayer returns (x, (attn, layer_result))
             # x is (T, B, C)
             x = output[0]
-            self._layer_outputs.append(x)
+            self._layer_outputs[layer_idx] = x
         return hook_fn
+
+    def train(self, mode=True):
+        """Keep a frozen encoder in eval mode.
+
+        nn.Module.train() is recursive, so Lightning calling model.train() each epoch
+        would otherwise undo the .eval() set in __init__ and re-enable the encoder's
+        dropout (and layerdrop, which skips whole layers and breaks the layer
+        aggregation above). That would make training see noisy embeddings while
+        inference sees clean ones.
+        """
+        super().train(mode)
+        if self.freeze_encoder:
+            self.ecg_fm_model.eval()
+        return self
 
     def unfreeze(self):
         if self.freeze_encoder:
@@ -555,7 +579,7 @@ class ECGFMFeatureExtractor(nn.Module):
             (batch_size, embed_dim)
         """
         # Clear captured outputs from previous forward pass
-        self._layer_outputs = []
+        self._layer_outputs = {}
 
         # Call the base encoder directly (ECGTransformerModel), bypassing the
         # classifier's forward() which applies .detach() to encoder_out.
@@ -571,11 +595,24 @@ class ECGFMFeatureExtractor(nn.Module):
 
         # Layer aggregation: weighted sum of all layer outputs
         # Each layer output is (T, B, C) — transpose to (B, T, C)
+        num_layers = self.layer_weights.numel()
+        if len(self._layer_outputs) != num_layers:
+            # Only reachable if a layer was skipped (encoder layerdrop while in train
+            # mode). Previously this silently mis-paired weights with layers via zip().
+            raise RuntimeError(
+                f"Captured {len(self._layer_outputs)} layer outputs but expected "
+                f"{num_layers}. The encoder is in train mode with layerdrop active; "
+                f"layer aggregation requires every layer to run."
+            )
         weights = torch.softmax(self.layer_weights, dim=0)
         aggregated = torch.zeros_like(self._layer_outputs[0])  # (T, B, C)
-        for w, layer_out in zip(weights, self._layer_outputs):
-            aggregated = aggregated + w * layer_out
+        for i in range(num_layers):
+            aggregated = aggregated + weights[i] * self._layer_outputs[i]
         aggregated = aggregated.transpose(0, 1)  # (B, T, C)
+
+        # Drop the captured references now that they are folded into `aggregated`;
+        # otherwise 12 activation tensors stay alive between steps.
+        self._layer_outputs = {}
 
         # Masked mean pooling using proper padding_mask
         if padding_mask is not None and padding_mask.any():
@@ -709,6 +746,12 @@ class FMChagasClassifier(pl.LightningModule):
         return logits
 
     def _common_step(self, batch, batch_idx):
+        # collate_fn_skip_none returns None when every record in the batch failed to
+        # load. Must be checked before unpacking, or this raises TypeError and aborts
+        # the whole run on a single bad batch.
+        if batch is None:
+            return None, None, None
+
         # Unpack batch, which may or may not have info features
         if self.hparams.info_features > 0:
             signals, info, labels = batch
@@ -810,15 +853,35 @@ class FMChagasClassifier(pl.LightningModule):
             print(f"[FMChagasClassifier] Encoder unfrozen at epoch {self.current_epoch}.")
 
     def on_train_epoch_start(self):
-        # Trigger unfreeze exactly once when epoch matches
+        # Trigger unfreeze exactly once when epoch matches.
+        # A negative value means "never unfreeze" -- without the >= 0 guard, the
+        # documented -1 sentinel satisfies `current_epoch >= -1` on epoch 0 and
+        # unfreezes immediately, the exact opposite of what it means.
         if (self.unfreeze_after_epoch is not None and
+            self.unfreeze_after_epoch >= 0 and
             self.current_epoch >= self.unfreeze_after_epoch and
             not self._encoder_unfrozen):
             self.unfreeze_encoder()
 
     def configure_optimizers(self):
+        # Split into decay / no-decay groups. AdamW's default weight_decay=0.01 would
+        # otherwise apply to layer_weights, which is initialised to zeros (= uniform
+        # softmax over layers) -- decay actively pulls it back there and the learnable
+        # layer aggregation never goes anywhere. Biases and norms are excluded by the
+        # usual convention.
+        decay, no_decay = [], []
+        for name, p in self.named_parameters():
+            if not p.requires_grad:
+                continue
+            if name.endswith('layer_weights') or name.endswith('.bias') or p.ndim <= 1:
+                no_decay.append(p)
+            else:
+                decay.append(p)
         optimizer = torch.optim.AdamW(
-            [p for p in self.parameters() if p.requires_grad],
+            [
+                {'params': decay, 'weight_decay': 0.01},
+                {'params': no_decay, 'weight_decay': 0.0},
+            ],
             lr=self.hparams.optimizer_hparams['lr']
         )
 
@@ -902,7 +965,7 @@ if __name__ == '__main__':
 
         # --- 3. GET A SAMPLE ECG ---
         # We'll grab one positive and one negative example for comparison
-        all_records = helper_code.find_records_abs(DATA_DIR)
+        all_records = custom_helper_code.find_records_abs(DATA_DIR)
         if args.debug:
             print("--- DEBUG MODE: Using a random subset of 1000 records. ---")
             np.random.shuffle(all_records)
@@ -1010,7 +1073,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
 # 2. Prepare data for fine-tuning
-    all_records = helper_code.find_records_abs(DATA_DIR)
+    all_records = custom_helper_code.find_records_abs(DATA_DIR)
     if args.debug:
         print("--- DEBUG MODE: Using a random subset of 1000 records. ---")
         np.random.shuffle(all_records)
@@ -1513,7 +1576,7 @@ def train_model(data_folder, model_folder):
         sys.exit(1)
 
 # 2. Prepare data for fine-tuning
-    all_records = helper_code.find_records_abs(DATA_DIR)
+    all_records = custom_helper_code.find_records_abs(DATA_DIR)
     print(f"{len(all_records)} records found in the dataset.")
     records_meta = utils.prepare_stratification(all_records)
     df = pd.DataFrame(records_meta)
@@ -1545,12 +1608,27 @@ def train_model(data_folder, model_folder):
     
     # First, split into training and a temporary set (val + test)
     train_df = df
+    # prepare_stratification returns a malformed entry for any record whose label or
+    # source could not be read; those become NaN rows here. Drop them so the sample
+    # weights below stay aligned with train_records (they would fail to load anyway).
+    before = len(train_df)
+    train_df = train_df.dropna(subset=['record', 'label'])
+    if len(train_df) < before:
+        print(f"Dropped {before - len(train_df)} records with unreadable label/source.")
     # Convert to lists of record paths
     train_records = train_df['record'].tolist()
 
-    
+
     print(f"Training on {len(train_records)} records.")
     print(f"Final training set positive ratio: {train_df['label'].value_counts(normalize=True).get(1, 0):.2%}")
+
+    # Inverse-frequency sample weights. At ~2% prevalence with batch_size=16 the median
+    # unweighted batch contains zero positives, so the head just learns the base rate.
+    labels = train_df['label'].astype(int).to_numpy()
+    class_counts = np.bincount(labels, minlength=2).astype(np.float64)
+    class_counts[class_counts == 0] = 1.0  # avoid div-by-zero on a single-class set
+    sample_weights = (1.0 / class_counts)[labels]
+    print(f"Sampling weights: {int(class_counts[0])} negatives, {int(class_counts[1])} positives.")
 
     # 3. Create DataModule
     data_module = ECGDataModule(
@@ -1558,7 +1636,7 @@ def train_model(data_folder, model_folder):
         batch_size=BATCH_SIZE,
         seq_len=SEQ_LENGTH,
         windowing_method='entire_recording',
-
+        sample_weights=sample_weights,
     )
     data_module.train_dataset = ECGDataset(train_records, DATA_DIR, is_training=True, seq_len=config["seq_length"], windowing_method='entire_recording', include_wide_feats=True,)
     data_module.val_dataset   = None
@@ -1585,6 +1663,10 @@ def train_model(data_folder, model_folder):
         callbacks=[TimeLimitCallback(max_hours=71.0)],
         logger=False,
         num_sanity_val_steps=0,
+        # This path trains on all records with no validation split. num_sanity_val_steps
+        # only skips the sanity check; without this, Lightning still calls
+        # val_dataloader() at the end of epoch 1 and gets DataLoader(None).
+        limit_val_batches=0,
     )
 
     # --- Run Training and Testing ---
@@ -1686,5 +1768,25 @@ def load_finetuned_model(ckpt_path, map_location=None, strict=True, override_hpa
         strict=strict,
         **override_hparams
     )
+
+    # load_from_checkpoint constructs the module first (randomly initialising the
+    # classification head) and only then loads the state dict. With strict=False a
+    # checkpoint missing those keys loads "successfully" and the model emits confident
+    # noise. Fail loudly instead -- a silent random head wastes a scarce submission.
+    if not strict:
+        ckpt_keys = set(torch.load(
+            ckpt_path, map_location='cpu', weights_only=False
+        ).get('state_dict', {}).keys())
+        critical = {
+            k for k in model.state_dict()
+            if k.startswith('classifier.') or k.endswith('layer_weights')
+        }
+        missing = sorted(critical - ckpt_keys)
+        if missing:
+            raise RuntimeError(
+                f"Checkpoint {ckpt_path} is missing trained parameters {missing}; "
+                f"they would be left randomly initialised. Refusing to run inference."
+            )
+
     model.eval()
     return model

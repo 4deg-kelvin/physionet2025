@@ -265,7 +265,10 @@ def load_checkpoint_to_cpu(path, arg_overrides = None, load_on_all_ranks = False
         local_path = PathManager.get_local_path(path)
     
     with open(local_path, "rb") as f:
-        state = torch.load(f, map_location=torch.device("cpu"))
+        # weights_only=False is required: these checkpoints carry `cfg` as an
+        # OmegaConf/Namespace object, which torch>=2.6's restricted unpickler rejects
+        # under the new weights_only=True default.
+        state = torch.load(f, map_location=torch.device("cpu"), weights_only=False)
 
     if "args" in state and state["args"] is not None and arg_overrides is not None:
         args = state["args"]

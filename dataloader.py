@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, random_split, WeightedRandomSampler
 import numpy as np
 import scipy.io
 from scipy.signal import resample
@@ -43,7 +43,7 @@ import utils
 
 class ECGDataset(Dataset):
     def __init__(self, records_list, data_dir, is_training=True, seq_len=5000, windowing_method='qrs', no_labels=False, include_wide_feats=False,
-                 normalize_leads=False, stats_csv_path='ecg_statistics.csv', multitask_csv_path='code15_exams.csv', do_multitask=False, aug_config=None):
+                 multitask_csv_path='code15_exams.csv', do_multitask=False, aug_config=None):
         self.records_list = records_list
         self.data_dir = data_dir
         self.is_training = is_training
@@ -51,9 +51,6 @@ class ECGDataset(Dataset):
         self.windowing_method = windowing_method
         self.no_labels = no_labels
         self.include_wide_feats = include_wide_feats
-        self.normalize_leads = normalize_leads
-        self.stats_csv_path = stats_csv_path
-        self.global_stats_available = False
         self.multitask_labels = {}
         self.do_multitask = do_multitask
         self.aug_config = aug_config
@@ -79,20 +76,6 @@ class ECGDataset(Dataset):
                     print(f"Successfully loaded {len(self.multitask_labels)} records from {multitask_csv_path} for multi-task learning.")
             except Exception as e:
                 print(f"Warning: Could not load or process {multitask_csv_path}: {e}. Multi-task labels will not be available.")
-
-        try:
-            if os.path.isfile(self.stats_csv_path):
-                stats_df = pd.read_csv(self.stats_csv_path, index_col=0)
-                # Expect columns: 'mean' and 'std'
-                self.lead_means = stats_df['mean'].values.astype(np.float32)
-                self.lead_stds = stats_df['std'].replace(0, 1.0).values.astype(np.float32)
-                assert self.lead_means.shape[0] == 12 and self.lead_stds.shape[0] == 12, "Expected 12 leads in stats file."
-                self.global_stats_available = True
-            else:
-                print(f"Warning: stats file '{self.stats_csv_path}' not found. Skipping global normalization.")
-        except Exception as e:
-            print(f"Warning: failed to load stats file '{self.stats_csv_path}': {e}")
-            self.global_stats_available = False
 
     def __len__(self):
         return len(self.records_list)
@@ -151,7 +134,21 @@ class ECGDataset(Dataset):
                 # Load header to get metadata and for label extraction
                 signal, metadata = helper_code.load_signals(record_path)
                 header_text = helper_code.load_header(record_path)
+
+                # Enforce the backbone's lead order, before the transpose. Must stay
+                # identical to utils.preprocess_signal (the inference path).
+                sig_names = metadata.get('sig_name') if hasattr(metadata, 'get') else None
+                if sig_names:
+                    signal = custom_helper_code.reorder_signal(
+                        signal, list(sig_names), list(utils.ECG_FM_LEAD_ORDER)
+                    )
+
                 signal = signal.T # make signal (num_leads, num_samples) shape
+
+                if signal.shape[0] != len(utils.ECG_FM_LEAD_ORDER):
+                    tqdm.write(f"Skipping record {record_path}: got {signal.shape[0]} leads, "
+                               f"expected {len(utils.ECG_FM_LEAD_ORDER)}.")
+                    return None
 
             except Exception as e:
                 # If loading fails for any reason, skip this record
@@ -225,10 +222,9 @@ class ECGDataset(Dataset):
                 # Convert back to numpy for further processing
                 signal = signal_tensor.numpy()
 
-            # Apply per-lead global mean/std normalization if available (after augmentation)
-            if self.global_stats_available:
-                # Broadcast subtraction/division: (12, N)
-                signal = (signal - self.lead_means[:, None]) / self.lead_stds[:, None]
+            # Per-lead z-score within this record, before windowing. Must stay identical
+            # to utils.preprocess_signal (the inference path) -- see utils.zscore_per_record.
+            signal = utils.zscore_per_record(signal)
 
             # try:
             #     signal, _ = utils.correct_12_lead_polarity_lead_II_ref(signal, utils.UNIFIED_FREQUENCY)
@@ -274,9 +270,7 @@ class ECGDataset(Dataset):
                 raise NotImplementedError("Multiple windows not implemented yet. Set USE_ONE_WINDOW to True for now.")
             # If augmenter was used, signal already has correct length (5000 samples)
 
-            # Only apply local normalization if global stats were NOT applied
-            if not self.global_stats_available:
-                signal = utils.normalize(signal, smooth=1e-8)
+            # (normalization already applied above, before windowing)
 
             # --- Soft labeling: replace hard label with soft label when possible ---
             if not self.no_labels and self.do_multitask and ('multitask_info' in locals()) and (multitask_info is not None):
@@ -321,13 +315,17 @@ def collate_fn_skip_none(batch):
 
 
 class ECGDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, batch_size=32, seq_len=utils.WINDOW_SIZE, windowing_method='entire_recording', aug_config=None):
+    def __init__(self, data_dir, batch_size=32, seq_len=utils.WINDOW_SIZE, windowing_method='entire_recording', aug_config=None,
+                 sample_weights=None):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.seq_len = seq_len
         self.windowing_method = windowing_method
         self.aug_config = aug_config
+        # Per-sample weights aligned with train_dataset.records_list. When set,
+        # train_dataloader draws with a WeightedRandomSampler instead of shuffling.
+        self.sample_weights = sample_weights
 
         # ensure these attrs always exist
         self.train_dataset = None
@@ -339,16 +337,36 @@ class ECGDataModule(pl.LightningDataModule):
 
 
     def train_dataloader(self):
-        # Weighted sampling: oversample positive cases by a factor of 5
+        # Records arrive grouped by source dataset, so the order MUST be broken up --
+        # otherwise training sees a long run of all-negative records followed by a run
+        # of positives, identically every epoch. Use weighted sampling when weights were
+        # supplied (the positive rate is ~2%, so unweighted batches of 16 are usually
+        # all-negative), otherwise plain shuffling. sampler and shuffle are exclusive.
+        sampler = None
+        shuffle = True
+        if self.sample_weights is not None:
+            sampler = WeightedRandomSampler(
+                weights=torch.as_tensor(self.sample_weights, dtype=torch.double),
+                num_samples=len(self.train_dataset),
+                replacement=True,
+            )
+            shuffle = False
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10),
+                          sampler=sampler, shuffle=shuffle,
                           persistent_workers=True, pin_memory=True, collate_fn=collate_fn_skip_none)
 
     def val_dataloader(self):
+        # Returning None keeps Lightning from building DataLoader(None) on paths that
+        # train without a validation split.
+        if self.val_dataset is None:
+            return None
         return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10),
                           persistent_workers=True, pin_memory=True, collate_fn=collate_fn_skip_none)
 
     def test_dataloader(self):
         # fallback to val_dataset if no test_dataset was set
         dataset = self.test_dataset if self.test_dataset is not None else self.val_dataset
+        if dataset is None:
+            return None
         return DataLoader(dataset, batch_size=self.batch_size, num_workers=min(os.cpu_count(), 10),
                           persistent_workers=True, pin_memory=True, collate_fn=collate_fn_skip_none)
