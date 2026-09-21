@@ -38,7 +38,7 @@ import torch.utils.checkpoint
 from torch import Tensor, nn
 
 from . import metrics as M
-from .config import CONV_DOWNSAMPLE, ExperimentCfg, resolve_path
+from .config import CONV_DOWNSAMPLE, ExperimentCfg
 from .losses import (
     GradientReversal,
     hard_negative_ranking_loss,
@@ -64,7 +64,7 @@ def token_lengths(valid_len: Tensor) -> Tensor:
     ECG-FM's conv frontend is ``[(256, 2, 2)] * 4`` -- four kernel-2 stride-2
     convolutions.  fairseq-signals computes ``floor((L - kernel)/stride + 1)`` once per
     layer, which for kernel = stride = 2 is ``floor(L/2)``; nested four deep that is
-    exactly ``L // 16``.  ``tests/test_padding_mask.py`` asserts this against
+    exactly ``L // 16``.  ``tests/test_backbone.py`` asserts this against
     ``ECGTransformerModel._get_feat_extract_output_lengths`` itself rather than trusting
     the derivation.
     """
@@ -570,11 +570,6 @@ class ChagasModule(pl.LightningModule):
         self.feature_extractor.unfreeze()
 
     # -- optimiser ----------------------------------------------------------
-    def _head_parameters(self) -> List[nn.Parameter]:
-        named = dict(self.named_parameters())
-        encoder_prefix = "feature_extractor.ecg_fm_model."
-        return [p for n, p in named.items() if not n.startswith(encoder_prefix) and p.requires_grad]
-
     def param_groups(self) -> List[Dict[str, Any]]:
         """Parameter groups for the current stage.
 

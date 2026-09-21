@@ -117,6 +117,13 @@ above stay the authoritative `a72c51c` result.
 
 ## SLURM smoke results
 
+### The test suite (`sbatch experiments/batch_slurm_tests.sh`)
+
+> Job **17542141**, `jagupard27`, NVIDIA TITAN RTX.  `85 passed` in 63.6 s, exit 0, and
+> all 13 ladder configs round-trip through `ExperimentCfg`.  The same suite passes on
+> the login node (CPU only, 107 s) — the two tests that touch the real 85 M-parameter
+> backbone do one tiny forward on two short records.
+
 ### PLAN §5 item 11 — stage-2 memory smoke (`sbatch experiments/batch_memory_smoke.sh`)
 
 > Job **17541941**, `jagupard27`, NVIDIA TITAN RTX (SM 7.5, 23.5 GiB), torch

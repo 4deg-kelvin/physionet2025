@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 
-from chagas.config import LabelCfg, default_config
+from chagas.config import LabelCfg
 from chagas.dataset import RecordEntry
 from chagas.labels import (
     Code15Table,

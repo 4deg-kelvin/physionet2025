@@ -17,13 +17,12 @@ import glob
 import json
 import os
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
 
-from .config import ExperimentCfg, resolve_path
+from .config import ExperimentCfg
 from .model import ChagasModule
 from .preprocessing import Sample, preprocess_record
 from .training import MODEL_FILENAME

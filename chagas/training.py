@@ -19,7 +19,6 @@ import os
 import shutil
 import time
 from collections import defaultdict
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -29,8 +28,8 @@ import torch
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 
 from . import labels as L
-from .config import ExperimentCfg, load_config, resolve_path
-from .dataset import ChagasDataModule, ChagasDataset, RecordEntry, find_records, scan_records
+from .config import ExperimentCfg, load_config
+from .dataset import ChagasDataModule, RecordEntry, find_records, scan_records
 from .model import ChagasModule
 
 __all__ = [

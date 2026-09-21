@@ -18,7 +18,7 @@ import dataclasses
 import os
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Type, TypeVar
+from typing import Any, Dict, Mapping, Optional, Tuple, Type, TypeVar
 
 import yaml
 
@@ -35,7 +35,7 @@ ECG_FM_LEAD_ORDER: Tuple[str, ...] = (
 #: Total downsampling factor of the ECG-FM conv frontend, ``[(256, 2, 2)] * 4``:
 #: four kernel-2 stride-2 convolutions, i.e. ``floor(L/2)`` four times == ``L // 16``.
 #: Verified against ``ECGTransformerModel._get_feat_extract_output_lengths`` by
-#: ``tests/test_padding_mask.py``.
+#: ``tests/test_backbone.py``.
 CONV_DOWNSAMPLE: int = 16
 
 

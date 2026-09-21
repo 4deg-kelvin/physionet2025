@@ -11,9 +11,8 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pytorch_lightning as pl
@@ -22,7 +21,7 @@ from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from . import labels as L
 from . import preprocessing as P
-from .config import ExperimentCfg, resolve_path
+from .config import ExperimentCfg
 
 __all__ = [
     "RecordEntry",
