@@ -1,0 +1,70 @@
+===== ENV =====
+jagupard27.stanford.edu
+Mon Sep 21 03:14:09 PM PDT 2026
+torch 2.7.1+cu118 | NVIDIA TITAN RTX | sm (7, 5)
+smoke records: 400
+
+===== 1. train_model.py (unmodified) =====
+[train] capped at 14.5 GiB of 23.5 GiB (NVIDIA TITAN RTX, sm (7, 5))
+[chagas] 400 records under /juice2/scr2/kelvinkn/other_work/edwards/fixbranch_test/testdata
+[chagas] code15_exams.csv: 345779 exams
+[chagas] train 320 (85 pos) / val 80 (21 pos); groups disjoint: True
+[chagas] stage 1 (frozen encoder), budget 0.025 h
+[chagas] stage 2 (12 transformer layers unfrozen, LLRD 0.85), budget 0.400 h
+[chagas] threshold = q0.95 = 0.934527
+[chagas] layer weights = [0.0833 0.0833 0.0833 0.0833 0.0833 0.0833 0.0833 0.0833 0.0833 0.0833
+ 0.0833 0.0836]
+[chagas] saved /juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/results/e2e_smoke/model/chagas_model.ckpt
+[train] PEAK ALLOCATED: 3.16 GiB
+[train] PEAK RESERVED : 3.36 GiB
+[train] WALL TIME     : 3.4 min
+--- model folder ---
+total 354169
+drwxr-xr-x 2 kelvinkn users         4 Sep 21 15:17 .
+drwxr-xr-x 4 kelvinkn users         4 Sep 21 15:14 ..
+-rw-r--r-- 1 kelvinkn users      3779 Sep 21 15:17 chagas_manifest.json
+-rw-r--r-- 1 kelvinkn users 362639790 Sep 21 15:17 chagas_model.ckpt
+--- stray .ckpt outside model_folder (must be empty) ---
+(none)
+--- model folder must not contain the temporary work dir ---
+
+===== 2. run_model.py (unmodified, no --allow_failures) =====
+- 385/400: 148623...
+- 386/400: 148892...
+- 387/400: 148942...
+- 388/400: 149079...
+- 389/400: 149836...
+- 390/400: 150382...
+- 391/400: 150631...
+- 392/400: 150686...
+- 393/400: 150698...
+- 394/400: 151644...
+- 395/400: 152050...
+- 396/400: 152562...
+- 397/400: 153126...
+- 398/400: 153781...
+- 399/400: 154510...
+- 400/400: 155625...
+Done.
+[infer] PEAK ALLOCATED: 0.37 GiB
+[infer] PEAK RESERVED : 0.43 GiB
+[infer] WALL TIME     : 0.5 min
+outputs written: 400 / 400
+
+===== 3. threshold check =====
+threshold stored in the checkpoint : 0.9345266819000244
+learned layer weights              : [0.0833 0.0833 0.0833 0.0833 0.0833 0.0833 0.0833 0.0833 0.0833 0.0833
+ 0.0833 0.0836]
+probabilities: n=400 min=0.3691 max=0.9477 mean=0.8087
+positive rate in the binary column : 0.0425
+OK: the binary column is exactly `prob > stored threshold`
+
+===== 4. evaluate_model.py (unmodified) =====
+Challenge score: 0.123
+AUROC: 0.624
+AUPRC: 0.427
+Accuracy: 0.752
+F-measure: 0.195
+
+===== DONE: end-to-end smoke passed =====
+Mon Sep 21 03:18:20 PM PDT 2026

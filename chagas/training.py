@@ -189,8 +189,12 @@ def _make_trainer(
         filename=f"best-stage{stage}",
         monitor=cfg.train.monitor if has_val else None,
         mode="max",
-        save_top_k=1 if has_val else 1,
-        save_last=False,
+        save_top_k=1,
+        # A budget-limited or step-limited stage may stop before any validation has run,
+        # leaving `best_model_path` empty; `last.ckpt` is the fallback so a run always
+        # has weights to carry into the next stage.  It lives in model_folder/_work,
+        # which is deleted once the final checkpoint is written.
+        save_last=True,
         save_weights_only=False,
     )
     time_limit = TimeLimitCallback(max_hours=max_hours, deadline=deadline)
@@ -230,10 +234,11 @@ def _make_trainer(
 
 def _load_best(module: ChagasModule, checkpoint: ModelCheckpoint) -> ChagasModule:
     """Restore the best weights in place, if the callback managed to save any."""
-    best = checkpoint.best_model_path
-    if best and os.path.isfile(best):
-        state = torch.load(best, map_location="cpu", weights_only=False)
-        module.load_state_dict(state["state_dict"], strict=True)
+    for path in (checkpoint.best_model_path, checkpoint.last_model_path):
+        if path and os.path.isfile(path):
+            state = torch.load(path, map_location="cpu", weights_only=False)
+            module.load_state_dict(state["state_dict"], strict=True)
+            return module
     return module
 
 

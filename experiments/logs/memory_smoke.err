@@ -1,0 +1,4 @@
+/juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/memory_smoke.py:71: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  scaler = torch.cuda.amp.GradScaler(enabled=True)
+/juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/memory_smoke.py:71: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  scaler = torch.cuda.amp.GradScaler(enabled=True)
