@@ -53,8 +53,16 @@ $PY experiments/run_capped.py --cap "$T4_CAP_GIB" --label train --script train_m
 echo "--- model folder ---"
 ls -la "$MODEL"
 echo "--- stray .ckpt outside the model folder (must be empty) ---"
-find "$WT" -maxdepth 2 -name '*.ckpt' -newermt '-2 days' -not -path "$MODEL/*" | tee /dev/stderr | \
-    { ! grep -q . ; } || { echo "FAIL: stray checkpoints outside model_folder"; exit 1; }
+# The judged container runs with WORKDIR /challenge; an implicit Lightning
+# ModelCheckpoint there writes a full checkpoint per epoch into the repo root.
+STRAY=$(find "$WT" -name '*.ckpt' -newermt '-2 days' -not -path "$WT/experiments/results/*" || true)
+if [ -n "$STRAY" ]; then
+  echo "FAIL: stray checkpoints outside model_folder:"
+  echo "$STRAY"
+  exit 1
+fi
+echo "(none)"
+test ! -d "$MODEL/_work" || { echo "FAIL: temporary _work dir was not cleaned up"; exit 1; }
 
 echo "===== INFERENCE: Test A (unmodified run_model.py) ====="
 # No --allow_failures: a systematic error must surface, not silently become nan.
