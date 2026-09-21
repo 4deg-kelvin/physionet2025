@@ -124,6 +124,19 @@ above stay the authoritative `a72c51c` result.
 > the login node (CPU only, 107 s) — the two tests that touch the real 85 M-parameter
 > backbone do one tiny forward on two short records.
 
+### Test C (`sbatch experiments/batch_build_test_C.sh`)
+
+> Job **17542142**, `jagupard27`, CPU only, 16 workers.  COMPLETED, exit 0:0, elapsed
+> **00:20:45**.  `wrote 73300/73300 records`; the per-source counts match `split.csv`
+> exactly (code15 68,575 / ptb 4,399 / samitrop 326) and the `#` header block was
+> verified byte-identical to the source on a 200-record sample, so `evaluate_model.py`
+> still finds the labels.  7.0 GB at
+> `/juice2/scr2/kelvinkn/other_work/edwards/fixbranch_test/data_test_C`.
+>
+> The first ~4.5 minutes are the initial `os.walk` over ~146k NFS symlink entries
+> (measured at 266.9 s on its own) before any record is written — the job looks idle
+> until then, which is expected, not a hang.
+
 ### PLAN §5 item 11 — stage-2 memory smoke (`sbatch experiments/batch_memory_smoke.sh`)
 
 > Job **17541941**, `jagupard27`, NVIDIA TITAN RTX (SM 7.5, 23.5 GiB), torch

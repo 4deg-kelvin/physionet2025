@@ -3,3 +3,24 @@ jagupard27.stanford.edu
 Mon Sep 21 03:26:48 PM PDT 2026
 torch 2.7.1+cu118 | scipy 1.11.4 | wfdb 4.1.2
 source records: 73300
+[build_test_C] 73300 records from /juice2/scr2/kelvinkn/other_work/edwards/fixbranch_test/data_test
+[build_test_C] 5000/73300
+[build_test_C] 10000/73300
+[build_test_C] 15000/73300
+[build_test_C] 20000/73300
+[build_test_C] 25000/73300
+[build_test_C] 30000/73300
+[build_test_C] 35000/73300
+[build_test_C] 40000/73300
+[build_test_C] 45000/73300
+[build_test_C] 50000/73300
+[build_test_C] 55000/73300
+[build_test_C] 60000/73300
+[build_test_C] 65000/73300
+[build_test_C] 70000/73300
+[build_test_C] wrote 73300/73300 records to /juice2/scr2/kelvinkn/other_work/edwards/fixbranch_test/data_test_C
+===== VERIFY =====
+source 73300 -> dest 73300
+OK: header comment blocks match on a 200-record sample
+===== DONE =====
+Mon Sep 21 03:47:33 PM PDT 2026
