@@ -222,3 +222,22 @@ ladder.
 * `run_ladder.sh` fails the job if any `.ckpt` appears outside `model_folder`.  The
   judged container runs with `WORKDIR /challenge`, and an implicit Lightning
   `ModelCheckpoint` there would write a full checkpoint per epoch into the repo root.
+
+## Ladder results (2026-09-22, 100k train subsample, seed 42, TitanRTX with 14.5 GiB cap)
+
+| Row | Job | Train time | A chall / AUROC | B chall / AUROC | C chall / AUROC | C−A |
+|---|---|---|---|---|---|---|
+| original a72c51c (run 16878337, no val split, 16 fixed epochs) | 16878337 | 3h25m | 0.434 / 0.858 | 0.440 / 0.858 | n/a | n/a |
+| 0 baseline in new harness | 17548861 | ~2h (of 5h00 job) | 0.412 / 0.848 | 0.423 / 0.851 | 0.408 / 0.846 | −0.004 |
+| 5 full config (two-stage FT + aug + soft labels + FiLM) | 17548862 | 1h22m (of 2h50 job) | **0.435 / 0.854** | 0.436 / 0.850 | **0.425 / 0.847** | −0.010 |
+
+Per-source mean probability (CODE-15 / PTB-XL / SaMi-Trop): original 0.334 / 0.062 / 0.651;
+row 0 0.356 / 0.077 / 0.640; row 5 **0.627 / 0.008 / 0.798**.
+
+Reading: row 5 beats the like-for-like row 0 on every view (+0.023 A, +0.014 B, +0.017 C) but only
+matches the original run in-distribution; row 0 is ~0.02 below the original because the harness
+holds out 10% and early-stops. The C−A gaps are within single-seed noise (TPR@5% sd ≈ 0.012 at
+1,662 positives). Row 5's PTB-XL/CODE-15-negative probability ratio widened from ~5× to ~80×:
+the source-valued soft labels (PTB-XL 0.0 vs CODE-15-neg 0.2) reward source discrimination.
+Next: rows 2 and 3 to attribute the effect; second seed of rows 0 and 5; a soft-label variant
+with source-independent negative targets.
