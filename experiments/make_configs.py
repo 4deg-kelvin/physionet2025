@@ -132,6 +132,20 @@ def row5(cfg: ExperimentCfg) -> None:
     cfg.train.max_hours = 40.0
 
 
+def row5b(cfg: ExperimentCfg) -> None:
+    """Row 5 with demographics removed (DECISIONS.md D-2026-09-25-3).
+
+    Row 3 had erased the PTB-XL fingerprint (PTB-XL mean prob 0.078 -> 0.316); row 5 brought
+    back a stronger one (0.008). PTB-XL is European with a different age/sex mix, so FiLM on
+    age/sex alone could identify it. This variant asks whether the source cue survives
+    without any demographic input.
+    """
+    row5(cfg)
+    cfg.model.demographics = "none"
+    cfg.name = "row5b_no_demographics"
+    cfg.description = "Row 5 variant: identical, but demographics=none (age-shortcut / source-cue ablation)."
+
+
 def row6(cfg: ExperimentCfg) -> None:
     row5(cfg)
     cfg.name = "row6_aux_heads"
@@ -176,6 +190,7 @@ ROWS: List[Tuple[str, Callable[[ExperimentCfg], None]]] = [
     ("row3_augmentation", row3),
     ("row4_film", row4),
     ("row5_two_stage_ft", row5),
+    ("row5b_no_demographics", row5b),
     ("row6_aux_heads", row6),
     ("row7_ranking_loss", row7),
     ("row8_domain_adversarial", row8),

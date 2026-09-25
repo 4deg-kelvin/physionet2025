@@ -136,3 +136,12 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   demographics alone could identify it. The hidden cohorts are all Brazilian: a demographic source
   cue learned here transfers as an age prior, not as disease signal.
 - **Status:** open.
+
+## D-2026-09-25-4 — "run both" = row 1 + (row 4 and row 5b), three jobs, test-gated
+- **Decision:** Submit row 1 (skipped defect-fix step), row 4 (+FiLM only) and a new row 5b
+  (row 5 with `demographics: none`), each `afterok` the test suite. Row 5b is added to
+  `make_configs.py` so it regenerates with the other rows.
+- **Why:** The user's "run both" answered a two-item list whose second item contained two runs.
+  Row 1 attributes the Test-C collapse (D-2026-09-25-1); rows 4 and 5b bracket FiLM's role in the
+  source separation (D-2026-09-25-3).
+- **Status:** active.
