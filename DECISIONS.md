@@ -173,3 +173,16 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   demographic PTB-XL identifier can only transfer as an age prior.
 - **Rejected:** keeping FiLM for its row-4 gain (a frozen-encoder effect that fine-tuning subsumes).
 - **Status:** active; open items: cleaner (5c vs 5d vs 5b), then second seed, then full-data final.
+
+## D-2026-09-26-4 — Batch 1 (rows 1b, 5c, 5d) then one full-data final; winner pre-registered
+- **Decision:** User approved "the 3 experiments and one final". Rows 1b/5c/5d are submitted now,
+  test-gated. The final (`final_full`, 292,885 records, 2 seeds) is launched by me as soon as batch 1
+  reports, with the cleaner chosen by this rule, fixed in advance:
+  1. Candidates: 5b (0.5–100 Hz, C 0.430), 5c (0.5–45 Hz), 5d (neurokit).
+  2. Pick the highest Test C among candidates whose Test A is within 0.005 of the best A.
+  3. Ties within 0.012 (one-seed noise) go to the vectorised butterworth (5b/5c) over neurokit,
+     because the grader's 48 h inference limit on ~81k records favours the 12× faster cleaner.
+  4. Row 1b is diagnostic only (confirms the cleaner attribution); it does not enter the pick.
+- **Why:** Pre-registering avoids choosing the cleaner on a post-hoc reading of three noisy numbers,
+  and lets the final start without another round-trip.
+- **Status:** active.
