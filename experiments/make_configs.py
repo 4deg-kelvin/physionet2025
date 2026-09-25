@@ -80,6 +80,17 @@ def row1(cfg: ExperimentCfg) -> None:
     cfg.train.early_stop_patience = 3
 
 
+def row1b(cfg: ExperimentCfg) -> None:
+    """Row 1 with the legacy neurokit cleaner (DECISIONS.md D-2026-09-26-1).
+
+    Isolates the cleaner from the other two row-1 changes (padding mask, early stopping).
+    """
+    row1(cfg)
+    cfg.preprocess.clean = "neurokit"
+    cfg.name = "row1b_neurokit"
+    cfg.description = "Row 1 variant: padding mask + early stop, but the legacy neurokit cleaner."
+
+
 def row2(cfg: ExperimentCfg) -> None:
     """+ source-aware soft labels and ``pos_weight = 5`` with 5x oversampling."""
     row1(cfg)
@@ -146,6 +157,26 @@ def row5b(cfg: ExperimentCfg) -> None:
     cfg.description = "Row 5 variant: identical, but demographics=none (age-shortcut / source-cue ablation)."
 
 
+def row5c(cfg: ExperimentCfg) -> None:
+    """Row 5 with the band-pass upper cutoff lowered to 45 Hz (DECISIONS.md D-2026-09-26-1).
+
+    Same fast vectorised cleaner; the 45 Hz cutoff is the one used by the
+    reliability-aware Chagas paper (Physiol. Meas. 2026; Hong et al. 2025 used 60 Hz).
+    """
+    row5(cfg)
+    cfg.preprocess.bandpass_high_hz = 45.0
+    cfg.name = "row5c_bandpass45"
+    cfg.description = "Row 5 variant: butterworth 0.5-45 Hz instead of 0.5-100 Hz."
+
+
+def row5d(cfg: ExperimentCfg) -> None:
+    """Row 5 with the legacy neurokit cleaner (DECISIONS.md D-2026-09-26-1)."""
+    row5(cfg)
+    cfg.preprocess.clean = "neurokit"
+    cfg.name = "row5d_neurokit"
+    cfg.description = "Row 5 variant: legacy per-lead neurokit cleaner (12x slower at inference)."
+
+
 def row6(cfg: ExperimentCfg) -> None:
     row5(cfg)
     cfg.name = "row6_aux_heads"
@@ -185,12 +216,15 @@ def row_final(cfg: ExperimentCfg) -> None:
 ROWS: List[Tuple[str, Callable[[ExperimentCfg], None]]] = [
     ("row0_baseline", row0),
     ("row1_defect_fixes", row1),
+    ("row1b_neurokit", row1b),
     ("row2_soft_labels", row2),
     ("row2b_no_oversample", row2b),
     ("row3_augmentation", row3),
     ("row4_film", row4),
     ("row5_two_stage_ft", row5),
     ("row5b_no_demographics", row5b),
+    ("row5c_bandpass45", row5c),
+    ("row5d_neurokit", row5d),
     ("row6_aux_heads", row6),
     ("row7_ranking_loss", row7),
     ("row8_domain_adversarial", row8),
