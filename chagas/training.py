@@ -295,6 +295,22 @@ def _train_member(
     return module
 
 
+def _summarise_val_history(member: int, module: ChagasModule) -> dict:
+    """Best validation score and epoch per stage, plus the full per-epoch history.
+
+    Written into chagas_manifest.json so a finished run records its own model
+    selection; previously the only trace was the checkpoint filename
+    (DECISIONS.md, 2026-09-22).
+    """
+    history = list(getattr(module, "val_history", []) or [])
+    best_by_stage: dict = {}
+    for rec in history:
+        key = f"stage{rec['stage']}"
+        if key not in best_by_stage or rec["val_challenge"] > best_by_stage[key]["val_challenge"]:
+            best_by_stage[key] = {k: rec[k] for k in ("epoch", "val_challenge", "val_auroc", "val_auprc")}
+    return {"member": member, "best_by_stage": best_by_stage, "history": history}
+
+
 # ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
@@ -352,6 +368,7 @@ def train_model(
     per_member_hours = cfg.train.max_hours / n_members
 
     saved: List[str] = []
+    summaries: List[dict] = []
     for member in range(n_members):
         module = _train_member(
             cfg,
@@ -365,6 +382,7 @@ def train_model(
         out_path = os.path.join(model_folder, member_filename(member))
         _save_checkpoint(module, out_path, cfg)
         saved.append(out_path)
+        summaries.append(_summarise_val_history(member, module))
         if verbose:
             print(f"[chagas] saved {out_path}", flush=True)
 
@@ -373,6 +391,7 @@ def train_model(
         json.dump(
             {
                 "members": [os.path.basename(p) for p in saved],
+                "training": summaries,
                 "config": cfg.to_dict(),
             },
             fh,

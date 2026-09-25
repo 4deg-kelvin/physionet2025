@@ -1,0 +1,113 @@
+# Decision log — branch `improve/robust-finetune`
+
+One entry per decision that shaped the work, newest last. Each records what was decided,
+why, the evidence at the time, what was rejected, and status. Results live in
+`experiments/README.md`; method provenance in `PROVENANCE.md`.
+
+Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
+
+---
+
+## D-2026-08-14-1 — Test on `jag-standard` with `gpu:titanrtx:1`, allocator capped to 14.5 GiB
+- **Decision:** All GPU jobs use partition `jag-standard` (not `jag-important`), a TitanRTX, and
+  `torch.cuda.set_per_process_memory_fraction(14.5 / total)`.
+- **Why:** User asked not to use `jag-important`. The grader's T4 is Turing SM 7.5; TitanRTX is the
+  only Turing card on jag-*, so it takes the same `get_device_capability()[0] >= 8` (TF32) branch
+  as the T4 and lacks native bf16 like the T4. It has 24 GB vs the T4's 16 GB, hence the cap.
+- **Rejected:** a6000ada (SM 8.9; different TF32 path, bf16 available, would hide T4 failures);
+  titanv (12 GB, stricter than the T4, risks false OOM).
+- **Status:** active.
+
+## D-2026-08-14-2 — Train on a 100k patient-grouped subsample for all ablations
+- **Decision:** Ablation rows train on all 6,528 positives + 93,472 sampled negatives from the
+  patient-grouped train split; the full 292,885 split is reserved for the final config.
+- **Why:** Full training was ~10 h/run; the encoder is frozen or lightly tuned and the sampler
+  draws positives at 5×, so positives bind learning. User chose "subsampled".
+- **Rejected:** full data per row (~10 h each, 10 rows); 40k "fast" (directional only).
+- **Status:** active.
+
+## D-2026-08-14-3 — Patient-grouped split, natural test prevalence, three views A/B/C
+- **Decision:** Split on CODE-15 `patient_id` (1.48 exams/patient); test keeps 2.27% prevalence;
+  score view A (full), B (CODE-15 only) and C (organiser-style perturbation of A).
+- **Why:** The repo's `train_val_test_sets.csv` leaks 45.5% of test exams' patients into train.
+  TPR@5% is capped at 0.05/prevalence, so a rebalanced test set is uninterpretable. B removes the
+  SaMi-Trop=positive / PTB-XL=negative source shortcut; C targets the perturbations the
+  organisers documented (noise, device filters, resampling; Reyna et al. 2025 §2.2).
+- **Rejected:** the repo's record-level split; rebalanced test set; leave-one-source-out (SaMi-Trop
+  is all-positive, so it cannot be ranked).
+- **Status:** active.
+
+## D-2026-09-21-1 — New `chagas/` package with a thin `team_code.py`; legacy files kept
+- **Decision:** Implement the plan as a new package; `fm.py`, `dataloader.py`, `utils.py`,
+  `augmentations.py` stay in the tree but nothing on the judged path imports them.
+- **Why:** The audit found three hand-synchronised preprocessing copies and a 74 KB `fm.py` with
+  four unreachable loss classes; maintainability was an explicit user requirement. Keeping the
+  legacy files preserves history and the team's authorship.
+- **Rejected:** editing `fm.py` in place (skew risk, unreviewable diff); deleting legacy files.
+- **Status:** active.
+
+## D-2026-09-21-2 — Keep the team's core idea; borrow only cited, evidence-backed methods
+- **Decision:** ECG-FM backbone + hook-captured 12 layers + static softmax aggregation + MLP head
+  + age/sex remain the model. Every added method is one a top-3 team or a peer-reviewed paper
+  measured on the *hidden* sets (two-stage FT, soft labels, w_pos=5 + 5× oversampling, FiLM,
+  augmentation, model selection on the challenge score).
+- **Why:** User instruction ("keep the core idea"; "cite … make clear if it's not mine"). The
+  hidden-set gap (median −64% to ELSA-Brasil) is the problem, not in-distribution fit.
+- **Rejected:** replacing the backbone with the winner's ST-MEM ViT (would abandon the core idea);
+  uncited heuristics.
+- **Status:** active.
+
+## D-2026-09-21-3 — Default config = ladder row 5; optional methods behind flags, default off
+- **Decision:** FiLM, soft labels, augmentation and two-stage FT are on by default; aux heads,
+  ranking loss, GRL and the PMA gate are off until an ablation row justifies them.
+- **Why:** The four defaults each have hidden-set evidence from ≥2 sources; the optional four have
+  one source each (or none for PMA on this task).
+- **Status:** active.
+
+## D-2026-09-21-4 — Departures from cited augmentation recipes
+- **Decision:** `crop_shift` randomises the crop *start* instead of prepending zeros;
+  `baseline_wander`/`gaussian_noise` amplitudes are relative to record std.
+- **Why:** The padding mask requires the valid region to be a prefix; the augmentations run before
+  the per-record z-score, so absolute amplitudes from Hong et al. would not transfer.
+- **Status:** active (documented in `PROVENANCE.md`).
+
+## D-2026-09-21-5 — Two PLAN §5 tolerances replaced by measured bounds, not loosened silently
+- **Decision:** Pad-invariance (item 3) asserts exact token counts and mask behaviour and *reports*
+  the pooled-feature delta (0.78 masked vs 1.29 unmasked); resample invariance (item 2) asserts
+  RMS < 0.15, corr > 0.99, and |Δ logit| < 0.25 (measured 0.0102).
+- **Why:** ECG-FM's conv frontend uses `Fp32GroupNorm` over time, so trailing zeros change valid
+  positions; 300 Hz genuinely removes >100 Hz QRS content. Both are backbone properties.
+- **Open risk:** padding distortion is a function of record length, which correlates with source.
+- **Status:** active.
+
+## D-2026-09-22-1 — Interpret "run both" as ladder rows 2 and 3
+- **Decision:** After rows 0/5, the user said "yes run both"; the immediately preceding list named
+  "rows 2 and 3" first. Rows 2 (+soft labels/weighting) and 3 (+augmentation) are submitted;
+  second-seed repeats and the source-independent soft-label variant are deferred.
+- **Why:** Rows 2 and 3 attribute row 5's gain and its widened source separation
+  (PTB-XL/CODE-15-negative probability ratio ~5× → ~80×), which is the open question.
+- **Status:** active.
+
+## D-2026-09-22-2 — Add per-epoch validation print and per-stage best score to the manifest
+- **Decision:** `ChagasModule.on_validation_epoch_end` prints one line per epoch;
+  `chagas_manifest.json` gains `training[].best_by_stage` and the full history.
+- **Why:** The progress bar is disabled for SLURM logs, so rows 0/5 were only observable through
+  checkpoint mtimes, and the manifest did not record which epoch was selected. Logging only; no
+  effect on training. Gated by the test suite on SLURM before rows 2/3 start.
+- **Status:** active.
+
+## D-2026-09-22-3 — Rows 2/3 run only after the test suite passes (SLURM `afterok`)
+- **Decision:** `batch_slurm_tests.sh` is submitted first; rows 2 and 3 depend on it with
+  `--dependency=afterok`.
+- **Why:** The harness edit above touches the training loop; a failed test cancels the chain
+  instead of burning two GPU runs on a broken loop. Mirrors the `afterok` guard that already
+  saved a wasted run when the first split job timed out on 2026-08-14.
+- **Status:** active.
+
+## Open decisions
+- Whether the source-valued soft labels (PTB-XL 0.0 vs CODE-15-neg 0.2) cost anything on the
+  hidden cohorts. Row 2 vs row 0 answers the in-distribution part; a variant with a single
+  negative target is the proposed follow-up.
+- Whether Test C is strong enough to discriminate robustness (both rows moved < 0.01). If rows
+  2/3 also show no C−A separation, strengthen C or accept it as a sanity check only.
+- Second seeds for rows 0 and 5 (TPR@5% sd ≈ 0.012 at 1,662 positives; the observed +0.023 is ~2σ).

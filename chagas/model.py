@@ -411,6 +411,9 @@ class ChagasModule(pl.LightningModule):
         self._val_labels: List[np.ndarray] = []
         self._val_losses: List[float] = []
         self.last_val_probs: Optional[np.ndarray] = None
+        # One dict per validation epoch (stage, epoch, metrics); summarised into
+        # chagas_manifest.json by training.py so a finished run is self-describing.
+        self.val_history: list = []
 
     # -- forward -----------------------------------------------------------
     def forward(
@@ -521,6 +524,23 @@ class ChagasModule(pl.LightningModule):
         self.log("val_auprc", float(np.nan_to_num(auprc, nan=0.0)), batch_size=n)
         if not self.trainer.sanity_checking:
             self.update_threshold(probs)
+            record = {
+                "stage": int(getattr(self, "stage", 0) or 0),
+                "epoch": int(self.current_epoch),
+                "val_challenge": float(np.nan_to_num(challenge, nan=0.0)),
+                "val_auroc": float(np.nan_to_num(auroc, nan=0.5)),
+                "val_auprc": float(np.nan_to_num(auprc, nan=0.0)),
+                "n": n,
+            }
+            self.val_history.append(record)
+            # One line per validation epoch. With the progress bar disabled this is the
+            # only per-epoch progress signal in a SLURM log (DECISIONS.md, 2026-09-22).
+            print(
+                f"[chagas] stage {record['stage']} epoch {record['epoch']} "
+                f"val_challenge={record['val_challenge']:.4f} "
+                f"val_auroc={record['val_auroc']:.4f} val_auprc={record['val_auprc']:.4f} n={n}",
+                flush=True,
+            )
 
     def update_threshold(self, probs: np.ndarray) -> float:
         """Set the decision threshold to the ``threshold_quantile`` of validation scores.

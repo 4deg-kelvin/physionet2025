@@ -44,4 +44,5 @@ results/
 training_data/
 transformers-autoencoder/
 xgboost-cleandata/
-pipeline.log
+pipeline.logexperiments/logs/
+experiments/.ladder_ids
