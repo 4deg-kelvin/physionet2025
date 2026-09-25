@@ -145,3 +145,20 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   Row 1 attributes the Test-C collapse (D-2026-09-25-1); rows 4 and 5b bracket FiLM's role in the
   source separation (D-2026-09-25-3).
 - **Status:** active.
+
+## D-2026-09-26-1 — The Test-C collapse is attributed to the defect-fix step, most likely the cleaner
+- **Decision:** Treat the 0.5–100 Hz butterworth cleaner (audit D8) as the prime suspect for the C
+  collapse (row 1: A 0.442 but C 0.341, gap −0.101; row 0 gap −0.004). Soft labels are cleared
+  (row 2 recovers +0.010 C). Prepare three variants to isolate and fix it: row 1 with
+  `clean: neurokit` (isolates the cleaner from padding mask/early stop), row 5 with
+  `bandpass_high_hz: 45` (fast vectorised cleaner, cutoff from Physiol. Meas. 2026 / Hong et al.
+  used 60), and row 5 with `clean: neurokit` (the legacy cleaner, 12× slower at inference).
+- **Why:** The 100 Hz cutoff was my choice (to keep high-frequency QRS content); the evidence says it
+  passes injected noise into fixed backbone features. A cutoff in the 45–60 Hz range is what the two
+  cited Chagas papers used. Padding-mask and early-stop are retained unless row 1b says otherwise.
+- **Status:** open — configs prepared; launch awaits user go-ahead (~5 h each).
+
+## D-2026-09-26-2 — FiLM demographics confirmed; row 5's source separation attributed to unfreezing
+- **Decision:** Keep FiLM (row 4: +0.027 A, +0.035 C vs row 3). Row 4's PTB-XL mean probability
+  (0.243) is far from row 5's (0.008), so the strong source cue comes from stage-2 fine-tuning.
+- **Status:** active; row 5b (no demographics) pending to confirm.

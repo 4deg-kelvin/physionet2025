@@ -265,3 +265,27 @@ Findings:
 4. Validation scores (~0.37) sit below test A because the 10% val split has 6.4% prevalence (ceiling 0.78).
 5. Acceptance rule: row 2 vs 0 fails on the C−A gap; row 3 vs 2 fails on A (−0.020) but halves the gap.
    The rule assumed monotone gains; rows 2/3 show a real in-distribution vs robustness trade-off.
+
+## Ladder rows 1 and 4 (2026-09-25/26, SLURM 17599521, 17599522; frozen encoder)
+
+| Row | A chall / AUROC | B | C | C−A | PTB-XL / CODE-15 / SaMi-Trop mean prob |
+|---|---|---|---|---|---|
+| 0 baseline | 0.412 / 0.848 | 0.423 | 0.408 | −0.004 | 0.077 / 0.356 / 0.640 |
+| **1** +defect fixes (padding mask, butterworth 0.5–100 Hz, early stop) | **0.442** / 0.862 | 0.434 | **0.341** | **−0.101** | 0.062 / 0.318 / 0.690 |
+| 2 +soft labels, w_pos 5, 5× | 0.427 / 0.856 | 0.428 | 0.351 | −0.076 | 0.078 / 0.639 / 0.807 |
+| 3 +augmentation | 0.407 / 0.837 | 0.415 | 0.374 | −0.033 | 0.316 / 0.623 / 0.779 |
+| **4** +FiLM | 0.434 / 0.852 | 0.430 | 0.409 | −0.025 | 0.243 / 0.645 / 0.808 |
+| 5 +two-stage FT | 0.435 / 0.854 | 0.436 | 0.425 | −0.010 | 0.008 / 0.627 / 0.798 |
+
+Attribution (each row vs the previous):
+- **Row 1 fixes: +0.030 A, −0.067 C.** The Test-C collapse is caused by the defect-fix step, NOT by the
+  soft labels (row 2 actually recovers +0.010 C). Prime suspect: the cleaner. neurokit's default is a
+  0.5 Hz high-pass plus a broad 50 Hz "powerline" smoother; the replacement is a 0.5–100 Hz band-pass
+  with narrow Q=30 notches, which passes far more of the injected broadband noise into a backbone
+  whose features were fixed during pretraining. Padding mask / early stopping are less plausible.
+- Soft labels: −0.015 A, +0.010 C. Augmentation: −0.020 A, +0.023 C, removes the 500 Hz PTB-XL fingerprint.
+- **FiLM: +0.027 A, +0.035 C, PTB-XL 0.316→0.243.** A clear win, and NOT the cause of row 5's source
+  separation (0.243 vs 0.008): that comes from unfreezing the encoder. Row 5b (no demographics) confirms.
+- Two-stage FT: +0.001 A, +0.016 C, but PTB-XL 0.243 → 0.008.
+Highest-A model so far is row 1 (0.442); highest-C is row 5 (0.425). The cleaner change is the single
+largest robustness cost in the ladder and must be revisited before the final config.
