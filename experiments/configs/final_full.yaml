@@ -97,7 +97,7 @@ model:
   checkpoint: mimic_iv_ecg_finetuned.pt
   embed_dim: 768
   aggregation: static_softmax
-  demographics: film
+  demographics: none
   film_hidden: 32
   hidden_dim: 256
   dropout: 0.1

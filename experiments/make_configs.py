@@ -163,7 +163,7 @@ def row5c(cfg: ExperimentCfg) -> None:
     Same fast vectorised cleaner; the 45 Hz cutoff is the one used by the
     reliability-aware Chagas paper (Physiol. Meas. 2026; Hong et al. 2025 used 60 Hz).
     """
-    row5(cfg)
+    row5b(cfg)  # demographics=none, D-2026-09-26-3
     cfg.preprocess.bandpass_high_hz = 45.0
     cfg.name = "row5c_bandpass45"
     cfg.description = "Row 5 variant: butterworth 0.5-45 Hz instead of 0.5-100 Hz."
@@ -171,7 +171,7 @@ def row5c(cfg: ExperimentCfg) -> None:
 
 def row5d(cfg: ExperimentCfg) -> None:
     """Row 5 with the legacy neurokit cleaner (DECISIONS.md D-2026-09-26-1)."""
-    row5(cfg)
+    row5b(cfg)  # demographics=none, D-2026-09-26-3
     cfg.preprocess.clean = "neurokit"
     cfg.name = "row5d_neurokit"
     cfg.description = "Row 5 variant: legacy per-lead neurokit cleaner (12x slower at inference)."
@@ -207,7 +207,7 @@ def row9(cfg: ExperimentCfg) -> None:
 
 def row_final(cfg: ExperimentCfg) -> None:
     """The final configuration, for the full 292,885-record training split."""
-    row5(cfg)
+    row5b(cfg)  # demographics=none, D-2026-09-26-3
     cfg.name = "final_full"
     cfg.description = "Final config on the full training split; 71 h budget, 2 seeds via two runs."
     cfg.train.max_hours = 71.0

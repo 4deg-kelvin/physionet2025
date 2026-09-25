@@ -162,3 +162,14 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - **Decision:** Keep FiLM (row 4: +0.027 A, +0.035 C vs row 3). Row 4's PTB-XL mean probability
   (0.243) is far from row 5's (0.008), so the strong source cue comes from stage-2 fine-tuning.
 - **Status:** active; row 5b (no demographics) pending to confirm.
+
+## D-2026-09-26-3 — Final config uses `demographics: none`; cleaner variants re-based on row 5b
+- **Decision:** Row 5b (no demographics) replaces row 5 as the base for the final config and for the
+  cleaner variants 5c/5d (`make_configs.py` updated; `final_full` likewise). The shipped default in
+  `chagas/config.py` is NOT changed until the cleaner question is settled.
+- **Why:** Row 5b matches row 5 on every view (A +0.003, B +0.006, C +0.005; noise ≈ 0.012) while
+  cutting the PTB-XL source separation 9× (0.008 → 0.072). D-2026-09-25-3 said: if FiLM's gain is
+  explained by demographics, prefer none. It is. The hidden cohorts are all Brazilian, so a
+  demographic PTB-XL identifier can only transfer as an age prior.
+- **Rejected:** keeping FiLM for its row-4 gain (a frozen-encoder effect that fine-tuning subsumes).
+- **Status:** active; open items: cleaner (5c vs 5d vs 5b), then second seed, then full-data final.

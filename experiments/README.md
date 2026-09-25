@@ -289,3 +289,16 @@ Attribution (each row vs the previous):
 - Two-stage FT: +0.001 A, +0.016 C, but PTB-XL 0.243 → 0.008.
 Highest-A model so far is row 1 (0.442); highest-C is row 5 (0.425). The cleaner change is the single
 largest robustness cost in the ladder and must be revisited before the final config.
+
+## Row 5b, no demographics (2026-09-26, SLURM 17599523; two-stage FT)
+
+| Row | A chall / AUROC | B | C | C−A | PTB-XL / CODE-15 / SaMi-Trop mean prob |
+|---|---|---|---|---|---|
+| 5 full (FiLM) | 0.435 / 0.854 | 0.436 | 0.425 | −0.010 | 0.008 / 0.627 / 0.798 |
+| **5b** = 5 with demographics=none | 0.438 / 0.848 | **0.442** | **0.430** | −0.008 | **0.072** / 0.645 / 0.788 |
+
+With the encoder unfrozen, demographics add nothing measurable (all deltas within the ~0.012 noise) but
+FiLM + fine-tuning together drive PTB-XL's mean probability to 0.008 — a source cue built from the
+European age/sex mix, with no performance benefit. 5b keeps the flattest age profile (mean prob
+0.57–0.64 across deciles) and the best CODE-15-only score in the ladder. FiLM's +0.027 in row 4 was a
+frozen-encoder effect that stage-2 fine-tuning subsumes.
