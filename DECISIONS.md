@@ -111,3 +111,28 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - Whether Test C is strong enough to discriminate robustness (both rows moved < 0.01). If rows
   2/3 also show no C−A separation, strengthen C or accept it as a sanity check only.
 - Second seeds for rows 0 and 5 (TPR@5% sd ≈ 0.012 at 1,662 positives; the observed +0.023 is ~2σ).
+
+## D-2026-09-25-1 — Rows 2/3 read as inconclusive on attribution; row 1 must run next
+- **Decision:** Do not accept or reject the soft-label/weighting change on rows 2/3 alone. Run row 1
+  (padding mask + butterworth cleaner + early stopping, nothing else) to attribute the C collapse.
+- **Why:** Row 0→1 changes three things and row 1 was never run (D-2026-09-22-1 jumped to rows 2/3).
+  Row 2's C fell from 0.408 to 0.351 (gap −0.004 → −0.076), far beyond the ~0.012 noise; the cause is
+  either the new cleaner (0.5–100 Hz passes more of the injected noise than neurokit's default) or
+  the sharper, source-valued targets. These need different fixes.
+- **Status:** open — awaiting user go-ahead for row 1 (~5 h GPU).
+
+## D-2026-09-25-2 — Augmentation judged by Test C and the PTB-XL probability, not by Test A
+- **Decision:** Keep augmentation on in the default config despite A −0.020 vs row 2.
+- **Why:** It halves the C−A gap and raises PTB-XL mean probability from 0.078 to 0.316, i.e. it
+  removes the sampling-rate fingerprint (PTB-XL 500 Hz vs 400 Hz elsewhere). Hidden SaMi-Trop 3 is
+  partly 500 Hz; a model that has learned "500 Hz ⇒ negative" would score those records as negatives.
+- **Rejected:** dropping augmentation to recover A (optimises the wrong distribution).
+- **Status:** active.
+
+## D-2026-09-25-3 — Row 5's source separation (PTB-XL 0.008) is an open risk, not a win
+- **Decision:** Before the full-data final, run row 4 (+FiLM only) and a `demographics: none` variant of
+  row 5 to find which component re-learns the source cue that augmentation had removed.
+- **Why:** Row 3 → 5 adds FiLM and unfreezing; PTB-XL is European with a different age/sex mix, so
+  demographics alone could identify it. The hidden cohorts are all Brazilian: a demographic source
+  cue learned here transfers as an age prior, not as disease signal.
+- **Status:** open.

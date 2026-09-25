@@ -241,3 +241,27 @@ holds out 10% and early-stops. The C−A gaps are within single-seed noise (TPR@
 the source-valued soft labels (PTB-XL 0.0 vs CODE-15-neg 0.2) reward source discrimination.
 Next: rows 2 and 3 to attribute the effect; second seed of rows 0 and 5; a soft-label variant
 with source-independent negative targets.
+
+## Ladder results, rows 2 and 3 (2026-09-25, same subsample/seed; SLURM 17591923, 17591924; 5h08 each, frozen encoder)
+
+| Row | A chall / AUROC | B chall / AUROC | C chall / AUROC | C−A | PTB-XL / CODE-15 / SaMi-Trop mean prob | best val epoch |
+|---|---|---|---|---|---|---|
+| 0 baseline | 0.412 / 0.848 | 0.423 / 0.851 | 0.408 / 0.846 | −0.004 | 0.077 / 0.356 / 0.640 | (all 16 epochs, no early stop) |
+| 2 +soft labels, w_pos 5, 5× oversample (+row-1 fixes) | **0.427** / 0.856 | 0.428 / 0.851 | **0.351** / 0.821 | **−0.076** | 0.078 / 0.639 / 0.807 | 8 of 12 |
+| 3 +augmentation | 0.407 / 0.837 | 0.415 / 0.836 | 0.374 / 0.825 | −0.033 | **0.316** / 0.623 / 0.779 | 5 of 9 |
+| 5 full (+FiLM, +two-stage FT) | 0.435 / 0.854 | 0.436 / 0.850 | 0.425 / 0.847 | −0.010 | 0.008 / 0.627 / 0.798 | stage-2 epoch 0 |
+
+Findings:
+1. **Row 1 was skipped**, and row 0→1 changes three things (padding mask, neurokit→butterworth cleaner,
+   early stopping), so the C collapse between row 0 (−0.004) and row 2 (−0.076) cannot yet be attributed
+   between those fixes and the label/weighting change. Row 1 must run before either is accepted.
+2. **Augmentation does what it is for**: C−A narrows from −0.076 to −0.033 and PTB-XL's mean probability
+   rises from 0.078 to 0.316, i.e. the augmentation (resample round-trip, device filters) removes a
+   PTB-XL fingerprint — consistent with PTB-XL being the only 500 Hz source (the others are 400 Hz),
+   the "original sampling frequency" confounder Van Santvliet et al. warned about. Cost: A −0.020.
+3. **Row 5 has the best C but the strongest source separation** (PTB-XL 0.008). Since row 3 had removed
+   it, FiLM (PTB-XL is European, different age/sex mix) and/or the unfrozen encoder re-learn a source cue
+   that survives our Test-C perturbations. Row 4 and a `demographics: none` ablation separate these.
+4. Validation scores (~0.37) sit below test A because the 10% val split has 6.4% prevalence (ceiling 0.78).
+5. Acceptance rule: row 2 vs 0 fails on the C−A gap; row 3 vs 2 fails on A (−0.020) but halves the gap.
+   The rule assumed monotone gains; rows 2/3 show a real in-distribution vs robustness trade-off.
