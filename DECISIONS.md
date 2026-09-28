@@ -198,3 +198,13 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - **Noise caveat:** 5c vs 5b differences are inside one-seed noise (~0.012). The pick is principled
   (pre-registered) rather than statistically decisive; the two-seed final reports mean ± sd.
 - **Status:** active.
+
+## D-2026-09-28-2 — Test gate caught the default flip; final resubmitted
+- **What happened:** `test_two_stage_freezing_llrd_and_dropout_modes` asserted FiLM parameters are
+  trainable under `default_config()`; the shipped default became `demographics="none"` in
+  D-2026-09-28-1, so the gate failed (84/85) and the dependent final (17641239) was held
+  (`DependencyNeverSatisfied`) and cancelled.
+- **Decision:** Pin `cfg.model.demographics = "film"` inside that test. Its subject is the
+  freezing / LLRD / dropout mechanics, which are independent of the shipped default; the FiLM
+  path still needs coverage even though it is off by default. No assertion was weakened.
+- **Status:** active. Final resubmitted behind a fresh test gate.

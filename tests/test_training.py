@@ -33,6 +33,10 @@ def test_two_stage_freezing_llrd_and_dropout_modes(checkpoint_path):
     from chagas.model import ChagasModule
 
     cfg = default_config()
+    # This test exercises the FiLM path explicitly. The shipped default became
+    # demographics="none" after ladder row 5b (DECISIONS.md D-2026-09-26-3 / D-2026-09-28-1);
+    # the freezing / LLRD / dropout assertions below must not depend on that default.
+    cfg.model.demographics = "film"
     module = ChagasModule(cfg=cfg.to_dict(), stage=1)
     extractor = module.feature_extractor
     encoder = extractor.ecg_fm_model
