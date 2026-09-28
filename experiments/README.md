@@ -302,3 +302,19 @@ FiLM + fine-tuning together drive PTB-XL's mean probability to 0.008 — a sourc
 European age/sex mix, with no performance benefit. 5b keeps the flattest age profile (mean prob
 0.57–0.64 across deciles) and the best CODE-15-only score in the ladder. FiLM's +0.027 in row 4 was a
 frozen-encoder effect that stage-2 fine-tuning subsumes.
+
+## Batch 1: cleaner ablation (2026-09-28, SLURM 17606715/16/17; all on demographics=none)
+
+| Row | A chall / AUROC | B | C | C−A | PTB-XL / CODE-15 / SaMi-Trop | wall |
+|---|---|---|---|---|---|---|
+| 5b 0.5–100 Hz | 0.438 / 0.848 | 0.442 | 0.430 | −0.008 | 0.072 / 0.645 / 0.788 | 3h02 |
+| **5c 0.5–45 Hz** | 0.437 / 0.842 | **0.448** | **0.434** | **−0.003** | 0.122 / 0.640 / 0.774 | 4h20 |
+| 5d neurokit | 0.418 / 0.839 | 0.423 | 0.418 | +0.001 | 0.164 / 0.623 / 0.762 | 4h20 |
+| 1b row 1 + neurokit (frozen, diagnostic) | 0.403 / 0.848 | 0.417 | 0.403 | 0.000 | 0.085 / 0.327 / 0.618 | 4h31 |
+
+Pre-registered rule (D-2026-09-26-4) → **5c**: within 0.005 of best A, highest C, smallest gap, best B in the
+ladder. Row 1b vs row 1 (0.442 / 0.341, gap −0.101) confirms the 100 Hz cleaner caused the frozen-encoder
+collapse; with the encoder unfrozen the cleaner matters far less (5b's gap is already −0.008), but 45 Hz is
+still marginally better on every robustness measure at equal A. Inference wall times (5b 40/59 min,
+5c 93/82, 5d 70/82 for A/C) are confounded by co-scheduling on one node and do NOT support the earlier
+"neurokit 12× slower" claim at this scale; per-record cost is dominated by the encoder and I/O.

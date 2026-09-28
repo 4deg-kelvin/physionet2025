@@ -14,7 +14,7 @@ preprocess:
   min_seconds: 2.0
   clean: butterworth
   bandpass_low_hz: 0.5
-  bandpass_high_hz: 100.0
+  bandpass_high_hz: 45.0
   bandpass_order: 2
   notch_hz:
   - 50.0

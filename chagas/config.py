@@ -72,7 +72,7 @@ class PreprocessCfg:
     #: per-lead ``nk.ecg_clean`` (kept for the ablation).  ``"none"`` disables cleaning.
     clean: str = "butterworth"
     bandpass_low_hz: float = 0.5      # Hong et al. 2025
-    bandpass_high_hz: float = 100.0   # Hong et al. 2025
+    bandpass_high_hz: float = 45.0    # ladder row 5c (DECISIONS.md D-2026-09-28-1); Physiol. Meas. 2026 used 45, Hong et al. 2025 60
     bandpass_order: int = 2           # Hong et al. 2025
     #: Brazil's mains is 60 Hz; the legacy neurokit cleaner notches 50 Hz only.
     notch_hz: Tuple[float, ...] = (50.0, 60.0)
@@ -210,7 +210,7 @@ class ModelCfg:
     aggregation: str = "static_softmax"
     #: ``"film"`` (Perez et al., AAAI 2018) | ``"concat"`` (team, legacy) | ``"none"``
     #: (the age-shortcut ablation).
-    demographics: str = "film"
+    demographics: str = "none"  # ladder row 5b (D-2026-09-26-3): no gain with a fine-tuned encoder, 9x less source cue
     film_hidden: int = 32
     hidden_dim: int = 256
     dropout: float = 0.1

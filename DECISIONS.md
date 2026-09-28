@@ -186,3 +186,15 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - **Why:** Pre-registering avoids choosing the cleaner on a post-hoc reading of three noisy numbers,
   and lets the final start without another round-trip.
 - **Status:** active.
+
+## D-2026-09-28-1 — Cleaner = butterworth 0.5–45 Hz (row 5c); shipped defaults flipped; final launched
+- **Decision:** Apply D-2026-09-26-4: 5c wins (A 0.437 within 0.005 of 5b's 0.438; C 0.434 highest;
+  gap −0.003; B 0.448 best in ladder). `chagas/config.py` defaults now `demographics="none"`,
+  `bandpass_high_hz=45.0`, so the judged container (no `CHAGAS_CONFIG`) trains exactly the final
+  config. `final_full` builds on row 5c. Final submitted (2 seeds, 292,885 records, 71 h budget each).
+- **Correction:** the "neurokit is 12× slower at inference" claim (D-2026-09-26-1) is not supported by
+  batch 1 wall times (confounded by co-scheduling; 5d 70 min vs 5b 40 min vs 5c 93 min). Speed was not
+  needed to break a tie: 5d lost on Test A outright (0.418).
+- **Noise caveat:** 5c vs 5b differences are inside one-seed noise (~0.012). The pick is principled
+  (pre-registered) rather than statistically decisive; the two-seed final reports mean ± sd.
+- **Status:** active.

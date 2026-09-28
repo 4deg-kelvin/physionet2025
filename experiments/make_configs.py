@@ -207,7 +207,7 @@ def row9(cfg: ExperimentCfg) -> None:
 
 def row_final(cfg: ExperimentCfg) -> None:
     """The final configuration, for the full 292,885-record training split."""
-    row5b(cfg)  # demographics=none, D-2026-09-26-3
+    row5c(cfg)  # winner of the cleaner ablation, D-2026-09-28-1
     cfg.name = "final_full"
     cfg.description = "Final config on the full training split; 71 h budget, 2 seeds via two runs."
     cfg.train.max_hours = 71.0
