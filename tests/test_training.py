@@ -281,3 +281,62 @@ def test_subsample_keeps_every_positive_and_is_deterministic():
     assert [e.i for e in out] == [e.i for e in _subsample(entries, 130, seed=7)]
     assert _subsample(entries, max_records=0, seed=7) == entries          # 0 = no cap
     assert len(_subsample(entries, max_records=5000, seed=7)) == 1030     # cap above size = no-op
+
+
+# ---------------------------------------------------------------------------
+# CSV metrics logging (DECISIONS.md D-2026-09-29-5)
+# ---------------------------------------------------------------------------
+def test_csv_logger_writes_loss_lr_and_nothing_else(tmp_path):
+    import csv
+
+    import pytorch_lightning as pl
+    from torch.utils.data import DataLoader, TensorDataset
+
+    from chagas.training import _make_trainer
+
+    class Toy(pl.LightningModule):
+        def __init__(self) -> None:
+            super().__init__()
+            self.lin = nn.Linear(4, 1)
+
+        def training_step(self, batch, _):
+            x, y = batch
+            loss = nn.functional.mse_loss(self.lin(x), y)
+            self.log("train_loss", loss, on_step=True, on_epoch=True)
+            return loss
+
+        def configure_optimizers(self):
+            return torch.optim.SGD(self.parameters(), lr=0.1)
+
+    cfg = default_config()
+    cfg.train.max_epochs = 2
+    cfg.train.stage1_max_steps = 0
+    cfg.train.accumulate_grad_batches = 1
+    cfg.train.log_every_n_steps = 1
+    log_dir = tmp_path / "metrics" / "member0"
+    trainer, _, _ = _make_trainer(
+        cfg, tmp_path / "_work", stage=1, max_hours=1.0, deadline=None, has_val=False, log_dir=log_dir
+    )
+    data = DataLoader(TensorDataset(torch.randn(16, 4), torch.randn(16, 1)), batch_size=4)
+    trainer.fit(Toy(), train_dataloaders=data)
+
+    csv_path = log_dir / "stage1" / "metrics.csv"
+    assert csv_path.is_file()
+    with open(csv_path) as fh:
+        cols = set(csv.DictReader(fh).fieldnames or [])
+    assert {"train_loss_step", "train_loss_epoch"} <= cols
+    assert any(c.startswith("lr-") for c in cols)
+    # Lightning must not fall back to its default ./lightning_logs next to the work dir.
+    assert not (tmp_path / "lightning_logs").exists()
+    assert not (tmp_path / "_work" / "lightning_logs").exists()
+
+
+def test_csv_logger_can_be_disabled(tmp_path):
+    from chagas.training import _make_trainer
+
+    cfg = default_config()
+    cfg.train.csv_log = False
+    trainer, _, _ = _make_trainer(
+        cfg, tmp_path, stage=1, max_hours=1.0, deadline=None, has_val=False, log_dir=tmp_path / "m"
+    )
+    assert trainer.logger is None

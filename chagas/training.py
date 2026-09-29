@@ -25,7 +25,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.loggers import CSVLogger
 
 from . import labels as L
 from .config import ExperimentCfg, load_config
@@ -181,6 +182,7 @@ def _make_trainer(
     max_hours: float,
     deadline: Optional[float],
     has_val: bool,
+    log_dir: Optional[Path] = None,
 ) -> Tuple[pl.Trainer, ModelCheckpoint, TimeLimitCallback]:
     ckpt_dir = work_dir / f"stage{stage}"
     checkpoint = ModelCheckpoint(
@@ -198,6 +200,12 @@ def _make_trainer(
     )
     time_limit = TimeLimitCallback(max_hours=max_hours, deadline=deadline)
     callbacks: List[pl.Callback] = [checkpoint, time_limit]
+    # Persist loss / LR / validation metrics per stage.  Outside _work on purpose: _work is
+    # deleted once the final checkpoint is written, the metrics are meant to survive.
+    logger: Any = False
+    if cfg.train.csv_log and log_dir is not None:
+        logger = CSVLogger(save_dir=str(log_dir), name="", version=f"stage{stage}")
+        callbacks.append(LearningRateMonitor(logging_interval="step"))
     if has_val and cfg.train.early_stop_patience > 0:
         callbacks.append(
             EarlyStopping(
@@ -226,7 +234,8 @@ def _make_trainer(
         accumulate_grad_batches=cfg.train.accumulate_grad_batches,
         gradient_clip_val=cfg.train.gradient_clip_val,
         callbacks=callbacks,
-        logger=False,
+        logger=logger,
+        log_every_n_steps=cfg.train.log_every_n_steps,
         # Everything Lightning writes goes inside model_folder; without this an implicit
         # ModelCheckpoint lands in the CWD (i.e. /challenge in the judged container).
         default_root_dir=str(work_dir),
@@ -261,6 +270,7 @@ def _train_member(
     max_hours: float,
     deadline: Optional[float],
     verbose: bool,
+    log_dir: Optional[Path] = None,
 ) -> ChagasModule:
     pl.seed_everything(seed, workers=True)
     has_val = datamodule.val_dataset is not None and len(datamodule.val_dataset) > 0
@@ -269,7 +279,7 @@ def _train_member(
 
     stage1_hours = max_hours * cfg.train.stage1_budget_frac if cfg.train.two_stage else max_hours
     trainer, checkpoint, _ = _make_trainer(
-        cfg, work_dir, stage=1, max_hours=stage1_hours, deadline=deadline, has_val=has_val
+        cfg, work_dir, stage=1, max_hours=stage1_hours, deadline=deadline, has_val=has_val, log_dir=log_dir
     )
     if verbose:
         print(f"[chagas] stage 1 (frozen encoder), budget {stage1_hours:.3f} h", flush=True)
@@ -280,7 +290,7 @@ def _train_member(
         module.enter_stage_two()
         stage2_hours = max_hours * cfg.train.stage2_budget_frac
         trainer2, checkpoint2, _ = _make_trainer(
-            cfg, work_dir, stage=2, max_hours=stage2_hours, deadline=deadline, has_val=has_val
+            cfg, work_dir, stage=2, max_hours=stage2_hours, deadline=deadline, has_val=has_val, log_dir=log_dir
         )
         if verbose:
             print(
@@ -389,6 +399,7 @@ def train_model(
             max_hours=per_member_hours,
             deadline=deadline,
             verbose=verbose,
+            log_dir=Path(model_folder) / "metrics" / f"member{member}",
         )
         out_path = os.path.join(model_folder, member_filename(member))
         _save_checkpoint(module, out_path, cfg)

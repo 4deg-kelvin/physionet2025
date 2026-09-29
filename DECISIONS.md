@@ -269,3 +269,18 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   AUROC ≥ 2e-5's − 0.005, and (3) its mean C−A is not worse by > 0.012. If both qualify, take the higher mean
   TPR@5%. Otherwise keep 2e-5. Diagnostics reported regardless: stage-2 best epoch and stage-2 val gain over stage 1.
 - **Status:** active.
+
+## D-2026-09-29-5 — Persist training loss, learning rate and validation metrics to CSV
+- **Decision:** `_make_trainer` attaches a Lightning `CSVLogger` and a `LearningRateMonitor` (per step) when
+  `train.csv_log` (default true) and a log dir are given. Output: `model_folder/metrics/member<k>/stage<n>/metrics.csv`
+  with `train_loss_step`, `train_loss_epoch`, one `lr-*` column per param group (so LLRD is visible), and all
+  `val_*` metrics. Logged every `train.log_every_n_steps` (default 50) optimiser steps.
+- **Why:** previously the trainer ran with `logger=False`, so loss and LR were computed and discarded; only
+  validation metrics survived (manifest history). User asked for per-epoch loss/LR logging.
+- **Placement:** inside model_folder (grader rules), outside `_work` (which is deleted after training). Test asserts
+  no fallback `lightning_logs/` directory is created.
+- **Process:** built on side branch `improve/csv-logger` (worktree `improve_csvlog_wt`) so the running LR sweep
+  (array 17656806, which imports code from `improve_wt` as each task starts) stays on one code version. Tests:
+  89/89 on SLURM job 17657002 (CPU-only; GPUs were occupied by the sweep). Merge into `improve/robust-finetune`
+  after the sweep completes.
+- **Status:** active; merge pending.

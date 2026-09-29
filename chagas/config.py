@@ -304,6 +304,11 @@ class TrainCfg:
     #: Decision threshold = this quantile of the validation probabilities; the metric's
     #: own operating point is the top 5%, so 0.95 (audit defect D9).
     threshold_quantile: float = 0.95
+    #: Persist per-step training loss, learning rate and every validation metric to
+    #: ``model_folder/metrics/member<k>/stage<n>/metrics.csv`` (Lightning ``CSVLogger``).
+    #: Stays inside model_folder, so the grader's container rules are unaffected.
+    csv_log: bool = True
+    log_every_n_steps: int = 50
     val_check_interval: float = 1.0
     limit_train_batches: float = 1.0
 

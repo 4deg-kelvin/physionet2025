@@ -140,6 +140,8 @@ train:
   early_stop_patience: 3
   monitor: val_challenge
   threshold_quantile: 0.95
+  csv_log: true
+  log_every_n_steps: 50
   val_check_interval: 1.0
   limit_train_batches: 1.0
   ensemble_members: 1
