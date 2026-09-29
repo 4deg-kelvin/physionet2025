@@ -267,6 +267,15 @@ class TrainCfg:
     gradient_clip_val: float = 1.0
     max_epochs: int = 16
     stage2_max_epochs: int = 16
+    #: Stage-2 validation cadence in OPTIMISER steps; 0 = once per epoch (legacy).
+    #: Every two-stage ladder run peaked at its first stage-2 validation and then
+    #: drifted, so per-epoch checkpoints land past the peak once an epoch is long
+    #: (4.6k steps on the full 292k split vs 1.4k on the 100k ladder subsample).
+    #: A step cadence makes checkpoint timing independent of dataset size
+    #: (DECISIONS.md D-2026-09-29-1/2).
+    stage2_val_every_steps: int = 0
+    #: Hard cap on stage-2 optimiser steps; 0 = bounded by epochs and the time budget.
+    stage2_max_steps: int = 0
 
     # -- time budget -----------------------------------------------------------
     #: The grader allows 72 h on a T4; stop just under it (team ``TimeLimitCallback``).

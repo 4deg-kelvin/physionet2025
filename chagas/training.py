@@ -208,9 +208,18 @@ def _make_trainer(
             )
         )
     max_epochs = cfg.train.max_epochs if stage == 1 else cfg.train.stage2_max_epochs
+    if stage == 1:
+        max_steps = cfg.train.stage1_max_steps if cfg.train.stage1_max_steps > 0 else -1
+    else:
+        max_steps = cfg.train.stage2_max_steps if cfg.train.stage2_max_steps > 0 else -1
+    # Lightning counts val_check_interval in TRAINING BATCHES, so convert optimiser steps.
+    step_val = stage == 2 and cfg.train.stage2_val_every_steps > 0
+    val_every = (
+        cfg.train.stage2_val_every_steps * cfg.train.accumulate_grad_batches if step_val else 1.0
+    )
     trainer = pl.Trainer(
         max_epochs=max_epochs,
-        max_steps=cfg.train.stage1_max_steps if stage == 1 and cfg.train.stage1_max_steps > 0 else -1,
+        max_steps=max_steps,
         accelerator="auto",
         devices=1,
         precision=cfg.train.precision if torch.cuda.is_available() else 32,
@@ -226,7 +235,9 @@ def _make_trainer(
         num_sanity_val_steps=0,
         limit_val_batches=1.0 if has_val else 0,
         limit_train_batches=cfg.train.limit_train_batches,
-        check_val_every_n_epoch=1,
+        val_check_interval=val_every,
+        # An integer interval may span epochs; Lightning requires this to be None then.
+        check_val_every_n_epoch=None if step_val else 1,
     )
     return trainer, checkpoint, time_limit
 

@@ -126,6 +126,8 @@ train:
   gradient_clip_val: 1.0
   max_epochs: 16
   stage2_max_epochs: 16
+  stage2_val_every_steps: 0
+  stage2_max_steps: 0
   max_hours: 40.0
   stage1_budget_frac: 0.05
   stage2_budget_frac: 0.8

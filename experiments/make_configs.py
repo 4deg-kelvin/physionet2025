@@ -215,6 +215,30 @@ def row_final(cfg: ExperimentCfg) -> None:
     cfg.train.max_hours = 71.0
 
 
+def final_a(cfg: ExperimentCfg) -> None:
+    """Final candidate A: the 5c config, trained on all positives + ~93k negatives.
+
+    Reproduces the validated 100k ladder regime inside ``train_model`` so the grader's
+    full-data retrain lands where the ladder measured (DECISIONS.md D-2026-09-29-1/2).
+    """
+    row_final(cfg)
+    cfg.name = "finalA_negcap"
+    cfg.description = "Final A: 5c config with data.max_records=100000 (all positives, capped negatives)."
+    cfg.data.max_records = 100_000
+
+
+def final_b(cfg: ExperimentCfg) -> None:
+    """Final candidate B: the 5c config on all data, stage 2 validated every 500 optimiser steps.
+
+    Catches the early stage-2 peak regardless of epoch length (DECISIONS.md D-2026-09-29-2).
+    """
+    row_final(cfg)
+    cfg.name = "finalB_stepval"
+    cfg.description = "Final B: 5c config on all data; stage-2 validation every 500 steps, capped at 6000."
+    cfg.train.stage2_val_every_steps = 500
+    cfg.train.stage2_max_steps = 6000
+
+
 ROWS: List[Tuple[str, Callable[[ExperimentCfg], None]]] = [
     ("row0_baseline", row0),
     ("row1_defect_fixes", row1),
@@ -232,6 +256,8 @@ ROWS: List[Tuple[str, Callable[[ExperimentCfg], None]]] = [
     ("row8_domain_adversarial", row8),
     ("row9_ensemble", row9),
     ("final_full", row_final),
+    ("finalA_negcap", final_a),
+    ("finalB_stepval", final_b),
 ]
 
 

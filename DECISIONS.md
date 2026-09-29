@@ -223,3 +223,20 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   Recommendation: A and B in parallel, one seed each on full data; A is the safe fallback, B tests whether the
   extra negatives help once the peak is caught. C only if B is unstable.
 - **Status:** open — awaiting user decision.
+
+## D-2026-09-29-2 — Run final candidates A and B on the full training split (user approved "do both")
+- **A (`finalA_negcap`):** config-only. `data.max_records = 100000` uses the existing `_subsample()` (all
+  positives kept, negatives thinned, seeded) inside `train_model`, so a full-data retrain reproduces the
+  validated 100k ladder regime (5c: A 0.437 / AUROC 0.842). No code change.
+- **B (`finalB_stepval`):** new `TrainCfg.stage2_val_every_steps` (validate every N optimiser steps;
+  Lightning's `val_check_interval` is converted to training batches) and `stage2_max_steps`, both default 0
+  = legacy per-epoch behaviour, so every earlier config and result is unchanged (existing YAMLs only gain
+  the two zero-valued fields). B uses 500 / 6000 with early-stop patience 3 (stops ≤1.5k steps past the
+  last improvement); the ladder peak sat at ~1.4k stage-2 steps.
+- **Tests added:** trainer wiring for both stages and both settings; `_subsample` keeps every positive,
+  is seeded-deterministic, and is a no-op at 0 or above size. Gate = full suite on SLURM.
+- **Both** train on `fixbranch_test/data_train_full` (292,885 records), seed 42, evaluated on A/B/C.
+- **Pick rule (pre-registered):** B replaces A only if its Test A AUROC ≥ A's − 0.005 AND its TPR@5% on
+  A and C are within noise (0.012) of A's or better; otherwise ship A. Rationale: A reproduces a measured
+  result; B must earn the extra complexity.
+- **Status:** active.

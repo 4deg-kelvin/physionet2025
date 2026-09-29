@@ -241,3 +241,43 @@ def test_time_limit_callback_respects_an_absolute_deadline():
     limit = TimeLimitCallback(max_hours=100.0, deadline=_t.time() + 3600.0)
     limit.start_time = _t.time()
     assert limit._expired() is False
+
+
+# ---------------------------------------------------------------------------
+# stage-2 step cadence and negative capping (DECISIONS.md D-2026-09-29-2)
+# ---------------------------------------------------------------------------
+def test_stage2_step_validation_wiring(tmp_path):
+    from chagas.training import _make_trainer
+
+    cfg = default_config()
+    cfg.train.accumulate_grad_batches = 4
+    # default: legacy per-epoch validation in both stages, no stage-2 step cap
+    t1, _, _ = _make_trainer(cfg, tmp_path, stage=1, max_hours=1.0, deadline=None, has_val=True)
+    t2, _, _ = _make_trainer(cfg, tmp_path, stage=2, max_hours=1.0, deadline=None, has_val=True)
+    assert t1.max_steps == cfg.train.stage1_max_steps
+    assert t2.max_steps == -1
+    assert t2.check_val_every_n_epoch == 1
+    # step cadence: 500 optimiser steps x 4 accumulated batches = every 2000 training batches
+    cfg.train.stage2_val_every_steps = 500
+    cfg.train.stage2_max_steps = 6000
+    t2, _, _ = _make_trainer(cfg, tmp_path, stage=2, max_hours=1.0, deadline=None, has_val=True)
+    assert t2.val_check_interval == 2000
+    assert t2.check_val_every_n_epoch is None
+    assert t2.max_steps == 6000
+    # stage 1 is unaffected by the stage-2 settings
+    t1, _, _ = _make_trainer(cfg, tmp_path, stage=1, max_hours=1.0, deadline=None, has_val=True)
+    assert t1.check_val_every_n_epoch == 1 and t1.max_steps == cfg.train.stage1_max_steps
+
+
+def test_subsample_keeps_every_positive_and_is_deterministic():
+    from types import SimpleNamespace
+    from chagas.training import _subsample
+
+    entries = [SimpleNamespace(label_hard=1, i=i) for i in range(30)] + \
+              [SimpleNamespace(label_hard=0, i=i) for i in range(1000)]
+    out = _subsample(entries, max_records=130, seed=7)
+    assert len(out) == 130
+    assert sum(e.label_hard for e in out) == 30
+    assert [e.i for e in out] == [e.i for e in _subsample(entries, 130, seed=7)]
+    assert _subsample(entries, max_records=0, seed=7) == entries          # 0 = no cap
+    assert len(_subsample(entries, max_records=5000, seed=7)) == 1030     # cap above size = no-op
