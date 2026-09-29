@@ -254,3 +254,18 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   grader trains on the full public set (≈366k records, ≈8,190 positives), where the same cap gives ≈8.2%. Untested but
   a modest shift; a ratio-based cap would be size-invariant and is the natural follow-up.
 - **Status:** active. Remaining before submission: Docker build-and-run verification (not possible on the cluster).
+
+## D-2026-09-29-4 — Stage-2 learning-rate sweep on the shipped config, 3 seeds per rate
+- **Trigger:** user asked "can you not test the stage 2 learning rate sweep" after I proposed it; read as
+  "can't you test it?" and run (stated to the user, with an offer to cancel).
+- **Hypothesis:** stage 2 barely helps (val AUROC ~0.81 → ~0.83, peaking at its first check and then drifting)
+  versus the winner's +29% from full fine-tuning. 2e-5 came from the winner's different backbone; ECG-FM's
+  authors fine-tuned at 1e-6 (McKeen et al. 2025).
+- **Design:** `finalA_negcap` (the shipped default) with only `train.stage2_lr` ∈ {2e-5, 5e-6, 1e-6} and
+  seed ∈ {42, 43, 44} changed (verified structurally). 2e-5/s42 = the existing finalA result, so 8 new runs,
+  one SLURM array (`batch_lr_sweep.sh`, at most 4 concurrent), full folder with the shipped negative cap.
+- **Pre-registered rule:** per LR take 3-seed means of Test-A TPR@5%, Test-A AUROC and C−A. Adopt a lower LR only
+  if (1) its mean TPR@5% beats 2e-5's by more than the SE of the difference (≈ 0.011·√(2/3) ≈ 0.009), (2) its mean
+  AUROC ≥ 2e-5's − 0.005, and (3) its mean C−A is not worse by > 0.012. If both qualify, take the higher mean
+  TPR@5%. Otherwise keep 2e-5. Diagnostics reported regardless: stage-2 best epoch and stage-2 val gain over stage 1.
+- **Status:** active.
