@@ -240,3 +240,17 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   A and C are within noise (0.012) of A's or better; otherwise ship A. Rationale: A reproduces a measured
   result; B must earn the extra complexity.
 - **Status:** active.
+
+## D-2026-09-29-3 — Ship candidate A (negative cap); B rejected by the pre-registered rule
+- **Result:** A: TPR@5% 0.427 / AUROC 0.835 on A, C 0.414. B: 0.440 / 0.789, C 0.439.
+- **Decision:** Ship A. Rule (D-2026-09-29-2) required B's AUROC ≥ A's − 0.005; B is 0.046 lower. The shipped default
+  in `chagas/config.py` is now `data.max_records = 100000` and was verified identical to `finalA_negcap.yaml` apart from
+  name/description; historical ladder configs pin `max_records = 0` so they still describe what ran.
+- **The tension, recorded honestly:** B wins the challenge metric (+0.013 on A ≈ 1σ, +0.025 on C ≈ 2σ) and has the
+  smallest C−A gap. The rule was fixed in advance precisely so this would not be decided post hoc. B's AUROC matches the
+  rejected full final (0.791), showing full-data training degrades global ranking regardless of checkpoint timing, and B
+  has the study's strongest source cue (PTB-XL 0.007) — both risk factors on unseen cohorts.
+- **Known caveat:** the cap is an absolute record count. On our 292k folder it gives 6.5% prevalence (validated). The
+  grader trains on the full public set (≈366k records, ≈8,190 positives), where the same cap gives ≈8.2%. Untested but
+  a modest shift; a ratio-based cap would be size-invariant and is the natural follow-up.
+- **Status:** active. Remaining before submission: Docker build-and-run verification (not possible on the cluster).

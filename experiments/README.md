@@ -337,3 +337,17 @@ On 100k an epoch is ~1.4k optimiser steps, so the first checkpoint lands near th
 steps, so the first checkpoint is already past it (final val AUROC 0.78–0.80 at epoch 0, 0.59–0.67 by epoch 2–4).
 This matters for submission because **the grader retrains our code on the full public training set**: the full-data
 run, not the 100k ladder, is the faithful simulation of what they will get.
+
+## Final candidates A and B (2026-09-29, SLURM 17651638/9; full 292,885-record folder; seed 42; 2h49 each)
+
+| Candidate | A chall / AUROC | B chall / AUROC | C chall | C−A | PTB-XL / CODE-15 / SaMi-Trop |
+|---|---|---|---|---|---|
+| **A** negative cap (max_records=100000) | 0.427 / **0.835** | 0.436 / 0.839 | 0.414 | −0.013 | 0.034 / 0.529 / 0.729 |
+| **B** step-based stage 2 (every 500, cap 6000) | **0.440** / 0.789 | 0.442 / 0.792 | **0.439** | −0.001 | 0.007 / 0.432 / 0.582 |
+| ref 5c (100k ladder) | 0.437 / 0.842 | 0.448 / 0.847 | 0.434 | −0.003 | 0.122 / 0.640 / 0.774 |
+| ref final_full (all data, per-epoch) | 0.427 / 0.791 | 0.430 / 0.792 | 0.428 | +0.002 | 0.02 |
+
+**Pick = A** by the pre-registered rule (B's AUROC 0.789 < A's 0.835 − 0.005). B caught the stage-2 validation peak
+(best at ~2,000 steps) yet still shows the full-data AUROC loss, so that loss is not only checkpoint timing: training on
+all ~290k negatives trades global ranking for top-5% recall. B also has the strongest PTB-XL source cue in the study.
+A reproduces the 100k ladder regime within noise. Shipped default now == finalA_negcap (verified field by field).

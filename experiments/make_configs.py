@@ -54,6 +54,7 @@ def row0(cfg: ExperimentCfg) -> None:
     cfg.description = "PLAN row 0: a72c51c-equivalent baseline under the new eval harness."
     # Pinned: the ladder ran with these; shipped defaults may move (D-2026-09-28-1).
     cfg.preprocess.bandpass_high_hz = 100.0
+    cfg.data.max_records = 0  # pinned: ladder rows ran uncapped (their folders were pre-thinned)
     cfg.preprocess.clean = "neurokit"
     cfg.model.use_padding_mask = False
     cfg.model.demographics = "concat"

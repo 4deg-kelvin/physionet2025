@@ -329,7 +329,10 @@ class DataCfg:
     #: a default for offline experiments.
     data_folder: Optional[str] = None
     #: Cap on the number of training records (0 = all).  Used by the smoke configs.
-    max_records: int = 0
+    #: Keep every positive, thin negatives to this total (``training._subsample``).
+    #: 100k reproduces the validated ladder regime; training on all ~290k negatives
+    #: cost ~0.05 AUROC in two runs (DECISIONS.md D-2026-09-29-1/3). 0 = no cap.
+    max_records: int = 100_000
     #: Drop CODE-15 records listed in ``code15_label_issues.csv`` (team artefact).
     exclude_label_issues: bool = False
     label_issues_csv: str = "code15_label_issues.csv"
