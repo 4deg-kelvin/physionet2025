@@ -208,3 +208,18 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   freezing / LLRD / dropout mechanics, which are independent of the shipped default; the FiLM
   path still needs coverage even though it is off by default. No assertion was weakened.
 - **Status:** active. Final resubmitted behind a fresh test gate.
+
+## D-2026-09-29-1 — Full-data final rejected as shipped; stage-2 schedule is scale-dependent
+- **Finding:** `final_full` (2 seeds) scores TPR@5% 0.427 ± 0.011 on A (≈ ladder 5c) but AUROC 0.791 vs 0.842 on
+  the same test set and 0.792 vs 0.847 on source-free view B; PTB-XL cue returns (0.02).
+- **Cause:** in every two-stage run stage 2 peaks at its first validation and then drifts. Validation/checkpointing
+  is per epoch, so the first checkpoint arrives after ~1.4k optimiser steps on 100k but ~4.6k on 292k — past the
+  peak. The shipped procedure's quality therefore depends on training-set size, and the grader trains on the full set.
+- **Decision:** do not submit the current default. Candidate fixes (need user go-ahead, full-data runs):
+  (A) keep all positives, cap negatives at ~94k inside `train_model` — reproduces the validated 5c regime exactly;
+  (B) make stage 2 step-based: validate every ~500 optimiser steps and cap stage 2 at a fixed step count, so
+      checkpoint timing is independent of data size;
+  (C) lower stage-2 LR toward McKeen et al. 2025's full-FT rate (1e-6) to widen the useful window.
+  Recommendation: A and B in parallel, one seed each on full data; A is the safe fallback, B tests whether the
+  extra negatives help once the peak is caught. C only if B is unstable.
+- **Status:** open — awaiting user decision.

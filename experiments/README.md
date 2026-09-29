@@ -318,3 +318,22 @@ collapse; with the encoder unfrozen the cleaner matters far less (5b's gap is al
 still marginally better on every robustness measure at equal A. Inference wall times (5b 40/59 min,
 5c 93/82, 5d 70/82 for A/C) are confounded by co-scheduling on one node and do NOT support the earlier
 "neurokit 12× slower" claim at this scale; per-record cost is dominated by the encoder and I/O.
+
+## Full-data final (2026-09-28/29, SLURM 17641337, 11h11m, 2 seeds, 292,885 records) — NOT a ship candidate
+
+| Run | A chall / AUROC | B chall / AUROC | C chall | C−A | PTB-XL prob | stage-2 best epoch |
+|---|---|---|---|---|---|---|
+| 5c on 100k (ladder) | 0.437 / **0.842** | 0.448 / **0.847** | 0.434 | −0.003 | 0.122 | 0 |
+| final seed 42 | 0.419 / 0.789 | 0.428 / 0.795 | 0.421 | +0.002 | 0.020 | 0 |
+| final seed 43 | 0.434 / 0.792 | 0.431 / 0.789 | 0.436 | +0.001 | 0.013 | 1 |
+| **final mean ± sd** | **0.427 ± 0.011 / 0.791** | 0.430 ± 0.002 / 0.792 | 0.428 ± 0.011 | | | |
+
+Same config as 5c except data size. TPR@5% holds (within noise) but **AUROC falls 0.842 → 0.791 on the same test set,
+and on the source-free view B 0.847 → 0.792**, with the PTB-XL source cue back (0.12 → 0.02).
+
+Cause (confirmed across all two-stage runs): stage-2 fine-tuning peaks at its FIRST validation and then drifts
+(val AUROC 5b 0.838→0.776, 5c 0.833→0.777, 5d 0.834→0.759 by stage-2 epoch 3). Checkpointing is per epoch.
+On 100k an epoch is ~1.4k optimiser steps, so the first checkpoint lands near the peak; on 292k it is ~4.6k
+steps, so the first checkpoint is already past it (final val AUROC 0.78–0.80 at epoch 0, 0.59–0.67 by epoch 2–4).
+This matters for submission because **the grader retrains our code on the full public training set**: the full-data
+run, not the 100k ladder, is the faithful simulation of what they will get.
