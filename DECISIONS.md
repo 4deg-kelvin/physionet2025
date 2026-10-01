@@ -284,3 +284,19 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   89/89 on SLURM job 17657002 (CPU-only; GPUs were occupied by the sweep). Merge into `improve/robust-finetune`
   after the sweep completes.
 - **Status:** active; merge pending.
+
+## D-2026-09-30-1 — LR sweep: keep stage2_lr = 2e-5; my hypothesis was wrong
+- **Result (3 seeds each):** 2e-5: 0.436 ± 0.010; 5e-6: 0.423 ± 0.002; 1e-6: 0.404 ± 0.004 (Test-A TPR@5%).
+  AUROC flat (0.829 / 0.834 / 0.830). C−A: −0.007 / −0.001 / +0.001.
+- **Decision:** keep 2e-5 per the pre-registered rule (lower rates had to win by > 0.009; they lose by 0.013 and 0.032).
+  No config change.
+- **What the sweep did and did not show:** predicted — the stage-2 peak moves later at lower rates (0.7 → 1.7 → 5.7
+  epochs). Not predicted — stage 2's validation gain is ~+0.02 at every rate and the challenge score drops. So "stage 2
+  barely helps" is real but is not caused by the learning rate. Remaining candidates: the 10 s input vs ECG-FM's 5 s
+  pretraining segments, the frozen conv frontend, or a label-noise ceiling.
+- **Side findings:** lower LR → weaker PTB-XL source cue (0.029 → 0.068 → 0.113) and ~5× lower seed variance. A
+  trade-off, not adopted: it costs the metric.
+- **By-product:** the shipped config's estimate is now 3-seed: A 0.436 ± 0.010 (the earlier single-seed 0.427 was the
+  low draw), AUROC 0.829, B 0.438, C 0.429.
+- **Merged** `improve/csv-logger` (D-2026-09-29-5) into this branch now that the sweep has finished.
+- **Status:** active.

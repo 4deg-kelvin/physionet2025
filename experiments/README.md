@@ -351,3 +351,21 @@ run, not the 100k ladder, is the faithful simulation of what they will get.
 (best at ~2,000 steps) yet still shows the full-data AUROC loss, so that loss is not only checkpoint timing: training on
 all ~290k negatives trades global ranking for top-5% recall. B also has the strongest PTB-XL source cue in the study.
 A reproduces the 100k ladder regime within noise. Shipped default now == finalA_negcap (verified field by field).
+
+## Stage-2 learning-rate sweep (2026-09-29/30, SLURM array 17656806; shipped config, 3 seeds per rate)
+
+| stage2_lr | Test A TPR@5% (mean ± sd) | A AUROC | Test B | Test C | C−A | stage-2 best epoch | stage-2 val-AUROC gain | PTB-XL prob |
+|---|---|---|---|---|---|---|---|---|
+| **2e-5 (shipped)** | **0.436 ± 0.010** | 0.829 | **0.438** | **0.429** | −0.007 | 0.7 | +0.018 | 0.029 |
+| 5e-6 | 0.423 ± 0.002 | 0.834 | 0.429 | 0.422 | −0.001 | 1.7 | +0.020 | 0.068 |
+| 1e-6 | 0.404 ± 0.004 | 0.830 | 0.415 | 0.405 | +0.001 | 5.7 | +0.022 | 0.113 |
+
+Per seed (A / AUROC / C): 2e-5: 0.427/0.835/0.414, 0.433/0.826/0.430, 0.447/0.827/0.442; 5e-6: 0.421/0.837/0.418,
+0.422/0.834/0.422, 0.425/0.831/0.425; 1e-6: 0.406/0.833/0.401, 0.399/0.828/0.400, 0.407/0.829/0.412.
+
+**Outcome: keep 2e-5** (pre-registered rule D-2026-09-29-4: a lower rate had to beat 2e-5 by > 0.009; both are lower,
+by 0.013 and 0.032). The hypothesis that 2e-5 was too aggressive is refuted on the metric. Lower rates do move the
+stage-2 peak later (epoch 0.7 → 1.7 → 5.7) as predicted, but the stage-2 validation gain stays ~+0.02 at every rate,
+AUROC is flat, and TPR@5% falls monotonically. Lower rates do weaken the PTB-XL source cue and cut seed variance.
+Stage 2's small gain is therefore not a learning-rate problem.
+The shipped config is now characterised on 3 seeds: **A 0.436 ± 0.010, AUROC 0.829, B 0.438, C 0.429**.
