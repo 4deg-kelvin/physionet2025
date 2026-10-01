@@ -442,3 +442,15 @@ the `run_model.py` path to |Δprob| < 1e-4, and the unmodified `run_model.py` re
   by hand on 2026-09-30.  The duration-only AUROC is 0.677 on view B; the hand-computed 0.681 is the all-CODE-15
   value (0.6805) (DECISIONS.md D-2026-10-01-4).
 * Stage-2 memory with 5 s windows (r2_MW config, batch 16 × 2,500): peak 2.81 GiB allocated (10 s: 4.10 GiB).
+* Round-2 contract smoke (job 17682393, `batch_r2_smoke.sh`, TitanRTX, 8 min 56 s, COMPLETED 0:0), 400-record set,
+  `configs/smoke_r2.yaml` (matched negatives with `max_records: 300`, 5 s multi-window, WiSE-FT select, all alphas
+  saved): unmodified `train_model.py` (peak 2.16 GiB) wrote the checkpoint, the manifest and
+  `wise_ft/member0/alpha{0.00,0.50,1.00}/`; per-alpha validation challenge 0.000 / 0.095 / 0.048 -> alpha 0.50
+  selected and stored in the checkpoint; alpha 0 and 1 reproduced the stage-1 and stage-2 validation metrics exactly;
+  2.24 windows per validation record.  Unmodified `run_model.py`: 400/400 outputs, binary column == prob > stored
+  threshold (0.9583), 5.25% flagged.  `evaluate_model.py` ran (scores meaningless at this budget).
+  `predict_batched.py` vs the `run_model.py` files: **max |Δprob| = 1.2e-7** over 400 records; the selected alpha
+  folder vs the shipped model: max |Δprob| = 0.  Matching on this tiny set: only 100 short negatives exist for a
+  quota of 190, so all were taken and the rest redistributed (the designed fallback).
+  Note: the `step` on validation lines is Lightning's `global_step` of the current stage's trainer (it restarts at 0
+  in stage 2).
