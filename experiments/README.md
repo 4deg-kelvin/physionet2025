@@ -369,3 +369,28 @@ stage-2 peak later (epoch 0.7 → 1.7 → 5.7) as predicted, but the stage-2 val
 AUROC is flat, and TPR@5% falls monotonically. Lower rates do weaken the PTB-XL source cue and cut seed variance.
 Stage 2's small gain is therefore not a learning-rate problem.
 The shipped config is now characterised on 3 seeds: **A 0.436 ± 0.010, AUROC 0.829, B 0.438, C 0.429**.
+
+## Re-scored within record-length groups (2026-09-30) — views A/B/C are inflated by a length shortcut
+
+CODE-15 records are 7.34 s or 10.24 s; Chagas prevalence is 3.05% vs 0.24% (12.7×). A duration-only score gets AUROC
+0.681 on view B. Scores below are CODE-15 test records only, **within** one length group (7.3 s: 1,259 positives,
+bootstrap SE ±0.0125 TPR@5% / ±0.007 AUROC; 10.2 s: 77 positives, SE ±0.053 / ±0.037).
+
+| Model (seeds) | pooled B: AUROC / TPR@5% | within 7.3 s: AUROC / TPR@5% | within 10.2 s: AUROC / TPR@5% |
+|---|---|---|---|
+| row 0 original (1) | 0.851 / 0.423 | 0.807 / 0.377 | 0.720 / 0.286 |
+| row 1 +fixes (1) | 0.857 / 0.434 | 0.812 / 0.376 | 0.733 / 0.338 |
+| row 3 +augmentation (1) | 0.836 / 0.415 | 0.785 / 0.360 | 0.700 / 0.312 |
+| row 4 +FiLM (1) | 0.850 / 0.430 | 0.807 / 0.373 | 0.705 / 0.325 |
+| row 5 +two-stage FT (1) | 0.850 / 0.436 | 0.806 / 0.378 | 0.727 / 0.286 |
+| row 5b no demographics (1) | 0.849 / 0.442 | 0.800 / 0.399 | 0.739 / 0.364 |
+| row 5c 0.5–45 Hz (1) | 0.847 / 0.448 | 0.799 / 0.400 | 0.733 / 0.325 |
+| **shipped (3)** | 0.830 / 0.438 | 0.787 / 0.384 | 0.695 / 0.342 |
+| shipped, 3-seed ensemble | 0.843 / 0.456 | 0.801 / 0.404 | 0.711 / 0.338 |
+| lr 5e-6 (3) | 0.833 / 0.429 | 0.792 / 0.381 | 0.708 / 0.333 |
+| lr 1e-6 (3) | 0.833 / 0.415 | 0.784 / 0.362 | 0.687 / 0.316 |
+| full-data final (2) | 0.792 / 0.430 | 0.751 / 0.382 | 0.632 / 0.312 |
+
+Reading: within one length group a single shipped model (0.384) is not better than the original (0.377), and its AUROC
+is lower (0.787 vs 0.807). Only the seed ensemble holds an edge (0.404). The 10.2 s group cannot rank models.
+Round 2 (`PLAN_R2.md`) fixes the yardstick and removes the cue.

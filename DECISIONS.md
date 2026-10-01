@@ -300,3 +300,19 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   low draw), AUROC 0.829, B 0.438, C 0.429.
 - **Merged** `improve/csv-logger` (D-2026-09-29-5) into this branch now that the sweep has finished.
 - **Status:** active.
+
+## D-2026-09-30-2 — Record length is a label shortcut in CODE-15; round 1's gains are mostly not real
+- **Finding:** CODE-15 prevalence 3.05% (7.34 s records) vs 0.24% (10.24 s), 12.7×; duration alone gives AUROC 0.681 on
+  view B; every model (incl. row 0) scores CODE-15 negatives higher when they are short (shipped: 0.62 vs 0.39). Hidden
+  cohorts are all ~10 s. Within the 7.3 s group: row 0 = 0.377 / 0.807, shipped (3 seeds) = 0.384 / 0.787,
+  shipped ensemble = 0.404 / 0.801 (TPR@5% / AUROC; SE ±0.0125 / ±0.007).
+- **Consequences:** (1) view B was mislabelled "shortcut removed" — only the source cue was. (2) The round-1 ladder's
+  single-model gain over the original is inside the noise once length is controlled. (3) D-2026-09-29-3 (ship candidate
+  A) stands only as "no worse than the original"; it is not a demonstrated improvement.
+- **Decision:** round 2 per `PLAN_R2.md`: within-length views (S7 primary, S10/S10+ secondary), length-matched
+  negative sampling, fixed 5 s windows (ECG-FM's native input), WiSE-FT, seed ensemble; pre-registered rule in §5.
+  New features default off; the shipped default does not move until the rule says so.
+- **Also from the literature review (8 CinC 2025 papers):** internal scores moved opposite to hidden scores in five
+  papers; a frozen encoder beat a fine-tuned one on hidden data for rank 7 and for the team's own entry; ELR was never
+  ablated; heterogeneous ensembles with a weak member hurt; nobody reported the length–label association.
+- **Status:** active.
