@@ -13,12 +13,13 @@ Updated at every milestone so the work can be resumed by reading this file.
 - Docs: DECISIONS D-2026-10-01-1..4, PROVENANCE/METHODS/README round-2 sections, REPRODUCE.md.
 
 ## In progress
-- 17682393 r2 smoke (GPU): memory at 5 s PASS (2.81 GiB); training + WiSE-FT done; run_model/evaluate/predict_batched pending.
+- Round-2 array **17682658** (9 tasks, %4) launched at commit 65fb3bf after: CPU suite 17682446 = 138 passed;
+  smoke 17682393 passed; run_r2.sh end-to-end on testdata 17682505 passed. DO NOT edit chagas/ or experiments/*.py|sh
+  while it runs (tasks import the worktree when they start).
 - 17682392 rescore -> results/RESCORED.md.
 
 ## Todo
-- Re-run full test suite on SLURM; then launch `sbatch experiments/batch_r2.sh`; record array id here.
-- Force-add RESCORED.md (+CSVs); fill README with smoke results.
+- When the array finishes: run the aggregate commands in experiments/REPRODUCE.md section 5 (A and C).
 
 ## Job ids
-- 17682272 durations (COMPLETED); 17682391 pytest CPU (1 fail, fixed); 17682392 rescore; 17682393 r2 smoke
+- 17682272 durations (COMPLETED); 17682391 pytest CPU (1 fail, fixed); 17682392 rescore; 17682393 r2 smoke (PASS); 17682446 pytest CPU (138 passed); 17682505 run_r2.sh runner smoke (PASS); 17682658 r2 array
