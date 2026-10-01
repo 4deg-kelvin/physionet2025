@@ -3,7 +3,11 @@
 Updated at every milestone so the work can be resumed by reading this file.
 
 ## Done
-- (none committed yet)
+- Code for all §3 flags, eval tools, configs (commit 0461809).
+- Durations: SLURM 17682272 (CPU, 15m56s) read all 366,185 headers; 0 unreadable, 0 missing,
+  0 n_samples / fs mismatches vs signal_lengths.csv -> experiments/data/record_durations.csv.
+- Tests written: test_durations, test_matching, test_windows, test_wise_ft, test_predict_batched,
+  test_eval_r2, test_aggregate, test_config_r2 (non-backbone subset passes locally: 35).
 
 ## In progress
 - Code: config flags (`data.match_negatives_on`, `preprocess.window_mode/max_windows`, `train.wise_ft*`),
@@ -22,4 +26,4 @@ Updated at every milestone so the work can be resumed by reading this file.
 8. METHODS.md, PROVENANCE.md, README round-2 sections.
 
 ## Job ids
-- (none yet)
+- 17682272 durations build (COMPLETED)

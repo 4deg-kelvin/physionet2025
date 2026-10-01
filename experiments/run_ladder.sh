@@ -45,6 +45,8 @@ mkdir -p "$MODEL" "$OUT_A" "$RESULTS"
 export CHAGAS_CONFIG="$CONFIG"
 export T4_CAP_GIB=14.5
 cd "$WT"
+# Provenance record (PLAN_R2.md section 6): commit, config hash, seed, host, versions.
+$PY experiments/run_info.py --out "$RESULTS/run_info.json" --phase start --config "$CONFIG" --name "$ROW"
 
 echo "===== TRAIN (unmodified train_model.py) ====="
 $PY experiments/run_capped.py --cap "$T4_CAP_GIB" --label train --script train_model.py -- \
@@ -87,6 +89,8 @@ echo "===== REPORT (A / B / C, per-source, per-age-decile, C-A gap) ====="
 $PY experiments/eval_report.py --name "$ROW" \
     --outputs-a "$OUT_A" ${OUT_C:+--outputs-c "$OUT_C"} \
     --data "$TEST_A" --out-dir "$RESULTS"
+
+$PY experiments/run_info.py --out "$RESULTS/run_info.json" --phase end --model-folder "$MODEL"
 
 echo "===== DONE: $ROW ====="
 date

@@ -18,6 +18,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+#: The experiment scripts (scoring.py, aggregate.py, ...) are importable as modules.
+EXPERIMENTS_DIR = REPO_ROOT / "experiments"
+if str(EXPERIMENTS_DIR) not in sys.path:
+    sys.path.append(str(EXPERIMENTS_DIR))
 
 #: 400-record smoke set shipped with the evaluation harness (flat WFDB, labels in the
 #: headers).
