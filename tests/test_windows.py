@@ -147,7 +147,9 @@ def test_dataset_and_collate_concatenate_windows(real_records):
 def test_segment_mean_is_exact():
     x = torch.tensor([[1.0], [2.0], [4.0], [8.0], [16.0], [32.0]])
     out = segment_mean(x, torch.tensor([1, 2, 3]))
-    assert out.reshape(-1).tolist() == [1.0, 3.0, 56.0 / 3.0]
+    # sum within each segment, then divide by its length (float32, as the model runs)
+    expected = torch.tensor([1.0, 6.0, 56.0]) / torch.tensor([1.0, 2.0, 3.0])
+    assert torch.equal(out.reshape(-1), expected)
     with pytest.raises(ValueError):
         segment_mean(x, torch.tensor([1, 2]))
 

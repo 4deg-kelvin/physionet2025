@@ -188,3 +188,56 @@ The construction-time assertion makes that a hard invariant rather than a coinci
   `a72c51c` numbers remain the recorded run 16878337.
 * The ablation ladder itself was not run; it is hours of GPU time per rung.  The batch
   scripts are written, verified in shape, and listed in `experiments/README.md`.
+
+## Round 2: the record-length shortcut (PLAN_R2.md)
+
+**What round 1 got wrong.**  In CODE-15 the recording length predicts the label: records are 7.34 s (2,934
+samples at 400 Hz) or 10.24 s (4,096), with Chagas prevalence 3.05% vs 0.24% (12.7x).  A score that knows only the
+length reaches AUROC 0.681 on the CODE-15 test set, and every round-1 model scores short negatives higher than long
+ones (shipped model: 0.62 vs 0.39).  The hidden cohorts are ~10 s, so the cue is absent there.  Views A, B and C
+are all inflated by it (view B removed only the *source* cue).  This discovery and the within-length evaluation
+below are this project's own (DECISIONS.md D-2026-09-30-2).
+
+**Evaluation (`experiments/scoring.py`, `eval_report.py`, `aggregate.py`).**  Durations come from every record's
+WFDB header (`experiments/build_durations.py`; all 366,185 checked against `signal_lengths.csv`, 0 mismatches).
+New views, CODE-15 only so the source cue is gone too: **S7** (< 7.5 s; 1,259 test positives; primary), **S10**
+(>= 9.9 s; 77 positives; the hidden cohorts' format) and **S10+** (S10 negatives plus every >= 9.9 s positive,
+CODE-15 and SaMi-Trop; ~240 positives; secondary).  Every view has a 1,000-resample bootstrap 95% CI; every report
+also gives the duration-only baseline and the **length-cue gap** (mean probability of CODE-15 negatives, short
+minus long).  `aggregate.py` gives mean ± sd over seeds, the seed ensemble, and paired-bootstrap differences against
+a baseline (every model scored on the same resamples).  The bootstrap uses integer resampling weights on scores
+sorted once, which is exactly the metric on the resampled set because both metrics treat ties exactly.
+All 22 saved round-1 runs are re-scored in `experiments/results/RESCORED.md`.
+
+**Changes under test (all flags; defaults = round 1, asserted by tests):**
+
+* **Length-matched negatives** (`data.match_negatives_on: duration`).  When negatives are capped, their
+  distribution over length groups (short / mid / long, read from each record's own header) is made equal to the
+  positives' — frequency matching of controls to cases on a confounder, the "subsample groups" remedy for shortcut
+  learning (Idrissi et al. 2022; Sagawa et al. 2020; Geirhos et al. 2020).  Seeded; a group short of negatives is
+  taken whole and the rest redistributed.  Needs headers only, so it works in the grader's container.
+* **Fixed 5 s windows** (`preprocess.window_seconds: 5`, `window_mode: multi`).  ECG-FM was pretrained on 5 s at
+  500 Hz (McKeen et al. 2025); feeding 10 s padded 56% of training records by 27%.  Training takes one random 5 s
+  crop from the valid region (after the whole-record z-score); validation and inference take
+  `K = min(4, ceil(T / 5 s))` evenly spaced windows (2 for 7.34 s and 10 s, 3 for 10.24 s) and average their
+  **logits** (FjordNet, CinC 2025).  No record >= 5 s is padded, which removes the GroupNorm padding distortion
+  recorded above and the visibility of record length.  `crop_shift` is replaced by the random crop in this mode.
+* **WiSE-FT** (`train.wise_ft: select`).  After stage 2, `θ(α) = (1 − α)·θ_stage1 + α·θ_stage2` is evaluated on
+  validation for α ∈ {0, 0.5, 1}; the best validation challenge score ships (ties towards smaller α).  α = 0 is the
+  frozen-encoder model, α = 1 the fine-tuned one (Wortsman et al., CVPR 2022; Kumar et al., ICLR 2022).
+  Experiments also write each α as a model folder.
+* **Seed ensemble** (unchanged code, now tested): members' probabilities are averaged and each member gets
+  `max_hours / members` of the budget.
+
+**Logging and reproducibility.**  Every validation line and manifest record now carries the global optimiser
+step, the within-length validation scores (CODE-15 short and long), windows per record, and the WiSE-FT α it
+scored; the CSV log gets the same columns.  `chagas_manifest.json` records train/val counts by source × label ×
+length group.  Every run writes `results/<run>/run_info.json` (commit, dirty flag, config SHA-256, seed, host, GPU,
+library versions, `pip freeze` hash, times).  `experiments/REPRODUCE.md` goes from a clean clone to every table.
+
+**Batched inference for experiments** (`experiments/predict_batched.py`): the same model loading, preprocessing
+and batching code as `team_code.run_model`, with a DataLoader and batches of 64; asserted equal to the
+`run_model.py` path (max |Δprob| < 1e-4).  The unmodified `run_model.py` stays the contract test.
+
+**Decision rule (pre-registered, PLAN_R2.md §5).**  Primary: 3-seed mean TPR@5% on S7; co-primary S7 AUROC; S10+
+AUROC must not drop by more than its SE; the length-cue gap must shrink.  `aggregate.py` applies it mechanically.

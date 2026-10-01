@@ -20,11 +20,14 @@ for _p in (REPO_ROOT, EXPERIMENTS_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+import pandas as pd  # noqa: E402
+
 import aggregate as AG  # noqa: E402
 import scoring as S  # noqa: E402
 from chagas.metrics import challenge_score, compute_auc  # noqa: E402
 
 RESULTS = EXPERIMENTS_DIR / "results"
+SPLIT = "/juice2/scr2/kelvinkn/other_work/edwards/fixbranch_test/split/split.csv"
 B0 = ("finalA_negcap", "lrsweep_lr2e5_s43", "lrsweep_lr2e5_s44")
 
 
@@ -49,8 +52,15 @@ def checks() -> List[Tuple[str, float, float, int]]:
     test_c15 = final_a[S.view_mask(final_a, "B")]
     pos_short = int(((test_c15["length_group"] == "short") & (test_c15["label"] == 1)).sum())
     pos_long = int(((test_c15["length_group"] == "long") & (test_c15["label"] == 1)).sum())
+    # The 2026-09-30 hand number 0.681 reproduces on ALL CODE-15 records (train + test),
+    # not on the test-only view B (DECISIONS.md D-2026-10-01-4); both are reported.
+    split = pd.read_csv(SPLIT, low_memory=False, dtype={"stem": str}).merge(durations, on="stem")
+    c15 = split[split["source"].astype(str).str.startswith("CODE")]
+    dur_all = compute_auc(c15["label"].to_numpy(dtype=float),
+                          (c15["duration_s"].to_numpy(dtype=float) < 7.5).astype(float))[0]
     return [
-        ("duration-only AUROC, view B", 0.681, float(dur_b["auroc"]), 3),
+        ("duration-only AUROC, view B (test)", 0.681, float(dur_b["auroc"]), 3),
+        ("duration-only AUROC, all CODE-15 records", 0.681, float(dur_all), 3),
         ("finalA_negcap S7 AUROC", 0.791, fa_s7[1], 3),
         ("finalA_negcap S7 TPR@5%", 0.365, fa_s7[0], 3),
         ("finalA_negcap S10 AUROC", 0.708, fa_s10[1], 3),

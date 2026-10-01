@@ -58,3 +58,22 @@ actually built.
 * **The static softmax stays the default aggregation.**  Nguyen et al.'s input-dependent
   gate is implemented but off, because the team's version is the one the existing results
   were measured with and the ladder has not yet earned the change.
+
+## Round 2 (PLAN_R2.md, 2026-09-30 / 10-01)
+
+| Idea | Origin | Implemented in |
+|---|---|---|
+| **Discovery** that CODE-15 record length predicts the label (7.34 s vs 10.24 s, 12.7x prevalence ratio), and the **within-length evaluation** (views S7 / S10 / S10+, duration-only baseline, length-cue gap) | **This project** (analysis of `physionet2025/signal_lengths.csv` and saved predictions, 2026-09-30; DECISIONS.md D-2026-09-30-2) | `chagas/lengths.py`, `experiments/scoring.py`, `experiments/eval_report.py`, `experiments/aggregate.py`, `experiments/rescore_all.py` |
+| ECG-FM backbone, 12-layer aggregation, MLP head (unchanged); "random padding or random windowing" named as future work | **The team** (`fm.py`); Nguyen et al., CinC 2025, DOI 10.22489/CinC.2025.416 | `chagas/model.py` (unchanged core) |
+| CODE records are 7–10 s long | Ribeiro et al., *Automatic diagnosis of the 12-lead ECG using a deep neural network*, Nat. Commun. 2020, 11:1760 | `chagas/lengths.py` docstring |
+| 5 s segments at 500 Hz as ECG-FM's pretraining input | McKeen et al., *ECG-FM: an open electrocardiogram foundation model*, JAMIA Open 2025; arXiv:2408.05178 | `PreprocessCfg.window_mode`, `chagas/preprocessing.py::window_starts/extract_windows/random_window` |
+| Random 5 s training crops, window averaging at inference | FjordNet, CinC 2025, DOI 10.22489/CinC.2025.091 | `chagas/preprocessing.py::random_window`, `extract_windows`; `chagas/model.py::segment_mean` |
+| Shortcut learning; balancing / subsampling groups to remove a spurious cue (frequency matching of controls to cases on a confounder) | Geirhos et al., *Shortcut learning in deep neural networks*, Nat. Mach. Intell. 2020; Idrissi et al., *Simple data balancing achieves competitive worst-group-accuracy*, CLeaR 2022; Sagawa et al., *Distributionally robust neural networks*, ICLR 2020 | `DataCfg.match_negatives_on`, `chagas/training.py::matched_negative_quota`, `_matched_negatives` |
+| WiSE-FT weight interpolation; LP-FT / feature-distortion analysis | Wortsman et al., *Robust fine-tuning of zero-shot models*, CVPR 2022; Kumar et al., *Fine-Tuning can Distort Pretrained Features and Underperform Out-of-Distribution*, ICLR 2022 | `chagas/wise_ft.py`, `chagas/training.py::_wise_ft_select`, `TrainCfg.wise_ft*` |
+| A frozen encoder beat a fine-tuned one on the hidden data | Wang et al. (CinCo Amigos), CinC 2025, DOI 10.22489/CinC.2025.158; Nguyen et al. 2025 (416) | motivation in `chagas/wise_ft.py`; tie-break towards smaller alpha (D-2026-10-01-2) |
+| Deep ensembles; multi-member ensembles for Chagas | Lakshminarayanan, Pritzel & Blundell, NeurIPS 2017; Nejedly et al. (ISIBrno), CinC 2025, DOI 10.22489/CinC.2025.132; Jidling et al., PLoS NTD 2023 | `chagas/inference.py::ChagasPredictor` (unchanged), `experiments/aggregate.py` seed ensemble |
+| Hidden cohorts are ~10 s; cohort facts | Reyna et al., CinC 2025 / arXiv:2510.02202 | `chagas/lengths.py` docstring, S10 view |
+| Percentile bootstrap; weighted (multiplicity) form on pre-sorted scores | Efron & Tibshirani, *An Introduction to the Bootstrap*, 1993 (standard); the weighted closed form is derived here from `chagas/metrics.py` | `experiments/scoring.py::RankedScores`, `bootstrap_weights` |
+
+Engineering that is ours and carries no citation: the durations builder and its full cross-check, batched inference
+(`experiments/predict_batched.py`), `run_info.json`, the multi-window collate.

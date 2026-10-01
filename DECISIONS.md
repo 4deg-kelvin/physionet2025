@@ -316,3 +316,68 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   papers; a frozen encoder beat a fine-tuned one on hidden data for rank 7 and for the team's own entry; ELR was never
   ablated; heterogeneous ensembles with a weak member hurt; nobody reported the length–label association.
 - **Status:** active.
+
+## D-2026-10-01-1 — Round 2 implemented behind flags; shipped default unchanged
+- **Decision:** every PLAN_R2.md §3 change is a config flag whose default is round-1 behaviour:
+  `data.match_negatives_on: none`, `preprocess.window_mode: single` (+ `max_windows: 4`), `train.wise_ft: off`
+  (+ `wise_ft_alphas`, `wise_ft_save_all`). `tests/test_config_r2.py` asserts `default_config()` ==
+  `configs/finalA_negcap.yaml` (name/description aside), that each flag defaults to round 1, that every committed
+  config equals `make_configs.py` output, and that the 9 r2 configs differ from finalA only in their flags (+ seed).
+  `window_mode: single` is asserted bit-exact against a verbatim copy of the round-1 pipeline (train and eval, with
+  augmentation), `match_negatives_on: none` against a verbatim copy of round-1 `_subsample`.
+- **Historical configs:** regenerating added only the 9 new default-valued lines to each of the 19 YAMLs; nothing
+  needed pinning. The 8 `configs/lrsweep/*.yaml` were hand-made in 74512a6 (not by `make_configs.py`); they are left
+  untouched as the record of what ran (they also lack the later `csv_log` fields).
+- **Status:** active.
+
+## D-2026-10-01-2 — Round-2 implementation choices the plan did not fix
+- **Durations** are read from all 366,185 headers (not derived) and cross-checked in full against
+  `signal_lengths.csv` (SLURM 17682272: 0 unreadable, 0 missing, 0 mismatches). The 9 MB CSV is committed.
+- **Matched sampling:** groups short/mid/long plus `unknown` (unparsable header). Quotas by largest remainder; a
+  group short of negatives is taken whole and the shortfall is redistributed by the positives' proportions; groups
+  with no positives receive negatives only when all others are exhausted.
+- **Observation, not acted on (plan fixes the design):** matching is marginal over all sources, as specified. On the
+  train split it leaves a residual length cue *within* CODE-15: CODE-15 positives are 95% short, SaMi-Trop positives
+  ~51% long, PTB-XL negatives all long, so the matched negatives are ~85% short overall and CODE-15 prevalence among
+  kept records becomes ~5.9% (short) vs ~2.1% (long), a 2.8x ratio instead of 12.7x (my arithmetic from the split
+  counts, not measured on a run). Matching within source (CODE-15 negatives to CODE-15 positives) would remove it.
+  The length-cue gap of M1/MW will show whether this matters; a `"source_duration"` variant is the natural follow-up.
+- **Windows:** `K = min(4, ceil(T/5 s))` exactly as written, so 10.24 s CODE-15 records get 3 windows (7.34 s and
+  10.0 s get 2). Window logits (and aux/domain logits) are averaged per record; ensemble members are still averaged
+  on probabilities. In multi mode `crop_shift` is skipped without drawing from the RNG. Validation uses the same
+  multi-window path as inference.
+- **WiSE-FT:** ties in validation challenge go to the smaller alpha (towards the frozen encoder, the more robust end
+  in the cited evidence); integer/bool buffers come from the nearer endpoint (alpha >= 0.5 -> stage 2); alpha 0/1 are
+  copies, not arithmetic. Each alpha's threshold is calibrated in its own validation pass, so the extra final
+  calibration pass is skipped when WiSE-FT runs. WiSE passes are not counted against the time budget (3 validations).
+  Per-alpha folders (`model/wise_ft/member<k>/alpha<a>/`) are written only with `wise_ft_save_all` (experiments);
+  the selected alpha is stored in the checkpoint (`chagas.wise_ft_alpha`) and the manifest.
+- **Evaluation:** bootstrap = plain resampling of test records (not label-stratified), 1,000 resamples, seed fixed
+  per view, computed with integer weights on pre-sorted scores (tested equal to explicit resampling). The
+  duration-only baseline is the indicator "record < 7.5 s". S-views are also reported on Test C (`S7·C` etc.).
+  Within-length *validation* metrics use CODE-15 records only (source id 0, which also covers `unknown`).
+- **Batched inference:** `predict_batched.py` writes `stem, record, binary, prob`; `eval_report.py --preds-a/-c`
+  reads it. For MW the shipped (selected) model is not re-inferred: the selected alpha folder's predictions are
+  copied to the run's top level; the smoke asserts the two are identical.
+- **RESCORED.md** lives under `experiments/results/`, which `.gitignore` excludes; it and its CSVs are force-added.
+- **Status:** active.
+
+## D-2026-10-01-3 — run_info.json is written by the experiment runners, counts by training
+- **Decision:** `experiments/run_info.py` writes `results/<run>/run_info.json`, called at start and end by
+  `run_ladder.sh` and `run_r2.sh`. It records git commit + dirty flag (tracked files, ignoring `experiments/logs`
+  and `experiments/results`), config path + SHA-256, seed, host, SLURM ids, GPU, python/torch/lightning/numpy
+  versions, SHA-256 of `pip freeze`, start/end times. The train/val counts by source x label x length group are
+  computed inside `chagas.training` (`data_summary`) and written to `chagas_manifest.json`, which run_info copies.
+- **Why:** the judged container must not shell out to `git`/`pip`, and only the training entry knows the split.
+- **Status:** active.
+
+## D-2026-10-01-4 — Acceptance: the duration-only 0.681 is an all-CODE-15 number, not a view-B number
+- **Finding:** with the tools (`experiments/acceptance_r2.py`, SLURM 17682392) every hand-computed target of
+  2026-09-30 reproduces to its last digit except the duration-only AUROC "on view B": the score "1 for records
+  < 7.5 s" gives **0.6767** on view B (CODE-15 test records, 68,575) but **0.6805** on all 342,755 CODE-15 records and
+  0.6815 on the training split. No other simple definition gives 0.681 on view B (−duration 0.671, per-exact-length
+  training prevalence 0.680, ordinal short/mid/long 0.676). So the 0.681 in PLAN_R2.md §1 was computed on all CODE-15
+  records; the conclusion (length alone is a strong cue) is unchanged.
+- **Decision:** keep the definition (indicator of < 7.5 s, scored on the view); report 0.677 for view B and note the
+  discrepancy. The acceptance script prints both lines.
+- **Status:** active.

@@ -74,7 +74,9 @@ class PreprocessCfg:
     #: GroupNorm padding distortion and the visibility of record length (PLAN_R2.md
     #: section 3.2).  5 s at 500 Hz is ECG-FM's pretraining segment (McKeen et al.,
     #: JAMIA Open 2025, arXiv:2408.05178); random 5 s training crops with window
-    #: averaging at inference are FjordNet's (CinC 2025, DOI 10.22489/CinC.2025.091).
+    #: averaging at inference are FjordNet's (CinC 2025, DOI 10.22489/CinC.2025.091); the
+    #: team's own paper named "random padding or random windowing" as future work
+    #: (Nguyen et al., CinC 2025, DOI 10.22489/CinC.2025.416).
     window_mode: str = "single"
     #: Cap on the number of inference windows per record in ``"multi"`` mode.
     max_windows: int = 4
