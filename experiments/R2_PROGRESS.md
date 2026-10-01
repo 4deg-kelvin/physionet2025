@@ -3,6 +3,7 @@
 Updated at every milestone so the work can be resumed by reading this file.
 
 ## Done
+- RESCORED.md (job 17682392, COMPLETED) force-added with its CSVs.
 - Code for all §3 flags, eval tools (scoring/eval_report/aggregate/predict_batched/run_info/rescore_all),
   r2 configs + smoke_r2 config (commits 0461809, 4076061, e9fd2b1).
 - Durations: SLURM 17682272 read all 366,185 headers; 0 mismatches vs signal_lengths.csv (committed CSV).
@@ -16,7 +17,6 @@ Updated at every milestone so the work can be resumed by reading this file.
 - Round-2 array **17682658** (9 tasks, %4) launched at commit 65fb3bf after: CPU suite 17682446 = 138 passed;
   smoke 17682393 passed; run_r2.sh end-to-end on testdata 17682505 passed. DO NOT edit chagas/ or experiments/*.py|sh
   while it runs (tasks import the worktree when they start).
-- 17682392 rescore -> results/RESCORED.md.
 
 ## Todo
 - When the array finishes: run the aggregate commands in experiments/REPRODUCE.md section 5 (A and C).

@@ -410,8 +410,8 @@ length cue is removed.  Definitions (all in `experiments/scoring.py`):
 Every report (`results/<run>/report.md`) now has: the view table with 95% bootstrap CIs (1,000 resamples) for TPR@5%
 (`challenge`) and AUROC; the **duration-only baseline** (what "1 if the record is < 7.5 s" scores; 0.677 AUROC on
 view B, so anything near that on A/B is not evidence of ECG reading); the **length-cue gap** (mean predicted
-probability of CODE-15 negatives, short minus long; the shipped model's is about +0.23, a model that ignores length
-should be ~0); per-source and per-age-decile diagnostics as before.  `results/RESCORED.md` re-scores every round-1
+probability of CODE-15 negatives, short minus long; shipped config +0.233 for seed 42, +0.170 ± 0.061 over 3 seeds;
+a model that ignores length should be ~0); per-source and per-age-decile diagnostics as before.  `results/RESCORED.md` re-scores every round-1
 run this way.  `experiments/aggregate.py` turns runs into configurations (mean ± sd over seeds, seed ensemble,
 paired-bootstrap Δ vs a baseline with its SE, the §5 decision rule).
 
@@ -454,3 +454,8 @@ the `run_model.py` path to |Δprob| < 1e-4, and the unmodified `run_model.py` re
   quota of 190, so all were taken and the rest redistributed (the designed fallback).
   Note: the `step` on validation lines is Lightning's `global_step` of the current stage's trainer (it restarts at 0
   in stage 2).
+* Re-score of all 22 saved round-1 runs (job 17682392, CPU, 37 min): `results/RESCORED.md` (+ CSVs).  B0 (shipped,
+  3 seeds) on S7: TPR@5% 0.384 ± 0.017, AUROC 0.787 ± 0.005; its 3-seed ensemble 0.404 [0.379, 0.430] / 0.801.
+  Every round-1 model has a positive length-cue gap (+0.06 to +0.30).
+* Test suite: job 17682446 (CPU), **138 passed** (89 round-1 + 49 round-2).  `run_r2.sh` end to end on the smoke set:
+  job 17682505, COMPLETED.  Round-2 array: **17682658** (launched 2026-10-01 at commit 65fb3bf).
