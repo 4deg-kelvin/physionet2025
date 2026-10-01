@@ -394,3 +394,51 @@ bootstrap SE ±0.0125 TPR@5% / ±0.007 AUROC; 10.2 s: 77 positives, SE ±0.053 /
 Reading: within one length group a single shipped model (0.384) is not better than the original (0.377), and its AUROC
 is lower (0.787 vs 0.807). Only the seed ensemble holds an edge (0.404). The 10.2 s group cannot rank models.
 Round 2 (`PLAN_R2.md`) fixes the yardstick and removes the cue.
+
+## Round 2 (PLAN_R2.md): how to run it and how to read the new views
+
+**Read views S7 / S10 / S10+ first; A, B and C are reported for continuity and are expected to fall** once the
+length cue is removed.  Definitions (all in `experiments/scoring.py`):
+
+| View | Records | Test positives | Use |
+|---|---|---|---|
+| **S7** | CODE-15, duration < 7.5 s | 1,259 | **Primary.** No source cue, no length cue, enough positives |
+| **S10** | CODE-15, duration ≥ 9.9 s | 77 | The hidden cohorts' format; wide CI, never decides alone |
+| **S10+** | S10 negatives + every ≥ 9.9 s positive (CODE-15 and SaMi-Trop) | 240 | More power for 10 s; SaMi-Trop positives carry a source cue, secondary |
+| `·C` | the same view on Test C | | robustness to organiser-style perturbation |
+
+Every report (`results/<run>/report.md`) now has: the view table with 95% bootstrap CIs (1,000 resamples) for TPR@5%
+(`challenge`) and AUROC; the **duration-only baseline** (what "1 if the record is < 7.5 s" scores; 0.677 AUROC on
+view B, so anything near that on A/B is not evidence of ECG reading); the **length-cue gap** (mean predicted
+probability of CODE-15 negatives, short minus long; the shipped model's is about +0.23, a model that ignores length
+should be ~0); per-source and per-age-decile diagnostics as before.  `results/RESCORED.md` re-scores every round-1
+run this way.  `experiments/aggregate.py` turns runs into configurations (mean ± sd over seeds, seed ensemble,
+paired-bootstrap Δ vs a baseline with its SE, the §5 decision rule).
+
+**Run it** (details and the exact table commands in `experiments/REPRODUCE.md`):
+
+```bash
+sbatch experiments/batch_build_durations.sh   # once: experiments/data/record_durations.csv (committed)
+sbatch experiments/batch_slurm_tests_cpu.sh   # the suite, CPU node
+sbatch experiments/batch_r2_smoke.sh          # contract with every new flag on; batched == run_model.py
+sbatch experiments/batch_rescore.sh           # RESCORED.md + acceptance checks
+sbatch experiments/batch_r2.sh                # M1 / W1 / MW x seeds 42, 43, 44 (at most 4 at once)
+```
+
+The round-2 flags (all default off, shipped default unchanged): `data.match_negatives_on: duration` (M1),
+`preprocess.window_seconds: 5.0` + `preprocess.window_mode: multi` (W1), and both plus `train.wise_ft: select` with
+`wise_ft_alphas: [0, 0.5, 1]` and `wise_ft_save_all: true` (MW).  For MW, `results/<run>/alpha<a>/` holds each
+mixture's report and the top level holds the mixture selected on validation (`selected_alpha.txt`).
+
+Batched inference (`predict_batched.py`) replaces `run_model.py` for experiment scoring only; it is asserted equal to
+the `run_model.py` path to |Δprob| < 1e-4, and the unmodified `run_model.py` remains the contract test.
+
+### Round-2 SLURM results so far
+
+* Durations: job 17682272 (CPU, 15 min 56 s) read all 366,185 headers; 0 unreadable, 0 missing, 0 sample-count and 0
+  sampling-rate mismatches against `physionet2025/signal_lengths.csv`.
+* Acceptance (job 17682392, `acceptance_r2.py`): finalA_negcap S7 AUROC 0.7906 / TPR@5% 0.3646, S10 AUROC 0.7079;
+  B0 3-seed ensemble view A TPR@5% 0.4525, S7 0.4043 / 0.8007; test positives 1,259 short / 77 long — all as computed
+  by hand on 2026-09-30.  The duration-only AUROC is 0.677 on view B; the hand-computed 0.681 is the all-CODE-15
+  value (0.6805) (DECISIONS.md D-2026-10-01-4).
+* Stage-2 memory with 5 s windows (r2_MW config, batch 16 × 2,500): peak 2.81 GiB allocated (10 s: 4.10 GiB).

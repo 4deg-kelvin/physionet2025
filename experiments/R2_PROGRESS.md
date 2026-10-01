@@ -3,27 +3,22 @@
 Updated at every milestone so the work can be resumed by reading this file.
 
 ## Done
-- Code for all §3 flags, eval tools, configs (commit 0461809).
-- Durations: SLURM 17682272 (CPU, 15m56s) read all 366,185 headers; 0 unreadable, 0 missing,
-  0 n_samples / fs mismatches vs signal_lengths.csv -> experiments/data/record_durations.csv.
-- Tests written: test_durations, test_matching, test_windows, test_wise_ft, test_predict_batched,
-  test_eval_r2, test_aggregate, test_config_r2 (non-backbone subset passes locally: 35).
+- Code for all §3 flags, eval tools (scoring/eval_report/aggregate/predict_batched/run_info/rescore_all),
+  r2 configs + smoke_r2 config (commits 0461809, 4076061, e9fd2b1).
+- Durations: SLURM 17682272 read all 366,185 headers; 0 mismatches vs signal_lengths.csv (committed CSV).
+- Tests: 49 new (138 total). CPU suite 17682391: 137 passed, 1 failed (float32-vs-float64 comparison in my own
+  segment_mean test; fixed in e9fd2b1). Full suite must be re-run on SLURM before launching the array.
+- Acceptance (17682392): all targets reproduce except duration-only on view B (0.677; 0.681 is the all-CODE-15 value,
+  D-2026-10-01-4).
+- Docs: DECISIONS D-2026-10-01-1..4, PROVENANCE/METHODS/README round-2 sections, REPRODUCE.md.
 
 ## In progress
-- Code: config flags (`data.match_negatives_on`, `preprocess.window_mode/max_windows`, `train.wise_ft*`),
-  `chagas/lengths.py`, augment `crop` flag.
+- 17682393 r2 smoke (GPU): memory at 5 s PASS (2.81 GiB); training + WiSE-FT done; run_model/evaluate/predict_batched pending.
+- 17682392 rescore -> results/RESCORED.md.
 
 ## Todo
-1. §2 eval: `experiments/build_durations.py` + SLURM job -> `experiments/data/record_durations.csv`;
-   `experiments/scoring.py`, `eval_report.py` views S7/S10/S10+, duration-only, length-cue gap, CIs;
-   `experiments/aggregate.py`; `experiments/predict_batched.py`; `RESCORED.md`; acceptance numbers.
-2. §3.1 matched negatives; §3.2 5 s windows; §3.3 WiSE-FT; §3.4 ensemble checks.
-3. §6 logging (global step, within-length val metrics, per-alpha), `run_info.json`, `REPRODUCE.md`.
-4. §7 tests; full suite on SLURM.
-5. Configs `experiments/configs/r2/` + `experiments/batch_r2.sh`.
-6. Smoke on SLURM (train -> run_model -> evaluate on testdata; predict_batched equivalence; 5 s memory).
-7. Launch §4 array.
-8. METHODS.md, PROVENANCE.md, README round-2 sections.
+- Re-run full test suite on SLURM; then launch `sbatch experiments/batch_r2.sh`; record array id here.
+- Force-add RESCORED.md (+CSVs); fill README with smoke results.
 
 ## Job ids
-- 17682272 durations build (COMPLETED)
+- 17682272 durations (COMPLETED); 17682391 pytest CPU (1 fail, fixed); 17682392 rescore; 17682393 r2 smoke
