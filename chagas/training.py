@@ -31,7 +31,9 @@ from pytorch_lightning.loggers import CSVLogger
 from . import labels as L
 from .config import ExperimentCfg, load_config
 from .dataset import ChagasDataModule, RecordEntry, find_records, scan_records
+from .lengths import LENGTH_GROUPS, length_group
 from .model import ChagasModule
+from .wise_ft import interpolate_state_dicts, select_alpha, snapshot_state
 
 __all__ = [
     "TimeLimitCallback",
@@ -39,6 +41,8 @@ __all__ = [
     "train_model",
     "MODEL_FILENAME",
     "member_filename",
+    "matched_negative_quota",
+    "data_summary",
 ]
 
 #: Name of the (single-member) checkpoint written into ``model_folder``.
@@ -141,12 +145,17 @@ def split_entries(
 
 
 def _subsample(
-    entries: Sequence[RecordEntry], max_records: int, seed: int
+    entries: Sequence[RecordEntry], max_records: int, seed: int, match_on: str = "none"
 ) -> List[RecordEntry]:
     """Thin the negatives to ``max_records``, keeping every positive.
 
     The positive count is what binds learning at 2% prevalence, so budgeted runs drop
     negatives rather than sampling uniformly.
+
+    ``match_on="duration"`` chooses the kept negatives so that their distribution over
+    length groups equals the positives' (:func:`matched_negative_quota`), removing the
+    CODE-15 record-length shortcut from the training and validation data (PLAN_R2.md
+    section 3.1).  ``"none"`` is the round-1 code path, untouched.
     """
     entries = list(entries)
     if max_records <= 0 or len(entries) <= max_records:
@@ -154,11 +163,120 @@ def _subsample(
     pos = [e for e in entries if e.label_hard == 1]
     neg = [e for e in entries if e.label_hard != 1]
     budget = max(0, max_records - len(pos))
+    if match_on == "duration":
+        return pos + _matched_negatives(pos, neg, budget, seed)
+    if match_on != "none":
+        raise ValueError(f"unknown match_on {match_on!r}")
     if budget < len(neg):
         rng = np.random.default_rng(seed)
         keep = np.sort(rng.choice(len(neg), size=budget, replace=False))
         neg = [neg[i] for i in keep]
     return pos + neg
+
+
+def matched_negative_quota(
+    pos_counts: Dict[str, int], neg_available: Dict[str, int], budget: int
+) -> Dict[str, int]:
+    """How many negatives to take from each length group.
+
+    Frequency matching of controls to cases on a confounder (record length): group
+    ``g`` gets ``budget * n_pos[g] / n_pos`` negatives, rounded by largest remainder so
+    the quotas sum to ``budget`` exactly.  This is the "subsample groups" remedy for a
+    spurious cue (Idrissi, Arjovsky, Pezeshki & Lopez-Paz, *Simple data balancing
+    achieves competitive worst-group-accuracy*, CLeaR 2022; Sagawa et al., ICLR 2020;
+    Geirhos et al., *Shortcut learning in deep neural networks*, Nat. Mach. Intell.
+    2020).
+
+    If a group has fewer negatives than its quota, all of them are taken and the
+    shortfall is redistributed over the remaining groups in proportion to their
+    positive counts, repeatedly, until the budget is met or every group is exhausted.
+    Groups with no positives get no negatives unless every positive-bearing group is
+    exhausted first.  Pure and deterministic.
+    """
+    groups = sorted(set(pos_counts) | set(neg_available), key=_group_order)
+    avail = {g: int(neg_available.get(g, 0)) for g in groups}
+    budget = int(min(max(0, budget), sum(avail.values())))
+    quota = {g: 0 for g in groups}
+    remaining = budget
+    weights = {g: float(pos_counts.get(g, 0)) for g in groups}
+    while remaining > 0:
+        open_groups = [g for g in groups if quota[g] < avail[g]]
+        if not open_groups:
+            break
+        w = np.array([weights[g] for g in open_groups], dtype=np.float64)
+        if w.sum() <= 0:
+            # No positive-bearing group has room left: fall back to the groups' sizes.
+            w = np.array([avail[g] - quota[g] for g in open_groups], dtype=np.float64)
+        share = _largest_remainder(w / w.sum() * remaining, remaining)
+        progressed = 0
+        for g, extra in zip(open_groups, share):
+            take = min(int(extra), avail[g] - quota[g])
+            quota[g] += take
+            progressed += take
+        remaining -= progressed
+        if progressed == 0:
+            break
+    return quota
+
+
+def _group_order(name: str) -> int:
+    return LENGTH_GROUPS.index(name) if name in LENGTH_GROUPS else len(LENGTH_GROUPS)
+
+
+def _largest_remainder(raw: np.ndarray, total: int) -> List[int]:
+    """Round non-negative ``raw`` to integers summing to ``total`` (Hamilton's method)."""
+    floors = np.floor(raw).astype(np.int64)
+    short = int(total - floors.sum())
+    if short > 0:
+        order = np.argsort(-(raw - floors), kind="stable")
+        floors[order[:short]] += 1
+    return [int(v) for v in floors]
+
+
+def _matched_negatives(
+    pos: Sequence[RecordEntry], neg: Sequence[RecordEntry], budget: int, seed: int
+) -> List[RecordEntry]:
+    """Seeded draw of ``budget`` negatives whose length groups follow the positives'."""
+    pos_counts: Dict[str, int] = defaultdict(int)
+    for e in pos:
+        pos_counts[length_group(getattr(e, "duration_s", float("nan")))] += 1
+    by_group: Dict[str, List[int]] = defaultdict(list)
+    for i, e in enumerate(neg):
+        by_group[length_group(getattr(e, "duration_s", float("nan")))].append(i)
+    quota = matched_negative_quota(
+        dict(pos_counts), {g: len(v) for g, v in by_group.items()}, budget
+    )
+    rng = np.random.default_rng(seed)
+    keep: List[int] = []
+    for g in sorted(quota, key=_group_order):
+        idx = by_group.get(g, [])
+        k = quota[g]
+        if k >= len(idx):
+            keep.extend(idx)
+        elif k > 0:
+            chosen = rng.choice(len(idx), size=k, replace=False)
+            keep.extend(idx[j] for j in chosen)
+    return [neg[i] for i in sorted(keep)]
+
+
+def data_summary(
+    train: Sequence[RecordEntry], val: Sequence[RecordEntry]
+) -> List[Dict[str, Any]]:
+    """Record counts by split x source x label x length group (PLAN_R2.md section 6).
+
+    Written into ``chagas_manifest.json`` (and from there into ``run_info.json``) so a
+    run records exactly what it trained and selected on.
+    """
+    counts: Dict[Tuple[str, str, int, str], int] = defaultdict(int)
+    for split, entries in (("train", train), ("val", val)):
+        for e in entries:
+            key = (split, str(e.source), int(e.label_hard),
+                   length_group(getattr(e, "duration_s", float("nan"))))
+            counts[key] += 1
+    return [
+        {"split": k[0], "source": k[1], "label": k[2], "length_group": k[3], "n": v}
+        for k, v in sorted(counts.items())
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +389,7 @@ def _train_member(
     deadline: Optional[float],
     verbose: bool,
     log_dir: Optional[Path] = None,
+    wise_dir: Optional[Path] = None,
 ) -> ChagasModule:
     pl.seed_everything(seed, workers=True)
     has_val = datamodule.val_dataset is not None and len(datamodule.val_dataset) > 0
@@ -285,6 +404,9 @@ def _train_member(
         print(f"[chagas] stage 1 (frozen encoder), budget {stage1_hours:.3f} h", flush=True)
     trainer.fit(module, datamodule=datamodule)
     module = _load_best(module, checkpoint)
+
+    use_wise = cfg.train.wise_ft == "select" and cfg.train.two_stage and has_val
+    theta_stage1 = snapshot_state(module) if use_wise else None
 
     if cfg.train.two_stage:
         module.enter_stage_two()
@@ -302,10 +424,16 @@ def _train_member(
         module = _load_best(module, checkpoint2)
         trainer = trainer2
 
+    if use_wise:
+        assert theta_stage1 is not None
+        module = _wise_ft_select(
+            module, theta_stage1, trainer, datamodule, cfg, wise_dir=wise_dir, verbose=verbose
+        )
     # Calibrate the decision threshold on the validation split, with the *selected*
     # weights (audit defect D9: a hard 0.5 on a 50%-prior-calibrated model flags a wild
-    # over-share of a 2%-prevalence cohort).
-    if has_val:
+    # over-share of a 2%-prevalence cohort).  The WiSE-FT loop already calibrated the
+    # threshold of every mixture it scored, including the one it kept.
+    elif has_val:
         trainer.validate(module, datamodule=datamodule, verbose=False)
         if module.last_val_probs is not None and module.last_val_probs.size:
             value = module.update_threshold(module.last_val_probs)
@@ -314,6 +442,68 @@ def _train_member(
     if verbose:
         print(f"[chagas] layer weights = {np.round(module.feature_extractor.layer_weight_values(), 4)}", flush=True)
     return module
+
+
+def _wise_ft_select(
+    module: ChagasModule,
+    theta_stage1: Dict[str, torch.Tensor],
+    trainer: pl.Trainer,
+    datamodule: ChagasDataModule,
+    cfg: ExperimentCfg,
+    *,
+    wise_dir: Optional[Path],
+    verbose: bool,
+) -> ChagasModule:
+    """Score every WiSE-FT mixture on validation and keep the best (PLAN_R2.md 3.3).
+
+    ``module`` arrives holding the best stage-2 weights.  For each alpha the mixture is
+    loaded, validated (which logs all validation metrics tagged with ``wise_ft_alpha``
+    to the CSV log and the manifest history) and its threshold calibrated.  With
+    ``wise_ft_save_all`` each mixture is also written as a self-contained model folder
+    so experiments can score it on the test sets.  Selection: :func:`chagas.wise_ft.select_alpha`.
+    """
+    theta_stage2 = snapshot_state(module)
+    results: List[Dict[str, Any]] = []
+    for alpha in cfg.train.wise_ft_alphas:
+        module.load_state_dict(interpolate_state_dicts(theta_stage1, theta_stage2, alpha), strict=True)
+        module.wise_ft_alpha = float(alpha)
+        trainer.validate(module, datamodule=datamodule, verbose=False)
+        threshold = float(module.threshold)
+        if module.last_val_probs is not None and module.last_val_probs.size:
+            threshold = module.update_threshold(module.last_val_probs)
+        metrics = dict(module.val_history[-1]) if module.val_history else {}
+        metrics.update({"alpha": float(alpha), "threshold": threshold})
+        results.append(metrics)
+        if wise_dir is not None and cfg.train.wise_ft_save_all:
+            _save_wise_folder(module, wise_dir / f"alpha{float(alpha):.2f}", cfg, metrics)
+    module.wise_ft_alpha = None
+    best = select_alpha(results)
+    module.load_state_dict(
+        interpolate_state_dicts(theta_stage1, theta_stage2, float(best["alpha"])), strict=True
+    )
+    module.threshold.fill_(float(best["threshold"]))
+    module.wise_ft_selected_alpha = float(best["alpha"])  # type: ignore[attr-defined]
+    module.wise_ft_results = results  # type: ignore[attr-defined]
+    if verbose:
+        table = ", ".join(f"a={r['alpha']:.2f}: {r.get('val_challenge', float('nan')):.4f}" for r in results)
+        print(f"[chagas] WiSE-FT val_challenge {table}; selected alpha = {best['alpha']:.2f}", flush=True)
+    return module
+
+
+def _save_wise_folder(
+    module: ChagasModule, folder: Path, cfg: ExperimentCfg, metrics: Dict[str, Any]
+) -> None:
+    """One mixture as a model folder ``chagas.inference.load_model`` can read."""
+    folder.mkdir(parents=True, exist_ok=True)
+    _save_checkpoint(
+        module, str(folder / MODEL_FILENAME), cfg, extra_meta={"wise_ft_alpha": metrics["alpha"]}
+    )
+    with open(folder / "chagas_manifest.json", "w") as fh:
+        json.dump(
+            {"members": [MODEL_FILENAME], "wise_ft_alpha": metrics["alpha"],
+             "val_metrics": metrics, "config": cfg.to_dict()},
+            fh, indent=2,
+        )
 
 
 def _summarise_val_history(member: int, module: ChagasModule) -> dict:
@@ -326,10 +516,18 @@ def _summarise_val_history(member: int, module: ChagasModule) -> dict:
     history = list(getattr(module, "val_history", []) or [])
     best_by_stage: dict = {}
     for rec in history:
+        if "wise_ft_alpha" in rec:
+            continue  # mixtures are summarised separately below
         key = f"stage{rec['stage']}"
         if key not in best_by_stage or rec["val_challenge"] > best_by_stage[key]["val_challenge"]:
             best_by_stage[key] = {k: rec[k] for k in ("epoch", "val_challenge", "val_auroc", "val_auprc")}
-    return {"member": member, "best_by_stage": best_by_stage, "history": history}
+    summary = {"member": member, "best_by_stage": best_by_stage, "history": history}
+    if getattr(module, "wise_ft_results", None) is not None:
+        summary["wise_ft"] = {
+            "alphas": module.wise_ft_results,
+            "selected_alpha": module.wise_ft_selected_alpha,
+        }
+    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +565,9 @@ def train_model(
     entries = scan_records(paths, cfg, table=table, workers=cfg.data.scan_workers)
     if not entries:
         raise RuntimeError("no records carried a readable Chagas label")
-    entries = _subsample(entries, cfg.data.max_records, cfg.train.seed)
+    entries = _subsample(
+        entries, cfg.data.max_records, cfg.train.seed, cfg.data.match_negatives_on
+    )
 
     train_entries, val_entries = split_entries(
         entries, cfg.train.val_fraction, cfg.train.seed
@@ -400,9 +600,14 @@ def train_model(
             deadline=deadline,
             verbose=verbose,
             log_dir=Path(model_folder) / "metrics" / f"member{member}",
+            wise_dir=Path(model_folder) / "wise_ft" / f"member{member}",
         )
         out_path = os.path.join(model_folder, member_filename(member))
-        _save_checkpoint(module, out_path, cfg)
+        selected = getattr(module, "wise_ft_selected_alpha", None)
+        _save_checkpoint(
+            module, out_path, cfg,
+            extra_meta=None if selected is None else {"wise_ft_alpha": float(selected)},
+        )
         saved.append(out_path)
         summaries.append(_summarise_val_history(member, module))
         if verbose:
@@ -414,6 +619,7 @@ def train_model(
             {
                 "members": [os.path.basename(p) for p in saved],
                 "training": summaries,
+                "data_summary": data_summary(train_entries, val_entries),
                 "config": cfg.to_dict(),
             },
             fh,
@@ -421,8 +627,17 @@ def train_model(
         )
 
 
-def _save_checkpoint(module: ChagasModule, path: str, cfg: ExperimentCfg) -> None:
-    """Write a self-contained checkpoint: weights, config, threshold, layer weights."""
+def _save_checkpoint(
+    module: ChagasModule,
+    path: str,
+    cfg: ExperimentCfg,
+    extra_meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Write a self-contained checkpoint: weights, config, threshold, layer weights.
+
+    ``extra_meta`` (e.g. the WiSE-FT ``wise_ft_alpha``) is merged into the ``chagas``
+    block; without it the checkpoint is byte-for-byte the round-1 layout.
+    """
     state = {
         "state_dict": module.state_dict(),
         "hyper_parameters": dict(module.hparams),
@@ -434,4 +649,6 @@ def _save_checkpoint(module: ChagasModule, path: str, cfg: ExperimentCfg) -> Non
             "stage": int(module.stage),
         },
     }
+    if extra_meta:
+        state["chagas"].update(extra_meta)
     torch.save(state, path)

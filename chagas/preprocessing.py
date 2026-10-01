@@ -21,7 +21,11 @@ Pipeline
 6. per-record per-lead z-score -- what ECG-FM was pretrained on (McKeen et al. 2025;
    ``fairseq-signals/scripts/preprocess/ecg/preprocess.py``);
 7. window to 10 s = 5000 samples, zero-pad at the end, and **return ``valid_len``** so
-   the model can build a real padding mask (audit defect D3).
+   the model can build a real padding mask (audit defect D3).  With
+   ``window_mode: "multi"`` (PLAN_R2.md section 3.2) training instead takes one random
+   ``window_seconds`` crop from the valid region (:func:`random_window`) and
+   validation/inference take ``K`` evenly spaced windows (:func:`extract_windows`)
+   whose logits the model averages.
 
 A note on filtering and the backbone: ECG-FM was pretrained on z-scored, essentially
 unfiltered signal, so the band-pass is kept deliberately wide (0.5-100 Hz) -- minimal
@@ -35,7 +39,7 @@ import math
 import os
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from scipy.signal import butter, iirnotch, resample_poly, sosfiltfilt, tf2sos
@@ -50,6 +54,9 @@ __all__ = [
     "clean_signal",
     "zscore_per_record",
     "window_and_pad",
+    "window_starts",
+    "extract_windows",
+    "random_window",
     "demographics_vector",
     "preprocess_array",
     "preprocess_record",
@@ -67,10 +74,12 @@ class Sample:
     Attributes
     ----------
     signal:
-        ``(12, window_size)`` float32, z-scored and zero-padded at the end.
+        ``(12, window_size)`` float32, z-scored and zero-padded at the end -- or, for
+        validation/inference in ``window_mode: "multi"``, ``(K, 12, window_size)``.
     valid_len:
         Number of leading samples of ``signal`` that are real signal.  Everything from
         ``valid_len`` on is zero padding and is masked out of attention and pooling.
+        An int, or a ``(K,)`` int64 array alongside a 3-D ``signal``.
     demographics:
         ``(5,)`` float32 ``[age/100, age_missing, sex_female, sex_male, sex_unknown]``.
         The explicit missing indicator is audit defect D16: encoding a missing age as
@@ -86,7 +95,7 @@ class Sample:
     """
 
     signal: np.ndarray
-    valid_len: int
+    valid_len: Union[int, np.ndarray]
     demographics: np.ndarray
     label_hard: Optional[int] = None
     label_soft: Optional[float] = None
@@ -94,6 +103,15 @@ class Sample:
     record_id: str = ""
     aux: Optional[np.ndarray] = None
     aux_mask: Optional[np.ndarray] = None
+
+    def windows(self) -> Tuple[np.ndarray, np.ndarray]:
+        """``(K, 12, W)`` float32 windows and ``(K,)`` int64 valid lengths, in any mode.
+
+        A single-window sample comes back as ``K = 1``; the array is a view, not a copy.
+        """
+        if self.signal.ndim == 3:
+            return self.signal, np.asarray(self.valid_len, dtype=np.int64).reshape(-1)
+        return self.signal[None], np.asarray([int(self.valid_len)], dtype=np.int64)
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +253,61 @@ def window_and_pad(x: np.ndarray, window_size: int) -> Tuple[np.ndarray, int]:
     return out, int(n)
 
 
+def window_starts(n: int, window_size: int, max_windows: int = 4) -> np.ndarray:
+    """Start sample of each inference window for a record of ``n`` samples.
+
+    ``K = min(max_windows, ceil(n / window_size))`` windows, evenly spaced from 0 to
+    ``n - window_size`` (rounded), so the first window starts at the first sample and
+    the last one ends at the last.  A record no longer than one window gets a single
+    window at 0 (it is then zero-padded and keeps its padding mask).  At 500 Hz and
+    5 s windows: 7.34 s -> 2 windows, 10 s -> 2, 10.24 s -> 3, 4 s -> 1, 23 s -> 4 (cap).
+    PLAN_R2.md section 3.2; window averaging at inference follows FjordNet (CinC 2025,
+    DOI 10.22489/CinC.2025.091).
+    """
+    if window_size <= 0:
+        raise ValueError("window_size must be positive")
+    if n <= window_size:
+        return np.zeros(1, dtype=np.int64)
+    k = max(1, min(int(max_windows), int(math.ceil(n / float(window_size)))))
+    if k == 1:
+        return np.zeros(1, dtype=np.int64)
+    return np.round(np.linspace(0.0, float(n - window_size), k)).astype(np.int64)
+
+
+def extract_windows(
+    x: np.ndarray, window_size: int, max_windows: int = 4
+) -> Tuple[np.ndarray, np.ndarray]:
+    """``(12, T)`` -> ``(K, 12, window_size)`` windows and their ``(K,)`` valid lengths.
+
+    Only a record shorter than ``window_size`` is padded (prefix-valid, as
+    :func:`window_and_pad`); every window of a longer record is all signal.
+    """
+    starts = window_starts(int(x.shape[-1]), window_size, max_windows)
+    windows = []
+    lengths = []
+    for start in starts:
+        w, valid = window_and_pad(x[:, int(start):], window_size)
+        windows.append(w)
+        lengths.append(valid)
+    return np.stack(windows, axis=0), np.asarray(lengths, dtype=np.int64)
+
+
+def random_window(
+    x: np.ndarray, window_size: int, rng: np.random.Generator
+) -> Tuple[np.ndarray, int]:
+    """One random ``window_size`` crop lying entirely inside the valid region.
+
+    The training half of PLAN_R2.md section 3.2 (random 5 s crops: FjordNet, CinC 2025,
+    DOI 10.22489/CinC.2025.091).  A record no longer than the window is returned whole,
+    zero-padded, with its true ``valid_len``.  Seeded through ``rng``.
+    """
+    n = int(x.shape[-1])
+    if n <= window_size:
+        return window_and_pad(x, window_size)
+    start = int(rng.integers(0, n - window_size + 1))
+    return np.ascontiguousarray(x[:, start:start + window_size]), int(window_size)
+
+
 # ---------------------------------------------------------------------------
 # demographics
 # ---------------------------------------------------------------------------
@@ -279,12 +352,15 @@ def preprocess_array(
     train: bool = False,
     aug: Optional[AugCfg] = None,
     rng: Optional[np.random.Generator] = None,
-) -> Tuple[np.ndarray, int]:
+) -> Tuple[np.ndarray, Union[int, np.ndarray]]:
     """Signal half of the pipeline: ``(12, T)`` at ``fs`` -> ``(12, window_size)``, ``valid_len``.
 
     ``aug`` is applied only when ``train`` is True and ``aug.enabled``; inference is
-    always deterministic.
+    always deterministic.  In ``window_mode: "multi"`` a training call returns one
+    random window and a validation/inference call returns ``(K, 12, window_size)`` and
+    a ``(K,)`` array of valid lengths.  ``window_mode: "single"`` is round 1, unchanged.
     """
+    multi = cfg.window_mode == "multi"
     x = np.ascontiguousarray(np.asarray(x, dtype=np.float64))
     if x.ndim != 2 or x.shape[0] != len(ECG_FM_LEAD_ORDER):
         raise ValueError(f"expected a (12, T) array, got shape {x.shape}")
@@ -308,13 +384,23 @@ def preprocess_array(
 
     # 5. signal-level augmentation
     if use_aug:
-        x = A.apply_stage_s(x, float(cfg.sampling_rate), rng, aug, cfg.window_seconds)
+        x = A.apply_stage_s(
+            x, float(cfg.sampling_rate), rng, aug, cfg.window_seconds, crop=not multi
+        )
 
     # 6. per-record z-score, before windowing
     x = zscore_per_record(x)
 
     # 7. window + pad, remembering how much is real
-    signal, valid_len = window_and_pad(x, cfg.window_size)
+    valid_len: Union[int, np.ndarray]
+    if not multi:
+        signal, valid_len = window_and_pad(x, cfg.window_size)
+    elif train:
+        signal, valid_len = random_window(
+            x, cfg.window_size, rng if rng is not None else np.random.default_rng()
+        )
+    else:
+        signal, valid_len = extract_windows(x, cfg.window_size, cfg.max_windows)
     if not np.isfinite(signal).all():
         signal = np.nan_to_num(signal, nan=0.0, posinf=0.0, neginf=0.0)
     return signal.astype(np.float32, copy=False), valid_len
@@ -353,7 +439,7 @@ def preprocess_record(
         )
     except ValueError:
         return None
-    if valid_len <= 0:
+    if int(np.min(valid_len)) <= 0:
         return None
     return Sample(
         signal=windowed,

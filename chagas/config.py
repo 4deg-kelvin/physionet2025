@@ -65,6 +65,19 @@ class PreprocessCfg:
     sampling_rate: int = 500
     #: Model input length in seconds.  10 s == every PTB-XL record.  (team)
     window_seconds: float = 10.0
+    #: ``"single"`` -- one window from the start of the record, zero-padded at the end
+    #: (round 1, the shipped behaviour; training varies it with ``aug.crop_shift``).
+    #: ``"multi"`` -- training takes one random ``window_seconds`` crop from the valid
+    #: region; validation and inference average the **logits** of
+    #: ``K = min(max_windows, ceil(T / window))`` evenly spaced windows.  With
+    #: ``window_seconds: 5.0`` no record >= 5 s is padded, which removes both the
+    #: GroupNorm padding distortion and the visibility of record length (PLAN_R2.md
+    #: section 3.2).  5 s at 500 Hz is ECG-FM's pretraining segment (McKeen et al.,
+    #: JAMIA Open 2025, arXiv:2408.05178); random 5 s training crops with window
+    #: averaging at inference are FjordNet's (CinC 2025, DOI 10.22489/CinC.2025.091).
+    window_mode: str = "single"
+    #: Cap on the number of inference windows per record in ``"multi"`` mode.
+    max_windows: int = 4
     #: Training-time minimum usable duration.  (team)
     min_seconds: float = 2.0
     #: ``"butterworth"`` -- vectorised ``sosfiltfilt`` band-pass + 50/60 Hz notches
@@ -93,6 +106,10 @@ class PreprocessCfg:
             raise ValueError(f"clean must be butterworth|neurokit|none, got {self.clean!r}")
         if self.bandpass_high_hz >= self.sampling_rate / 2:
             raise ValueError("bandpass_high_hz must be below Nyquist")
+        if self.window_mode not in ("single", "multi"):
+            raise ValueError(f"window_mode must be single|multi, got {self.window_mode!r}")
+        if int(self.max_windows) < 1:
+            raise ValueError("max_windows must be >= 1")
 
 
 # ---------------------------------------------------------------------------
@@ -316,11 +333,29 @@ class TrainCfg:
     #: (Jidling et al. 2023 averaged 15 seeds; inference cost scales linearly, so <= 3).
     ensemble_members: int = 1
 
+    # -- WiSE-FT weight interpolation (PLAN_R2.md section 3.3) -------------------
+    #: ``"off"`` ships the best stage-2 weights (round 1).  ``"select"`` evaluates
+    #: ``theta(a) = (1 - a) * theta_stage1 + a * theta_stage2`` for every ``a`` in
+    #: ``wise_ft_alphas`` on the validation split and ships the ``a`` with the best
+    #: validation challenge score (Wortsman et al., *Robust fine-tuning of zero-shot
+    #: models*, CVPR 2022; see also Kumar et al., ICLR 2022).  Needs ``two_stage``.
+    wise_ft: str = "off"
+    wise_ft_alphas: Tuple[float, ...] = (0.0, 0.5, 1.0)
+    #: Also write one self-contained model folder per alpha under
+    #: ``model_folder/wise_ft/member<k>/alpha<a>/`` (experiments only: ~360 MB each).
+    wise_ft_save_all: bool = False
+
     def __post_init__(self) -> None:
         if "bf16" in str(self.precision):
             raise ValueError(
                 "bf16 is not natively supported on SM 7.5 (T4 / TitanRTX); use '16-mixed'."
             )
+        if self.wise_ft not in ("off", "select"):
+            raise ValueError(f"wise_ft must be off|select, got {self.wise_ft!r}")
+        if self.wise_ft == "select" and not self.wise_ft_alphas:
+            raise ValueError("wise_ft='select' needs at least one alpha")
+        if any(not 0.0 <= float(a) <= 1.0 for a in self.wise_ft_alphas):
+            raise ValueError(f"wise_ft_alphas must lie in [0, 1], got {self.wise_ft_alphas}")
 
 
 # ---------------------------------------------------------------------------
@@ -338,11 +373,25 @@ class DataCfg:
     #: 100k reproduces the validated ladder regime; training on all ~290k negatives
     #: cost ~0.05 AUROC in two runs (DECISIONS.md D-2026-09-29-1/3). 0 = no cap.
     max_records: int = 100_000
+    #: How the capped negatives are chosen.  ``"none"``: uniformly (round 1).
+    #: ``"duration"``: frequency-matched to the positives' distribution over length
+    #: groups (short < 7.5 s, mid, long >= 9.9 s; :mod:`chagas.lengths`), so record
+    #: length carries no label information in the training or validation data
+    #: (PLAN_R2.md section 3.1).  Matching controls to cases on a confounder; the
+    #: "subsample groups" remedy for shortcut learning (Idrissi et al., CLeaR 2022;
+    #: Sagawa et al., ICLR 2020; Geirhos et al., Nat. Mach. Intell. 2020).
+    match_negatives_on: str = "none"
     #: Drop CODE-15 records listed in ``code15_label_issues.csv`` (team artefact).
     exclude_label_issues: bool = False
     label_issues_csv: str = "code15_label_issues.csv"
     #: Threads used to read headers when building the split.
     scan_workers: int = 8
+
+    def __post_init__(self) -> None:
+        if self.match_negatives_on not in ("none", "duration"):
+            raise ValueError(
+                f"match_negatives_on must be none|duration, got {self.match_negatives_on!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +511,11 @@ def default_config() -> ExperimentCfg:
     FiLM demographics, source-aware soft labels, the augmentation suite and two-stage
     fine-tuning are ON; auxiliary heads, ranking loss, the domain-adversarial head, the
     PMA gate and the ensemble are OFF until an ablation earns them.
+
+    Round 2 (PLAN_R2.md): ``data.match_negatives_on``, ``preprocess.window_mode`` and
+    ``train.wise_ft`` all default to round-1 behaviour.  ``tests/test_config_r2.py``
+    asserts this object equals ``experiments/configs/finalA_negcap.yaml`` field for
+    field (apart from name/description) so the shipped model cannot move by accident.
     """
     return ExperimentCfg(
         name="default",

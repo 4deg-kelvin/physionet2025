@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from . import labels as L
 from . import preprocessing as P
+from .lengths import LENGTH_GROUP_IDS, header_duration, length_group
 from .config import ExperimentCfg
 
 __all__ = [
@@ -46,6 +47,15 @@ class RecordEntry:
     source_id: int = 0
     aux: Optional[np.ndarray] = None
     aux_mask: Optional[np.ndarray] = None
+    #: Recording length from the record's own header (``n_samples / fs``); NaN when
+    #: unknown.  Drives length-matched negative sampling and the within-length
+    #: validation metrics (PLAN_R2.md sections 3.1 and 6).
+    duration_s: float = float("nan")
+
+    @property
+    def length_group(self) -> str:
+        """``short`` / ``mid`` / ``long`` / ``unknown`` (:func:`chagas.lengths.length_group`)."""
+        return length_group(self.duration_s)
 
 
 def find_records(folder: str, file_extension: str = ".hea") -> List[str]:
@@ -62,8 +72,11 @@ def find_records(folder: str, file_extension: str = ".hea") -> List[str]:
     return sorted(out)
 
 
-def _read_header_meta(path: str) -> Optional[Tuple[str, str, int, str]]:
-    """``(path, record_id, hard_label, source)`` for one record, or ``None`` if unreadable."""
+def _read_header_meta(path: str) -> Optional[Tuple[str, str, int, str, float]]:
+    """``(path, record_id, hard_label, source, duration_s)`` for one record, or ``None``.
+
+    The duration is read from the same header (record line), so no extra I/O.
+    """
     try:
         with open(path + ".hea", "r") as fh:
             header = fh.read()
@@ -74,7 +87,7 @@ def _read_header_meta(path: str) -> Optional[Tuple[str, str, int, str]]:
         return None
     if info.label is None:
         return None
-    return path, os.path.basename(path), int(info.label), info.source
+    return path, os.path.basename(path), int(info.label), info.source, header_duration(header)
 
 
 def scan_records(
@@ -99,12 +112,12 @@ def scan_records(
     stats = None
     if cfg.labels.soft_labels and cfg.labels.multi_report:
         stats = L.MultiReportStats.build(
-            ((rid, lab, src) for _p, rid, lab, src in raw), table
+            ((rid, lab, src) for _p, rid, lab, src, _d in raw), table
         )
 
     entries: List[RecordEntry] = []
     want_aux = cfg.model.aux_heads
-    for path, record_id, label, source in raw:
+    for path, record_id, label, source, duration in raw:
         soft = L.soft_label(label, source, record_id, cfg.labels, table, stats)
         aux, aux_mask = (
             L.aux_targets(record_id, table, cfg.labels.aux_columns)
@@ -122,6 +135,7 @@ def scan_records(
                 source_id=L.SOURCE_IDS.get(source, 0),
                 aux=aux,
                 aux_mask=aux_mask,
+                duration_s=float(duration),
             )
         )
     return entries
@@ -175,19 +189,35 @@ class ChagasDataset(Dataset):
         if sample is None:
             return None
 
-        item: Dict[str, Any] = {
-            "signal": torch.from_numpy(np.ascontiguousarray(sample.signal)),
-            "valid_len": torch.tensor(int(sample.valid_len), dtype=torch.long),
+        item: Dict[str, Any] = {}
+        if self.cfg.preprocess.window_mode == "multi":
+            # (K, 12, W) windows; ``collate`` concatenates them across the batch and the
+            # model averages the K logits back into one per record (PLAN_R2.md 3.2).
+            windows, lengths = sample.windows()
+            item["signal"] = torch.from_numpy(np.ascontiguousarray(windows))
+            item["valid_len"] = torch.from_numpy(lengths)
+            item["n_windows"] = torch.tensor(int(lengths.shape[0]), dtype=torch.long)
+        else:
+            item["signal"] = torch.from_numpy(np.ascontiguousarray(sample.signal))
+            item["valid_len"] = torch.tensor(int(sample.valid_len), dtype=torch.long)
+        item.update({
             "demographics": torch.from_numpy(sample.demographics),
             "label_hard": torch.tensor(float(entry.label_hard), dtype=torch.float32),
             "label_soft": torch.tensor(float(entry.label_soft), dtype=torch.float32),
             "source_id": torch.tensor(int(entry.source_id), dtype=torch.long),
+            "length_group": torch.tensor(
+                LENGTH_GROUP_IDS[entry.length_group], dtype=torch.long
+            ),
             "record_id": entry.record_id,
-        }
+        })
         if entry.aux is not None and entry.aux_mask is not None:
             item["aux"] = torch.from_numpy(entry.aux)
             item["aux_mask"] = torch.from_numpy(entry.aux_mask)
         return item
+
+
+#: Per-window keys: concatenated (not stacked) when items carry ``n_windows``.
+WINDOW_KEYS = ("signal", "valid_len")
 
 
 def collate(batch: Sequence[Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
@@ -195,14 +225,22 @@ def collate(batch: Sequence[Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any
 
     Every consumer must check for ``None`` before unpacking -- that is what
     :meth:`chagas.model.ChagasModule._unpack` does.
+
+    Multi-window items (``n_windows`` present) have ``signal`` ``(K_i, 12, W)`` and
+    ``valid_len`` ``(K_i,)``; those two are concatenated into ``(sum K_i, 12, W)`` and
+    ``n_windows`` says which windows belong to which record.  Everything else is
+    per-record and stacked as before.
     """
     items = [b for b in batch if b is not None]
     if not items:
         return None
+    windowed = "n_windows" in items[0]
     out: Dict[str, Any] = {}
     for key in items[0]:
         if key == "record_id":
             out[key] = [item[key] for item in items]
+        elif windowed and key in WINDOW_KEYS:
+            out[key] = torch.cat([item[key] for item in items], dim=0)
         else:
             out[key] = torch.stack([item[key] for item in items])
     return out

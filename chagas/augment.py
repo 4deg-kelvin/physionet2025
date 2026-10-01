@@ -365,11 +365,16 @@ def apply_stage_s(
     rng: np.random.Generator,
     cfg: Optional[AugCfg],
     window_seconds: float = 10.0,
+    crop: bool = True,
 ) -> np.ndarray:
     """Signal-level augmentations, applied after cleaning and before the z-score.
 
     ``crop_shift`` runs last so the returned array is at most ``window_seconds`` long;
     the caller z-scores it and zero-pads it to the model's fixed input size.
+
+    ``crop=False`` skips ``crop_shift`` entirely (no RNG draw either): in
+    ``window_mode: "multi"`` the random fixed-length window taken after the z-score
+    replaces it (PLAN_R2.md section 3.2).  The default keeps round 1 bit-exact.
     """
     if cfg is None or not cfg.enabled:
         return _as_2d(x)
@@ -391,6 +396,6 @@ def apply_stage_s(
         x = random_mask(x, fs, rng, cfg.random_mask_max_s)
     if rng.random() < cfg.p_edge_mask:
         x = edge_mask(x, fs, rng, cfg.edge_mask_max_s)
-    if rng.random() < cfg.p_crop_shift:
+    if crop and rng.random() < cfg.p_crop_shift:
         x = crop_shift(x, fs, rng, cfg.crop_seconds, window_seconds)
     return x

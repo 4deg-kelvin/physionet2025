@@ -39,6 +39,7 @@ from torch import Tensor, nn
 
 from . import metrics as M
 from .config import CONV_DOWNSAMPLE, ExperimentCfg
+from .lengths import LENGTH_GROUP_IDS
 from .losses import (
     GradientReversal,
     hard_negative_ranking_loss,
@@ -52,6 +53,8 @@ __all__ = [
     "ChagasModule",
     "token_lengths",
     "build_padding_mask",
+    "segment_mean",
+    "within_length_metrics",
 ]
 
 
@@ -89,6 +92,79 @@ def masked_mean(x: Tensor, padding_mask: Optional[Tensor]) -> Tensor:
     valid = (~padding_mask).to(x.dtype).unsqueeze(-1)  # (B, T, 1)
     denom = valid.sum(dim=1).clamp(min=1.0)
     return (x * valid).sum(dim=1) / denom
+
+
+def segment_mean(x: Tensor, counts: Tensor) -> Tensor:
+    """Mean of consecutive row segments: rows ``[0, c0)`` -> out[0], ``[c0, c0+c1)`` -> out[1], ...
+
+    Used to average per-window logits back into one logit per record in
+    ``window_mode: "multi"`` (PLAN_R2.md section 3.2; FjordNet, CinC 2025, DOI
+    10.22489/CinC.2025.091, averaged windows at inference).  Logits, not probabilities,
+    are averaged, as the plan specifies.
+    """
+    counts = counts.to(device=x.device, dtype=torch.long).reshape(-1)
+    if int(counts.sum()) != x.shape[0]:
+        raise ValueError(f"segment counts sum to {int(counts.sum())}, expected {x.shape[0]}")
+    owner = torch.repeat_interleave(torch.arange(counts.shape[0], device=x.device), counts)
+    out = torch.zeros((counts.shape[0],) + tuple(x.shape[1:]), dtype=x.dtype, device=x.device)
+    out.index_add_(0, owner, x)
+    denom = counts.to(x.dtype).reshape((-1,) + (1,) * (x.dim() - 1))
+    return out / denom
+
+
+def within_length_metrics(
+    labels: np.ndarray,
+    probs: np.ndarray,
+    length_groups: Optional[np.ndarray],
+    source_ids: Optional[np.ndarray],
+    code15_id: int = 0,
+) -> Dict[str, float]:
+    """Validation challenge score and AUROC inside the short and long CODE-15 groups.
+
+    The internal-validation counterpart of the S7 / S10 test views (PLAN_R2.md
+    sections 2 and 6): within one length group and one source, neither the length cue
+    nor the source cue can be used.  Keys are ``val_{challenge,auroc}_{short,long}``;
+    a group with no positive or no negative is left out rather than reported as 0.
+    """
+    out: Dict[str, float] = {}
+    if length_groups is None or source_ids is None or labels.size == 0:
+        return out
+    code15 = np.asarray(source_ids) == code15_id
+    for name in ("short", "long"):
+        mask = code15 & (np.asarray(length_groups) == LENGTH_GROUP_IDS[name])
+        y = labels[mask]
+        if y.size == 0 or np.unique(y).size < 2:
+            continue
+        p = probs[mask]
+        out[f"val_challenge_{name}"] = float(M.challenge_score(y, p))
+        out[f"val_auroc_{name}"] = float(M.compute_auc(y, p)[0])
+        out[f"val_n_pos_{name}"] = float(y.sum())
+    return out
+
+
+def format_val_line(record: Dict[str, Any]) -> str:
+    """The one-line validation summary printed to the SLURM log.
+
+    Carries the global optimiser step (PLAN_R2.md section 6) so the stage-2 peak can be
+    located in steps, plus the within-length scores and the WiSE-FT alpha when present.
+    """
+    line = (
+        f"[chagas] stage {record['stage']} epoch {record['epoch']} "
+        f"step {record.get('global_step', -1)} "
+        f"val_challenge={record['val_challenge']:.4f} "
+        f"val_auroc={record['val_auroc']:.4f} val_auprc={record['val_auprc']:.4f} n={record['n']}"
+    )
+    for name in ("short", "long"):
+        if f"val_challenge_{name}" in record:
+            line += (
+                f" {name}: challenge={record[f'val_challenge_{name}']:.4f}"
+                f" auroc={record[f'val_auroc_{name}']:.4f}"
+            )
+    if record.get("windows_per_record", 1.0) != 1.0:
+        line += f" windows/record={record['windows_per_record']:.2f}"
+    if "wise_ft_alpha" in record:
+        line += f" wise_ft_alpha={record['wise_ft_alpha']:.2f}"
+    return line
 
 
 # ---------------------------------------------------------------------------
@@ -410,6 +486,12 @@ class ChagasModule(pl.LightningModule):
         self._val_probs: List[np.ndarray] = []
         self._val_labels: List[np.ndarray] = []
         self._val_losses: List[float] = []
+        self._val_groups: List[np.ndarray] = []
+        self._val_sources: List[np.ndarray] = []
+        self._val_windows: List[np.ndarray] = []
+        #: Set by the WiSE-FT selection loop so each validation pass is tagged with the
+        #: interpolation weight it scored (PLAN_R2.md section 3.3).
+        self.wise_ft_alpha: Optional[float] = None
         self.last_val_probs: Optional[np.ndarray] = None
         # One dict per validation epoch (stage, epoch, metrics); summarised into
         # chagas_manifest.json by training.py so a finished run is self-describing.
@@ -421,7 +503,19 @@ class ChagasModule(pl.LightningModule):
         signal: Tensor,
         valid_len: Optional[Tensor] = None,
         demographics: Optional[Tensor] = None,
+        n_windows: Optional[Tensor] = None,
     ) -> Dict[str, Tensor]:
+        """Per-record outputs.
+
+        ``n_windows`` (``window_mode: "multi"``): ``signal`` holds ``sum(n_windows)``
+        windows, record ``i`` owning the next ``n_windows[i]``; every output is computed
+        per window and then averaged per record (:func:`segment_mean`).  ``None`` is the
+        round-1 one-window-per-record path, unchanged.
+        """
+        if n_windows is not None and demographics is not None:
+            demographics = demographics.repeat_interleave(
+                n_windows.to(device=demographics.device, dtype=torch.long), dim=0
+            )
         pooled = self.feature_extractor(signal, valid_len)
         feature = pooled
         if self.film is not None and demographics is not None:
@@ -434,6 +528,8 @@ class ChagasModule(pl.LightningModule):
             out["aux_logits"] = self.aux_head(hidden)
         if self.domain_head is not None and self.grl is not None:
             out["domain_logits"] = self.domain_head(self.grl(pooled))
+        if n_windows is not None:
+            out = {k: segment_mean(v, n_windows) for k, v in out.items()}
         return out
 
     def predict_proba(
@@ -441,8 +537,9 @@ class ChagasModule(pl.LightningModule):
         signal: Tensor,
         valid_len: Optional[Tensor] = None,
         demographics: Optional[Tensor] = None,
+        n_windows: Optional[Tensor] = None,
     ) -> Tensor:
-        return torch.sigmoid(self(signal, valid_len, demographics)["logits"])
+        return torch.sigmoid(self(signal, valid_len, demographics, n_windows)["logits"])
 
     # -- loss ---------------------------------------------------------------
     def _compute_loss(
@@ -486,29 +583,46 @@ class ChagasModule(pl.LightningModule):
         if data is None:
             return None
         self._update_grl_lambda()
-        out = self(data["signal"], data.get("valid_len"), data.get("demographics"))
+        out = self(
+            data["signal"], data.get("valid_len"), data.get("demographics"), data.get("n_windows")
+        )
         loss, parts = self._compute_loss(out, data)
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=data["signal"].shape[0])
+        n = int(data["label_hard"].shape[0])  # records, not windows
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=n)
         for name, value in parts.items():
-            self.log(f"train_{name}", value, on_step=False, on_epoch=True, batch_size=data["signal"].shape[0])
+            self.log(f"train_{name}", value, on_step=False, on_epoch=True, batch_size=n)
         return loss
 
     def validation_step(self, batch: Any, batch_idx: int) -> None:
         data = self._unpack(batch)
         if data is None:
             return
-        out = self(data["signal"], data.get("valid_len"), data.get("demographics"))
+        out = self(
+            data["signal"], data.get("valid_len"), data.get("demographics"), data.get("n_windows")
+        )
         loss, _ = self._compute_loss(out, data)
         self._val_losses.append(float(loss.detach()))
         # Metrics take sigmoid probabilities and HARD labels (audit defect D10).
         self._val_probs.append(torch.sigmoid(out["logits"].detach().float()).cpu().numpy())
         self._val_labels.append(data["label_hard"].detach().float().cpu().numpy())
-        self.log("val_loss", loss, on_epoch=True, prog_bar=True, batch_size=data["signal"].shape[0])
+        n = int(data["label_hard"].shape[0])
+        if "length_group" in data:
+            self._val_groups.append(data["length_group"].detach().cpu().numpy())
+        if "source_id" in data:
+            self._val_sources.append(data["source_id"].detach().cpu().numpy())
+        windows = data.get("n_windows")
+        self._val_windows.append(
+            windows.detach().cpu().numpy() if windows is not None else np.ones(n, dtype=np.int64)
+        )
+        self.log("val_loss", loss, on_epoch=True, prog_bar=True, batch_size=n)
 
     def on_validation_epoch_start(self) -> None:
         self._val_probs.clear()
         self._val_labels.clear()
         self._val_losses.clear()
+        self._val_groups.clear()
+        self._val_sources.clear()
+        self._val_windows.clear()
 
     def on_validation_epoch_end(self) -> None:
         if not self._val_probs:
@@ -522,25 +636,36 @@ class ChagasModule(pl.LightningModule):
         self.log("val_challenge", float(np.nan_to_num(challenge, nan=0.0)), prog_bar=True, batch_size=n)
         self.log("val_auroc", float(np.nan_to_num(auroc, nan=0.5)), prog_bar=True, batch_size=n)
         self.log("val_auprc", float(np.nan_to_num(auprc, nan=0.0)), batch_size=n)
+        # Round-2 diagnostics (PLAN_R2.md section 6): within-length scores, windows per
+        # record, and the WiSE-FT alpha this pass scored.  Logged only, never monitored.
+        groups = np.concatenate(self._val_groups) if self._val_groups else None
+        sources = np.concatenate(self._val_sources) if self._val_sources else None
+        within = within_length_metrics(labels, probs, groups, sources)
+        for key, value in within.items():
+            self.log(key, value, batch_size=n)
+        windows_per_record = float(np.concatenate(self._val_windows).mean()) if self._val_windows else 1.0
+        self.log("val_windows_per_record", windows_per_record, batch_size=n)
+        if self.wise_ft_alpha is not None:
+            self.log("wise_ft_alpha", float(self.wise_ft_alpha), batch_size=n)
         if not self.trainer.sanity_checking:
             self.update_threshold(probs)
             record = {
                 "stage": int(getattr(self, "stage", 0) or 0),
                 "epoch": int(self.current_epoch),
+                "global_step": int(self.global_step),
                 "val_challenge": float(np.nan_to_num(challenge, nan=0.0)),
                 "val_auroc": float(np.nan_to_num(auroc, nan=0.5)),
                 "val_auprc": float(np.nan_to_num(auprc, nan=0.0)),
                 "n": n,
+                "windows_per_record": windows_per_record,
             }
+            record.update({k: float(v) for k, v in within.items()})
+            if self.wise_ft_alpha is not None:
+                record["wise_ft_alpha"] = float(self.wise_ft_alpha)
             self.val_history.append(record)
             # One line per validation epoch. With the progress bar disabled this is the
             # only per-epoch progress signal in a SLURM log (DECISIONS.md, 2026-09-22).
-            print(
-                f"[chagas] stage {record['stage']} epoch {record['epoch']} "
-                f"val_challenge={record['val_challenge']:.4f} "
-                f"val_auroc={record['val_auroc']:.4f} val_auprc={record['val_auprc']:.4f} n={n}",
-                flush=True,
-            )
+            print(format_val_line(record), flush=True)
 
     def update_threshold(self, probs: np.ndarray) -> float:
         """Set the decision threshold to the ``threshold_quantile`` of validation scores.

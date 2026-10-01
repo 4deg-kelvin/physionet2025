@@ -27,21 +27,49 @@ from .model import ChagasModule
 from .preprocessing import Sample, preprocess_record
 from .training import MODEL_FILENAME
 
-__all__ = ["ChagasPredictor", "load_model", "run_model", "predict"]
+__all__ = ["ChagasPredictor", "load_model", "run_model", "predict", "samples_to_arrays"]
 
 
 @dataclass
 class _Member:
     module: ChagasModule
     threshold: float
+    #: WiSE-FT interpolation weight this member ships with; ``None`` when WiSE-FT was off.
+    wise_ft_alpha: Optional[float] = None
+
+
+def samples_to_arrays(
+    samples: Sequence[Sample], window_mode: str
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    """``(signal, valid_len, demographics, n_windows)`` numpy arrays for a batch.
+
+    ``window_mode: "single"`` stacks one window per record exactly as round 1 did and
+    returns ``n_windows = None``.  ``"multi"`` concatenates every record's windows and
+    returns how many belong to each record, for :func:`chagas.model.segment_mean`.
+    Shared by :class:`ChagasPredictor` and ``experiments/predict_batched.py`` so the
+    per-record and batched paths cannot drift apart.
+    """
+    demographics = np.stack([s.demographics for s in samples]).astype(np.float32)
+    if window_mode != "multi":
+        signal = np.stack([s.signal for s in samples]).astype(np.float32)
+        valid_len = np.asarray([s.valid_len for s in samples], dtype=np.int64)
+        return signal, valid_len, demographics, None
+    parts = [s.windows() for s in samples]
+    signal = np.concatenate([w for w, _l in parts], axis=0).astype(np.float32)
+    valid_len = np.concatenate([l for _w, l in parts], axis=0).astype(np.int64)
+    n_windows = np.asarray([l.shape[0] for _w, l in parts], dtype=np.int64)
+    return signal, valid_len, demographics, n_windows
 
 
 class ChagasPredictor:
     """One or more trained members, averaged on the probability scale.
 
     Averaging sigmoid outputs (rather than logits) is what the ensemble papers do
-    (Jidling et al., PLoS NTD 2023 averaged 15 seeds; Ahus AIM used 5 folds).  The
-    decision threshold is the mean of the members' calibrated thresholds.
+    (Jidling et al., PLoS NTD 2023 averaged 15 seeds; Ahus AIM used 5 folds; deep
+    ensembles: Lakshminarayanan, Pritzel & Blundell, NeurIPS 2017).  The decision
+    threshold is the mean of the members' calibrated thresholds.  Within one member,
+    the windows of a multi-window record are averaged on the **logit** scale first
+    (PLAN_R2.md section 3.2); members are then averaged on the probability scale.
     """
 
     def __init__(self, members: Sequence[_Member], cfg: ExperimentCfg, device: torch.device):
@@ -68,25 +96,42 @@ class ChagasPredictor:
         return self
 
     # -- prediction --------------------------------------------------------
+    @property
+    def window_mode(self) -> str:
+        return str(self.cfg.preprocess.window_mode)
+
+    @property
+    def wise_ft_alphas(self) -> List[Optional[float]]:
+        """The WiSE-FT alpha each member ships with (``None`` = WiSE-FT off)."""
+        return [m.wise_ft_alpha for m in self.members]
+
     @torch.no_grad()
+    def predict_arrays(
+        self,
+        signal: np.ndarray,
+        valid_len: np.ndarray,
+        demographics: np.ndarray,
+        n_windows: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Mean member probability per record, shape ``(n_records,)``.
+
+        Inputs as produced by :func:`samples_to_arrays`.
+        """
+        sig = torch.from_numpy(np.ascontiguousarray(signal, dtype=np.float32)).to(self.device)
+        lens = torch.as_tensor(valid_len, dtype=torch.long).to(self.device)
+        demo = torch.from_numpy(np.ascontiguousarray(demographics, dtype=np.float32)).to(self.device)
+        counts = None if n_windows is None else torch.as_tensor(n_windows, dtype=torch.long).to(self.device)
+        probs = []
+        for m in self.members:
+            out = m.module.predict_proba(sig, lens, demo, counts)
+            probs.append(out.float().reshape(-1).cpu().numpy())
+        return np.mean(np.stack(probs, axis=0), axis=0).astype(np.float64)
+
     def predict_samples(self, samples: Sequence[Sample]) -> np.ndarray:
         """Mean probability per sample, shape ``(n,)``."""
         if not samples:
             return np.zeros(0, dtype=np.float64)
-        signal = torch.from_numpy(
-            np.stack([s.signal for s in samples]).astype(np.float32)
-        ).to(self.device)
-        valid_len = torch.tensor(
-            [s.valid_len for s in samples], dtype=torch.long, device=self.device
-        )
-        demographics = torch.from_numpy(
-            np.stack([s.demographics for s in samples]).astype(np.float32)
-        ).to(self.device)
-        probs = []
-        for m in self.members:
-            out = m.module.predict_proba(signal, valid_len, demographics)
-            probs.append(out.float().reshape(-1).cpu().numpy())
-        return np.mean(np.stack(probs, axis=0), axis=0).astype(np.float64)
+        return self.predict_arrays(*samples_to_arrays(samples, self.window_mode))
 
     def predict_record(self, record: str) -> Tuple[Optional[int], Optional[float]]:
         sample = preprocess_record(
@@ -178,7 +223,14 @@ def load_model(
         module.load_state_dict(state["state_dict"], strict=True)
         module.eval().to(dev)
         threshold = float(meta.get("threshold", float(module.threshold)))
-        members.append(_Member(module=module, threshold=threshold))
+        alpha = meta.get("wise_ft_alpha")
+        members.append(
+            _Member(
+                module=module,
+                threshold=threshold,
+                wise_ft_alpha=None if alpha is None else float(alpha),
+            )
+        )
         if verbose:
             print(f"[chagas] loaded {os.path.basename(path)} (threshold {threshold:.6f})", flush=True)
     assert cfg is not None

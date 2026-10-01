@@ -5,12 +5,15 @@ description: 'Row 5 variant: butterworth 0.5-45 Hz instead of 0.5-100 Hz.'
 data:
   data_folder: null
   max_records: 0
+  match_negatives_on: none
   exclude_label_issues: false
   label_issues_csv: code15_label_issues.csv
   scan_workers: 8
 preprocess:
   sampling_rate: 500
   window_seconds: 10.0
+  window_mode: single
+  max_windows: 4
   min_seconds: 2.0
   clean: butterworth
   bandpass_low_hz: 0.5
@@ -145,3 +148,9 @@ train:
   val_check_interval: 1.0
   limit_train_batches: 1.0
   ensemble_members: 1
+  wise_ft: 'off'
+  wise_ft_alphas:
+  - 0.0
+  - 0.5
+  - 1.0
+  wise_ft_save_all: false
