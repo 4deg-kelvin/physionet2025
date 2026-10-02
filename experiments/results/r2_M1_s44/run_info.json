@@ -1,0 +1,183 @@
+{
+  "name": "r2_M1_s44",
+  "config_path": "/juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/configs/r2/r2_M1_s44.yaml",
+  "config_sha256": "b6e53951b91d885b6a09c481621e308233d443acac58ee8bbd534f8e30914584",
+  "seed": 44,
+  "git": {
+    "commit": "bce02f79e434d95e535e36d8700eff3119ba408d",
+    "branch": "improve/robust-finetune",
+    "dirty": false,
+    "dirty_paths": []
+  },
+  "environment": {
+    "hostname": "jagupard27.stanford.edu",
+    "slurm_job_id": "17682687",
+    "slurm_array_task_id": "2",
+    "python": "3.9.23",
+    "torch": "2.7.1+cu118",
+    "numpy": "1.26.4",
+    "cuda_available": true,
+    "gpu": "NVIDIA TITAN RTX",
+    "lightning": "2.5.2",
+    "pytorch_lightning": "2.5.2",
+    "pip_freeze_sha256": "6835e50d311ed3b540b8716a9df5e0ddb9073d8febe4adea915feb2e2ceb64d8",
+    "pip_freeze_lines": 226
+  },
+  "start_time": "2026-10-01T11:34:05-07:00",
+  "end_time": "2026-10-01T13:45:14-07:00",
+  "data_summary": [
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 0,
+      "length_group": "long",
+      "n": 10083
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 0,
+      "length_group": "mid",
+      "n": 1024
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 0,
+      "length_group": "short",
+      "n": 71393
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 1,
+      "length_group": "long",
+      "n": 217
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 1,
+      "length_group": "mid",
+      "n": 6
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 1,
+      "length_group": "short",
+      "n": 4471
+    },
+    {
+      "split": "train",
+      "source": "ptbxl",
+      "label": 0,
+      "length_group": "long",
+      "n": 1612
+    },
+    {
+      "split": "train",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "long",
+      "n": 606
+    },
+    {
+      "split": "train",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "mid",
+      "n": 67
+    },
+    {
+      "split": "train",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "short",
+      "n": 502
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 0,
+      "length_group": "long",
+      "n": 1113
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 0,
+      "length_group": "mid",
+      "n": 121
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 0,
+      "length_group": "short",
+      "n": 7947
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 1,
+      "length_group": "long",
+      "n": 23
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 1,
+      "length_group": "short",
+      "n": 506
+    },
+    {
+      "split": "val",
+      "source": "ptbxl",
+      "label": 0,
+      "length_group": "long",
+      "n": 179
+    },
+    {
+      "split": "val",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "long",
+      "n": 61
+    },
+    {
+      "split": "val",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "mid",
+      "n": 7
+    },
+    {
+      "split": "val",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "short",
+      "n": 62
+    }
+  ],
+  "members": [
+    "chagas_model.ckpt"
+  ],
+  "wise_ft": [],
+  "best_by_stage": [
+    {
+      "stage1": {
+        "epoch": 0,
+        "val_challenge": 0.29893778452200304,
+        "val_auroc": 0.7694542527528111,
+        "val_auprc": 0.2708792959036137
+      },
+      "stage2": {
+        "epoch": 1,
+        "val_challenge": 0.33687405159332323,
+        "val_auroc": 0.7566684337833807,
+        "val_auprc": 0.32629429886689787
+      }
+    }
+  ]
+}

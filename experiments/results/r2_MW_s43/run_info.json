@@ -1,0 +1,253 @@
+{
+  "name": "r2_MW_s43",
+  "config_path": "/juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/configs/r2/r2_MW_s43.yaml",
+  "config_sha256": "d7bb11dc02134bb0f52c9f393d0153ebf4606850f8a9bda01758d9250695446a",
+  "seed": 43,
+  "git": {
+    "commit": "ca4432e43c67201cf9480a842c5ae7a772892ebb",
+    "branch": "improve/robust-finetune",
+    "dirty": false,
+    "dirty_paths": []
+  },
+  "environment": {
+    "hostname": "jagupard26.stanford.edu",
+    "slurm_job_id": "17684175",
+    "slurm_array_task_id": "7",
+    "python": "3.9.23",
+    "torch": "2.7.1+cu118",
+    "numpy": "1.26.4",
+    "cuda_available": true,
+    "gpu": "NVIDIA TITAN RTX",
+    "lightning": "2.5.2",
+    "pytorch_lightning": "2.5.2",
+    "pip_freeze_sha256": "6835e50d311ed3b540b8716a9df5e0ddb9073d8febe4adea915feb2e2ceb64d8",
+    "pip_freeze_lines": 226
+  },
+  "start_time": "2026-10-01T13:45:41-07:00",
+  "end_time": "2026-10-01T16:04:21-07:00",
+  "data_summary": [
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 0,
+      "length_group": "long",
+      "n": 9918
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 0,
+      "length_group": "mid",
+      "n": 1019
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 0,
+      "length_group": "short",
+      "n": 71490
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 1,
+      "length_group": "long",
+      "n": 211
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 1,
+      "length_group": "mid",
+      "n": 5
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 1,
+      "length_group": "short",
+      "n": 4489
+    },
+    {
+      "split": "train",
+      "source": "ptbxl",
+      "label": 0,
+      "length_group": "long",
+      "n": 1697
+    },
+    {
+      "split": "train",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "long",
+      "n": 604
+    },
+    {
+      "split": "train",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "mid",
+      "n": 65
+    },
+    {
+      "split": "train",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "short",
+      "n": 506
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 0,
+      "length_group": "long",
+      "n": 1183
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 0,
+      "length_group": "mid",
+      "n": 126
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 0,
+      "length_group": "short",
+      "n": 7850
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 1,
+      "length_group": "long",
+      "n": 29
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 1,
+      "length_group": "mid",
+      "n": 1
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 1,
+      "length_group": "short",
+      "n": 488
+    },
+    {
+      "split": "val",
+      "source": "ptbxl",
+      "label": 0,
+      "length_group": "long",
+      "n": 189
+    },
+    {
+      "split": "val",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "long",
+      "n": 63
+    },
+    {
+      "split": "val",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "mid",
+      "n": 9
+    },
+    {
+      "split": "val",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "short",
+      "n": 58
+    }
+  ],
+  "members": [
+    "chagas_model.ckpt"
+  ],
+  "wise_ft": [
+    {
+      "alphas": [
+        {
+          "stage": 2,
+          "epoch": 5,
+          "global_step": 7035,
+          "val_challenge": 0.2896090534979424,
+          "val_auroc": 0.7573316501318035,
+          "val_auprc": 0.25497832948394916,
+          "n": 9996,
+          "windows_per_record": 2.121748699479792,
+          "val_challenge_short": 0.29098360655737704,
+          "val_auroc_short": 0.741578782499739,
+          "val_n_pos_short": 488.0,
+          "val_challenge_long": 0.10344827586206896,
+          "val_auroc_long": 0.7418019646136356,
+          "val_n_pos_long": 29.0,
+          "wise_ft_alpha": 0.0,
+          "alpha": 0.0,
+          "threshold": 0.8314169645309448
+        },
+        {
+          "stage": 2,
+          "epoch": 5,
+          "global_step": 7035,
+          "val_challenge": 0.3256172839506173,
+          "val_auroc": 0.7794221019086409,
+          "val_auprc": 0.298578204757292,
+          "n": 9996,
+          "windows_per_record": 2.121748699479792,
+          "val_challenge_short": 0.3155737704918033,
+          "val_auroc_short": 0.7628158609167799,
+          "val_n_pos_short": 488.0,
+          "val_challenge_long": 0.1724137931034483,
+          "val_auroc_long": 0.7390765732940798,
+          "val_n_pos_long": 29.0,
+          "wise_ft_alpha": 0.5,
+          "alpha": 0.5,
+          "threshold": 0.8527207970619202
+        },
+        {
+          "stage": 2,
+          "epoch": 5,
+          "global_step": 7035,
+          "val_challenge": 0.3425925925925926,
+          "val_auroc": 0.7774928419362166,
+          "val_auprc": 0.32061714594748725,
+          "n": 9996,
+          "windows_per_record": 2.121748699479792,
+          "val_challenge_short": 0.3237704918032787,
+          "val_auroc_short": 0.762702177090947,
+          "val_n_pos_short": 488.0,
+          "val_challenge_long": 0.13793103448275862,
+          "val_auroc_long": 0.6488763226163756,
+          "val_n_pos_long": 29.0,
+          "wise_ft_alpha": 1.0,
+          "alpha": 1.0,
+          "threshold": 0.9328210949897766
+        }
+      ],
+      "selected_alpha": 1.0
+    }
+  ],
+  "best_by_stage": [
+    {
+      "stage1": {
+        "epoch": 0,
+        "val_challenge": 0.2896090534979424,
+        "val_auroc": 0.7573316501318035,
+        "val_auprc": 0.25497832948394916
+      },
+      "stage2": {
+        "epoch": 1,
+        "val_challenge": 0.3425925925925926,
+        "val_auroc": 0.7774928419362166,
+        "val_auprc": 0.32061714594748725
+      }
+    }
+  ]
+}

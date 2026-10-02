@@ -459,3 +459,22 @@ the `run_model.py` path to |Δprob| < 1e-4, and the unmodified `run_model.py` re
   Every round-1 model has a positive length-cue gap (+0.06 to +0.30).
 * Test suite: job 17682446 (CPU), **138 passed** (89 round-1 + 49 round-2).  `run_r2.sh` end to end on the smoke set:
   job 17682505, COMPLETED.  Round-2 array: **17682658** (launched 2026-10-01 at commit 65fb3bf).
+
+## Round 2 results (2026-10-01, SLURM array 17682658, table job 17688505; 3 seeds each; view A predictions)
+
+| Config | Pooled A TPR@5% | S7 TPR@5% (Δ vs B0 ± SE) | S7 AUROC (Δ ± SE) | S10+ AUROC (Δ ± SE) | S10 AUROC | length-cue gap |
+|---|---|---|---|---|---|---|
+| B0 baseline | 0.436 | 0.384 | 0.787 | 0.779 | 0.695 | +0.170 |
+| M1 matched negatives | 0.401 | 0.382 (−0.002 ± 0.005) | 0.786 (−0.001 ± 0.003) | 0.817 (+0.038 ± 0.009) | 0.733 | +0.036 |
+| W1 5 s windows | 0.428 | 0.380 (−0.004 ± 0.005) | 0.795 (+0.008 ± 0.002) | 0.835 (+0.056 ± 0.010) | 0.764 | +0.097 |
+| MW both, α=1 (fine-tuned) | 0.403 | 0.375 (−0.009 ± 0.005) | 0.795 (+0.008 ± 0.003) | 0.841 (+0.062 ± 0.011) | 0.773 | +0.009 |
+| MW both, α=0.5 | 0.383 | 0.370 (−0.014 ± 0.007) | 0.798 (+0.011 ± 0.004) | 0.834 (+0.054 ± 0.012) | 0.762 | +0.008 |
+| MW both, α=0 (frozen) | 0.354 | 0.343 (−0.041 ± 0.009) | 0.775 (−0.012 ± 0.006) | 0.797 (+0.017 ± 0.017) | 0.725 | +0.002 |
+
+3-seed ensembles (S7 TPR@5% / S10+ AUROC): B0 0.404 / 0.802; M1 0.400 / 0.841; W1 0.400 / 0.857; MW α=1 0.396 / 0.854.
+WiSE-FT selected α on validation: 0.5 (seed 42), 1.0 (seeds 43, 44).
+
+**PLAN_R2 §5 rule, applied mechanically (`R2_TABLE_A_rule.csv`): no configuration qualifies.** None raises S7 TPR@5%, and the
+S7 AUROC gain (+0.008) is under the 0.010 bar. What the remedies do: remove the length cue (gap 0.17 → 0.01), leave S7
+within ~1–2 SE, and raise AUROC in the 10 s format by 4–5.5 SE. Fine-tuning beats a frozen encoder once the cue is
+controlled (S7 0.375 vs 0.343). Interpolation (α=0.5) is not better than α=1. Shipped default unchanged.

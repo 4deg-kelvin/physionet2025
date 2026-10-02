@@ -1,0 +1,190 @@
+{
+  "name": "r2_M1_s43",
+  "config_path": "/juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/configs/r2/r2_M1_s43.yaml",
+  "config_sha256": "22420ed4a479809dcea35369bd97d36397476d52e37ce5a12529c0fcf0271099",
+  "seed": 43,
+  "git": {
+    "commit": "bce02f79e434d95e535e36d8700eff3119ba408d",
+    "branch": "improve/robust-finetune",
+    "dirty": false,
+    "dirty_paths": []
+  },
+  "environment": {
+    "hostname": "jagupard27.stanford.edu",
+    "slurm_job_id": "17682686",
+    "slurm_array_task_id": "1",
+    "python": "3.9.23",
+    "torch": "2.7.1+cu118",
+    "numpy": "1.26.4",
+    "cuda_available": true,
+    "gpu": "NVIDIA TITAN RTX",
+    "lightning": "2.5.2",
+    "pytorch_lightning": "2.5.2",
+    "pip_freeze_sha256": "6835e50d311ed3b540b8716a9df5e0ddb9073d8febe4adea915feb2e2ceb64d8",
+    "pip_freeze_lines": 226
+  },
+  "start_time": "2026-10-01T11:34:05-07:00",
+  "end_time": "2026-10-01T13:18:10-07:00",
+  "data_summary": [
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 0,
+      "length_group": "long",
+      "n": 9918
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 0,
+      "length_group": "mid",
+      "n": 1019
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 0,
+      "length_group": "short",
+      "n": 71490
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 1,
+      "length_group": "long",
+      "n": 211
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 1,
+      "length_group": "mid",
+      "n": 5
+    },
+    {
+      "split": "train",
+      "source": "code15",
+      "label": 1,
+      "length_group": "short",
+      "n": 4489
+    },
+    {
+      "split": "train",
+      "source": "ptbxl",
+      "label": 0,
+      "length_group": "long",
+      "n": 1697
+    },
+    {
+      "split": "train",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "long",
+      "n": 604
+    },
+    {
+      "split": "train",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "mid",
+      "n": 65
+    },
+    {
+      "split": "train",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "short",
+      "n": 506
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 0,
+      "length_group": "long",
+      "n": 1183
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 0,
+      "length_group": "mid",
+      "n": 126
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 0,
+      "length_group": "short",
+      "n": 7850
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 1,
+      "length_group": "long",
+      "n": 29
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 1,
+      "length_group": "mid",
+      "n": 1
+    },
+    {
+      "split": "val",
+      "source": "code15",
+      "label": 1,
+      "length_group": "short",
+      "n": 488
+    },
+    {
+      "split": "val",
+      "source": "ptbxl",
+      "label": 0,
+      "length_group": "long",
+      "n": 189
+    },
+    {
+      "split": "val",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "long",
+      "n": 63
+    },
+    {
+      "split": "val",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "mid",
+      "n": 9
+    },
+    {
+      "split": "val",
+      "source": "samitrop",
+      "label": 1,
+      "length_group": "short",
+      "n": 58
+    }
+  ],
+  "members": [
+    "chagas_model.ckpt"
+  ],
+  "wise_ft": [],
+  "best_by_stage": [
+    {
+      "stage1": {
+        "epoch": 0,
+        "val_challenge": 0.28703703703703703,
+        "val_auroc": 0.7485053249655305,
+        "val_auprc": 0.25382239898695236
+      },
+      "stage2": {
+        "epoch": 1,
+        "val_challenge": 0.341820987654321,
+        "val_auroc": 0.7708027927014163,
+        "val_auprc": 0.32408688590530915
+      }
+    }
+  ]
+}

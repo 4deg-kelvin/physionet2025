@@ -1,0 +1,5 @@
+view,n,challenge,auroc,diagnostic,neg_mean_short,neg_n_short,neg_mean_mid,neg_n_mid,neg_mean_long,neg_n_long,gap
+A,73300.0,0.07559553642479627,0.6465388942916601,duration-only baseline (1 = short record),,,,,,,
+B,68575.0,0.07904735223316063,0.676651187207524,duration-only baseline (1 = short record),,,,,,,
+A,,,,length-cue gap (CODE-15 negatives),0.5963971545185026,39608.0,0.5541697936505664,1273.0,0.5644552088955644,26358.0,0.03194194562293817
+C,,,,length-cue gap (CODE-15 negatives),0.5931389676905465,39608.0,0.5540101468469435,1273.0,0.556132752869214,26358.0,0.037006214821332484

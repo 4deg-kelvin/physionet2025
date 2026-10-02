@@ -381,3 +381,17 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - **Decision:** keep the definition (indicator of < 7.5 s, scored on the view); report 0.677 for view B and note the
   discrepancy. The acceptance script prints both lines.
 - **Status:** active.
+
+## D-2026-10-01-5 — Round-2 verdict: the pre-registered rule adopts nothing; 10 s-format gain flagged for the user
+- **Result (3 seeds; paired bootstrap vs B0):** S7 TPR@5%: M1 −0.002 ± 0.005, W1 −0.004 ± 0.005, MW(α=1) −0.009 ± 0.005.
+  S7 AUROC: W1 +0.008 ± 0.002, MW +0.008 ± 0.003 (bar was 0.010). S10+ AUROC: M1 +0.038 ± 0.009, W1 +0.056 ± 0.010,
+  MW +0.062 ± 0.011. Length-cue gap: 0.170 → 0.036 (M1), 0.097 (W1), 0.009 (MW). Pooled A falls for M1/MW (−0.035/−0.033),
+  as predicted. Frozen (α=0) is clearly worse than fine-tuned (S7 0.343 vs 0.375).
+- **Decision:** by PLAN_R2 §5, applied mechanically, no configuration replaces B0. The shipped default is unchanged.
+- **Flag (not acted on):** the rule made S10+ a guard, not a criterion. The hidden cohorts are all ~10 s recordings, and on
+  that format W1 and MW improve AUROC by 4–5.5 SE while S7 moves by ≤ 2 SE. Adopting W1 or MW would be a post-hoc
+  departure from the rule, so it is the user's call, not mine. If chosen: MW(α=1) as a 3-seed ensemble is the candidate that
+  both removes the cue and scores best on S10/S10+; W1 is the lower-risk option (pooled A −0.008 only).
+- **Infrastructure note:** array task 6 (MW seed 42) hit NODE_FAIL three times on jagupard27 and completed on its fourth
+  attempt on jagupard26; the table job was also held after a failed launch and re-run with `--exclude=jagupard27`.
+- **Status:** active; adoption question open.
