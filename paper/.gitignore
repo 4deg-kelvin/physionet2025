@@ -1,0 +1,9 @@
+__pycache__/
+# copied next to main.tex by build.sh
+/iopjournal.cls
+/orcid.pdf
+# template bundle as downloaded; only the class and the ORCID logo are needed to build
+iop/ioplatextemplate.zip
+iop/iopjournal-template.pdf
+iop/iopjournal-guidelines.pdf
+iop/figure1.pdf

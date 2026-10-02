@@ -383,8 +383,8 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - **Status:** active.
 
 ## D-2026-10-01-5 — Round-2 verdict: the pre-registered rule adopts nothing; 10 s-format gain flagged for the user
-- **Result (3 seeds; paired bootstrap vs B0):** S7 TPR@5%: M1 −0.002 ± 0.005, W1 −0.004 ± 0.005, MW(α=1) −0.009 ± 0.005.
-  S7 AUROC: W1 +0.008 ± 0.002, MW +0.008 ± 0.003 (bar was 0.010). S10+ AUROC: M1 +0.038 ± 0.009, W1 +0.056 ± 0.010,
+- **Result (3 seeds; paired bootstrap vs B0):** S7 TPR@5%: M1 −0.002 ± 0.005, W1 −0.004 ± 0.004, MW(α=1) −0.009 ± 0.005.
+  S7 AUROC: W1 +0.008 ± 0.002, MW +0.008 ± 0.003 (bar was 0.010). S10+ AUROC: M1 +0.037 ± 0.009, W1 +0.056 ± 0.010,
   MW +0.062 ± 0.011. Length-cue gap: 0.170 → 0.036 (M1), 0.097 (W1), 0.009 (MW). Pooled A falls for M1/MW (−0.035/−0.033),
   as predicted. Frozen (α=0) is clearly worse than fine-tuned (S7 0.343 vs 0.375).
 - **Decision:** by PLAN_R2 §5, applied mechanically, no configuration replaces B0. The shipped default is unchanged.
@@ -395,3 +395,23 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - **Infrastructure note:** array task 6 (MW seed 42) hit NODE_FAIL three times on jagupard27 and completed on its fourth
   attempt on jagupard26; the table job was also held after a failed launch and re-run with `--exclude=jagupard27`.
 - **Status:** active; adoption question open.
+
+## D-2026-10-01-6 — Manuscript: lead with the record-length shortcut, generate every number from saved results
+- **Request:** a LaTeX/PDF write-up of the work so far in the form expected by the *Physiological Measurement* focus
+  collection "Detection of Neglected Tropical Diseases from the Cardiac Signals" (IOP; deadline 31 Dec 2026).
+- **Decision (framing):** the paper's claim is the record-length label shortcut in CODE-15% and its effect on
+  evaluation, not a better model. The evidence supports that claim (prevalence 3.05% vs 0.24%; duration-only AUROC
+  0.677; pooled gain 0.412 → 0.436 vanishing within length groups) and does not support "our model improved": the
+  within-length single-model score is unchanged and the pre-registered round-2 rule adopted nothing. Negative results
+  (lower stage-2 LR, all negatives, WiSE-FT) are reported as such. The 10 s-format AUROC gain is stated as a
+  hypothesis that the hidden cohorts would have to confirm.
+- **Decision (format):** IOP `iopjournal` class, structured abstract (Objective / Approach / Main results /
+  Significance, 245 words; limit 250), author-year references, about 4,200 words of body text (limit 8,000).
+- **Decision (reproducibility):** `main.tex` holds no hand-typed result. `paper/make_assets.py` writes `numbers.tex`,
+  `tables/*.tex` and `figures/*.pdf` from `experiments/results`; `bash paper/build.sh` rebuilds the PDF without
+  running a model. Built with tectonic because the cluster has no TeX installation.
+- **Not mine to decide (left as `TODO(authors)`):** author list and order (placeholder: the CinC 2025 team), funding,
+  CRediT roles, repository URL, and the wording of the generative-AI disclosure in the acknowledgements.
+- **Corrections made while writing:** W1 S7 TPR@5% standard error is 0.004 (0.0045), not 0.005; M1 S10+ AUROC
+  difference is +0.037 (0.0375), not +0.038. README and D-2026-10-01-5 updated to match the table.
+- **Status:** draft; needs author review before submission.
