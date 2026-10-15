@@ -65,6 +65,8 @@ def test_committed_configs_are_exactly_what_make_configs_generates(tmp_path):
         assert committed.is_file(), f"{rel} is generated but not committed"
         assert committed.read_text() == (tmp_path / rel).read_text(), f"{rel} is stale"
     assert len([g for g in generated if str(g).startswith("r2/")]) == 9
+    assert len([g for g in generated if str(g).startswith("r3/")]) == 14
+    assert (tmp_path / "r3_smoke.yaml").is_file()
 
 
 def test_round_two_configs_change_only_their_flags():
@@ -81,6 +83,43 @@ def test_round_two_configs_change_only_their_flags():
             changed = {(sec, key) for sec in base for key in base[sec] if base[sec][key] != cfg[sec][key]}
             expected = set(fields) | ({("train", "seed")} if seed != 42 else set())
             assert changed == expected, (variant, seed, changed)
+
+
+def test_round_three_configs_change_only_their_flags():
+    import make_configs
+
+    base = _strip(ExperimentCfg.from_yaml(CONFIGS / "finalA_negcap.yaml").to_dict())
+    protocol = {("train", "val_protocol"), ("train", "monitor"), ("data", "cap_mode"),
+                ("data", "ptbxl_database_csv")}  # cap_prevalence 0.065 is already the default
+    windows = {("preprocess", "window_seconds"), ("preprocess", "window_mode")}
+    allowed = {
+        "B0": protocol,
+        "W1": protocol | windows,
+        "W1R": protocol | windows | {("train", "ranking_loss")},
+        "W1S": protocol | windows | {("data", "exclude_sources")},
+    }
+    seeds = {"B0": (42, 43, 44), "W1": (42, 43, 44, 45, 46), "W1R": (42, 43, 44), "W1S": (42, 43, 44)}
+    names = []
+    for variant, fields in allowed.items():
+        for seed in seeds[variant]:
+            name = f"r3_{variant}_s{seed}"
+            names.append(name)
+            cfg = ExperimentCfg.from_yaml(CONFIGS / "r3" / f"{name}.yaml")
+            assert cfg.train.val_protocol == "fixed" and cfg.train.monitor == "val_challenge_s7"
+            assert cfg.data.cap_mode == "prevalence" and cfg.data.cap_prevalence == 0.065
+            d = _strip(cfg.to_dict())
+            changed = {(sec, key) for sec in base for key in base[sec] if base[sec][key] != d[sec][key]}
+            expected = set(fields) | ({("train", "seed")} if seed != 42 else set())
+            assert changed == expected, (variant, seed, changed)
+    assert names == [name for name, _cfg in make_configs.r3_configs()]
+    assert len(names) == 14
+    smoke = ExperimentCfg.from_yaml(CONFIGS / "r3_smoke.yaml")
+    assert smoke.train.val_protocol == "fixed" and smoke.preprocess.window_mode == "multi"
+    # batch_r3.sh runs exactly these configs, in this order.
+    batch = (REPO / "experiments" / "batch_r3.sh").read_text()
+    listed = batch.split("CONFIGS=(", 1)[1].split(")", 1)[0].split()
+    assert listed == names
+    assert "#SBATCH --array=0-13%4" in batch
 
 
 # ---------------------------------------------------------------------------
@@ -184,13 +223,14 @@ def test_ensemble_members_split_the_time_budget(monkeypatch, tmp_path):
                for i in range(60)]
     seen = []
 
-    def fake_member(cfg_, datamodule, work_dir, *, seed, max_hours, deadline, verbose, log_dir=None, wise_dir=None):
+    def fake_member(cfg_, datamodule, work_dir, *, seed, max_hours, deadline, verbose, log_dir=None, wise_dir=None,
+                    monitor=None):
         seen.append((seed, max_hours))
         return SimpleNamespace(val_history=[])
 
     monkeypatch.setattr(T, "find_records", lambda folder: ["/x/0"])
     monkeypatch.setattr(T.L.Code15Table, "from_csv", classmethod(lambda cls, *a, **k: SimpleNamespace(__len__=lambda: 0)))
-    monkeypatch.setattr(T, "scan_records", lambda paths, cfg, table=None, workers=8: entries)
+    monkeypatch.setattr(T, "scan_records", lambda paths, cfg, table=None, ptbxl_patients=None, workers=8: entries)
     monkeypatch.setattr(T, "ChagasDataModule", lambda cfg, tr, va: None)
     monkeypatch.setattr(T, "_train_member", fake_member)
     monkeypatch.setattr(T, "_save_checkpoint", lambda module, path, cfg, extra_meta=None: Path(path).write_text("x"))

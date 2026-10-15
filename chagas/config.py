@@ -80,6 +80,14 @@ class PreprocessCfg:
     window_mode: str = "single"
     #: Cap on the number of inference windows per record in ``"multi"`` mode.
     max_windows: int = 4
+    #: Validation/inference window stride in ``"multi"`` mode.  ``None`` keeps the
+    #: round-2 placement (``K = ceil(T / window)`` evenly spaced windows).  A value
+    #: ``<= window_seconds`` starts a window every ``stride`` seconds from 0 and
+    #: right-aligns one more to the record end if it is not yet covered, keeping at most
+    #: ``max_windows`` (:func:`chagas.preprocessing.window_starts`).  Overlapping windows
+    #: averaged at test time are FjordNet's (CinC 2025, DOI 10.22489/CinC.2025.091).
+    #: Training is unaffected: it always takes one random crop per record.
+    window_stride_seconds: Optional[float] = None
     #: Training-time minimum usable duration.  (team)
     min_seconds: float = 2.0
     #: ``"butterworth"`` -- vectorised ``sosfiltfilt`` band-pass + 50/60 Hz notches
@@ -112,6 +120,14 @@ class PreprocessCfg:
             raise ValueError(f"window_mode must be single|multi, got {self.window_mode!r}")
         if int(self.max_windows) < 1:
             raise ValueError("max_windows must be >= 1")
+        if self.window_stride_seconds is not None:
+            stride = float(self.window_stride_seconds)
+            if self.window_mode != "multi":
+                raise ValueError("window_stride_seconds needs window_mode: multi")
+            if not 0.0 < stride <= float(self.window_seconds):
+                raise ValueError(
+                    f"window_stride_seconds must lie in (0, window_seconds], got {stride}"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +276,15 @@ class ModelCfg:
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
+#: Validation metrics a checkpoint can be selected on (``train.monitor``; all
+#: maximised).  The ``_s7`` / ``_s10p`` ones are computed inside the S7 and S10+ views
+#: of ``experiments/scoring.py`` (:func:`chagas.model.view_mask`) and are logged on every
+#: validation pass, NaN when the view has no positive or no negative.
+MONITOR_METRICS: Tuple[str, ...] = (
+    "val_challenge", "val_auroc", "val_auprc",
+    "val_challenge_s7", "val_auroc_s7", "val_auroc_s10p",
+)
+
 @dataclass
 class TrainCfg:
     """Two-stage fine-tuning, loss, sampling and budget (PLAN.md sections 3.1/3.2/3.7)."""
@@ -317,8 +342,21 @@ class TrainCfg:
 
     # -- validation, selection, threshold --------------------------------------
     val_fraction: float = 0.1
+    #: How the internal validation split is drawn (:func:`chagas.training.split_entries`).
+    #: ``"legacy"``: after the negative cap, stratified by source x label, seeded by
+    #: ``seed`` (rounds 1-2).  ``"fixed"``: before the cap, from every scanned record,
+    #: stratified by source x label x length group, seeded by ``val_seed`` -- so it stays
+    #: at natural prevalence and is identical across training seeds, caps and
+    #: ``match_negatives_on``, and PTB-XL records are grouped by patient when
+    #: ``ptbxl_database.csv`` is available.
+    val_protocol: str = "legacy"
+    #: Seed of the ``"fixed"`` validation split; ignored by ``"legacy"``.
+    val_seed: int = 12345
     #: Early stopping on the challenge score (Physiol. Meas. 2026 used patience 3).
     early_stop_patience: int = 3
+    #: Checkpoint selection / early stopping metric, one of :data:`MONITOR_METRICS`.  A
+    #: view metric falls back to ``val_challenge`` (with a warning) when the validation
+    #: split has no positive or no negative in that view.
     monitor: str = "val_challenge"
     #: Decision threshold = this quantile of the validation probabilities; the metric's
     #: own operating point is the top 5%, so 0.95 (audit defect D9).
@@ -358,6 +396,10 @@ class TrainCfg:
             raise ValueError("wise_ft='select' needs at least one alpha")
         if any(not 0.0 <= float(a) <= 1.0 for a in self.wise_ft_alphas):
             raise ValueError(f"wise_ft_alphas must lie in [0, 1], got {self.wise_ft_alphas}")
+        if self.val_protocol not in ("legacy", "fixed"):
+            raise ValueError(f"val_protocol must be legacy|fixed, got {self.val_protocol!r}")
+        if self.monitor not in MONITOR_METRICS:
+            raise ValueError(f"monitor must be one of {MONITOR_METRICS}, got {self.monitor!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +425,23 @@ class DataCfg:
     #: "subsample groups" remedy for shortcut learning (Idrissi et al., CLeaR 2022;
     #: Sagawa et al., ICLR 2020; Geirhos et al., Nat. Mach. Intell. 2020).
     match_negatives_on: str = "none"
+    #: How large the negative cap is.  ``"count"``: thin negatives so the total is
+    #: ``max_records`` (rounds 1-2).  ``"prevalence"``: keep every positive and
+    #: ``round(n_pos * (1 - p) / p)`` negatives, ``p = cap_prevalence``, so the training
+    #: prevalence no longer depends on the folder size; ``max_records`` is then unused.
+    #: The negatives are drawn as ``match_negatives_on`` says in both modes.
+    cap_mode: str = "count"
+    #: Target training prevalence of ``cap_mode: prevalence``.  0.065 is what the
+    #: shipped 100k cap gave on the full training split (6.5k positives in 100k).
+    cap_prevalence: float = 0.065
+    #: Sources dropped at scan time, from training AND validation (e.g. ``[ptbxl]``),
+    #: names as :func:`chagas.labels.normalise_source` returns them.
+    exclude_sources: Tuple[str, ...] = ()
+    #: PTB-XL's ``ptbxl_database.csv`` (``ecg_id -> patient_id``) for the patient-grouped
+    #: ``"fixed"`` validation split.  ``None``: look for it in the data folder (top level
+    #: or one directory down); if it is not there PTB-XL records stay one group each.
+    #: Relative paths resolve against the repo root.  Requires ``val_protocol: fixed``.
+    ptbxl_database_csv: Optional[str] = None
     #: Drop CODE-15 records listed in ``code15_label_issues.csv`` (team artefact).
     exclude_label_issues: bool = False
     label_issues_csv: str = "code15_label_issues.csv"
@@ -394,6 +453,13 @@ class DataCfg:
             raise ValueError(
                 f"match_negatives_on must be none|duration, got {self.match_negatives_on!r}"
             )
+        if self.cap_mode not in ("count", "prevalence"):
+            raise ValueError(f"cap_mode must be count|prevalence, got {self.cap_mode!r}")
+        if not 0.0 < float(self.cap_prevalence) < 1.0:
+            raise ValueError(f"cap_prevalence must lie in (0, 1), got {self.cap_prevalence}")
+        unknown = sorted(set(self.exclude_sources) - {"code15", "samitrop", "ptbxl", "unknown"})
+        if unknown:
+            raise ValueError(f"exclude_sources: unknown source names {unknown}")
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +477,11 @@ class ExperimentCfg:
     labels: LabelCfg = field(default_factory=LabelCfg)
     model: ModelCfg = field(default_factory=ModelCfg)
     train: TrainCfg = field(default_factory=TrainCfg)
+
+    def __post_init__(self) -> None:
+        if self.data.ptbxl_database_csv and self.train.val_protocol != "fixed":
+            # The legacy split must stay exactly what rounds 1-2 ran.
+            raise ValueError("data.ptbxl_database_csv is used only by train.val_protocol: fixed")
 
     # -- serialisation ---------------------------------------------------------
     def to_dict(self) -> Dict[str, Any]:
@@ -515,7 +586,9 @@ def default_config() -> ExperimentCfg:
     PMA gate and the ensemble are OFF until an ablation earns them.
 
     Round 2 (PLAN_R2.md): ``data.match_negatives_on``, ``preprocess.window_mode`` and
-    ``train.wise_ft`` all default to round-1 behaviour.  ``tests/test_config_r2.py``
+    ``train.wise_ft`` all default to round-1 behaviour; so do round 3's
+    ``train.val_protocol``, ``data.cap_mode``, ``data.exclude_sources`` and
+    ``preprocess.window_stride_seconds``.  ``tests/test_config_r2.py``
     asserts this object equals ``experiments/configs/finalA_negcap.yaml`` field for
     field (apart from name/description) so the shipped model cannot move by accident.
     """

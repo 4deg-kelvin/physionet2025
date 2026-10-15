@@ -415,3 +415,78 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - **Corrections made while writing:** W1 S7 TPR@5% standard error is 0.004 (0.0045), not 0.005; M1 S10+ AUROC
   difference is +0.037 (0.0375), not +0.038. README and D-2026-10-01-5 updated to match the table.
 - **Status:** draft; needs author review before submission.
+
+## D-2026-10-15-1 — Round 3: fixed validation protocol (pre-cap, seed-independent, length-stratified, S7 monitor)
+- **Finding:** the validation set was carved after the negative cap and shuffled with `train.seed`, so each seed
+  validated on different records at 6.5% prevalence (test and hidden data are at natural prevalence), validation was
+  length-matched whenever training was, checkpoints were selected on pooled `val_challenge` (inflated by the length
+  cue, D-2026-09-30-2), and PTB-XL was grouped per record at training time but per patient in the held-out split.
+- **Decision:** `train.val_protocol: fixed` for round 3 and the entry: split before the cap, `val_seed` 12345
+  independent of the training seed, strata source × label × length group, PTB-XL grouped by patient, monitor
+  `val_challenge_s7` with S7/S10+ metrics logged. Legacy remains the default so rounds 1–2 reproduce.
+- **Why:** seeds should differ only in initialisation and sampling; ensemble members should be selected on the same
+  data; checkpoint selection must not reward the shortcut. See PLAN_R3.md §2.
+- **Not changed:** the held-out test split (20% of patient groups, source × label strata, seed 12345). 31 runs are
+  scored on it and a re-split cannot create more 10 s positives (317 in CODE-15). Re-audited (SPLIT_AUDIT.md).
+- **Status:** active.
+
+## D-2026-10-15-2 — Round 3: S10+ AUROC becomes the primary metric, S7 TPR@5% the guard
+- **Decision:** PLAN_R3.md §5. The entry is to be scored on hidden cohorts that are all ~10 s recordings, so the 10 s
+  format is the primary view; S7 guards against losing within-format performance. Round 2 had S7 primary and S10+ as
+  a guard (PLAN_R2 §5), which adopted nothing although W1 gained +0.056 ± 0.010 S10+ AUROC.
+- **Why recorded:** changing the primary metric after seeing round-2 results is exactly the kind of move a
+  pre-registered rule exists to prevent. It is made before round 3 is launched, applies to new runs under a new
+  validation protocol with a re-run baseline, and the round-2 verdict stands as written (D-2026-10-01-5).
+- **Caveat carried:** S10+ includes SaMi-Trop positives, so a source cue can contribute; the per-source
+  mean-probability diagnostic is reported alongside and W1S is judged on it.
+- **Status:** active.
+
+## D-2026-10-15-3 — Prevalence-based negative cap for the entry
+- **Finding:** `data.max_records: 100000` is an absolute count. On our 292,885-record training split it gives 6.5%
+  training prevalence; on the organisers' full set (~366k records) it would give 8.2%, a setting never validated.
+- **Decision:** `data.cap_mode: prevalence`, `cap_prevalence: 0.065` for all round-3 runs and the entry; `count` stays
+  the default so committed configs reproduce. The negative budget is n_pos·(1−p)/p, drawn uniformly or length-matched
+  exactly as before.
+- **Status:** active.
+
+## D-2026-10-15-4 — Round 3 matrix: B0, W1 (5 seeds), W1R, W1S, W1-TTA
+- **Decision:** 14 training runs (PLAN_R3 §3–4). Chosen for expected gain per GPU-hour on the 10 s format: the ranking
+  loss acts on the ranking the score measures and already exists; PTB-XL removal tests the remaining source cue with
+  no new code; two extra W1 seeds settle the ensemble size; overlapping-window inference costs no training.
+- **Deferred:** stage-2 regularisation (lower LLRD factor, frozen bottom layers), distillation, ELR, domain heads.
+- **Infrastructure:** jagupard27 is healthy today (state allocated, no reason); it is not excluded. SLURM requeues on
+  NODE_FAIL as it did in round 2.
+- **Status:** active; outcome to be recorded after `aggregate.py --rule r3`.
+
+## D-2026-10-15-5 — Round-3 protocol implemented behind flags; implementation choices
+- **Flags (all default to round-2 behaviour; `default_config()` still equals `finalA_negcap.yaml`):**
+  `train.val_protocol: legacy|fixed` (+ `train.val_seed: 12345`), `train.monitor` now validated against
+  `config.MONITOR_METRICS` (adds `val_challenge_s7`, `val_auroc_s7`, `val_auroc_s10p`), `data.cap_mode: count|prevalence`
+  (+ `cap_prevalence: 0.065`), `data.exclude_sources: []`, `data.ptbxl_database_csv: null`,
+  `preprocess.window_stride_seconds: null`. Regenerating added only these 7 default-valued lines to the 29 generated YAMLs.
+- **Fixed split:** scan -> split (from all scanned records, `val_seed`) -> cap the training half only. Strata are
+  (source, any-positive, length group of the group's first record); each stratum shuffles with its own generator seeded by
+  `(val_seed, crc32(stratum))`, so excluding a source (W1S) removes exactly that source's records from validation and moves
+  nothing else. Legacy keeps the shared generator and the old key (pinned partition in `tests/test_val_protocol.py`).
+- **PTB-XL patient groups are gated to `fixed`.** Under legacy the strata are shuffled in sorted order by one generator;
+  PTB-XL's stratum comes before SaMi-Trop's, and `Generator.shuffle` of n items consumes n-1 draws, so grouping PTB-XL by
+  patient (17,400 train records -> 15,095 patients) would also change which SaMi-Trop positives are validated. The table is
+  not in `data_train_full` (WFDB files only), so r3 configs point `data.ptbxl_database_csv` at
+  `physionet2025/training_data/ptb-xl-.../ptbxl_database.csv`; with no path, `ptbxl_database.csv` is looked for at the top
+  of the data folder and one level down. Key = stem without `_hr` and leading zeros, as `build_split.py`.
+- **Prevalence cap** ignores `max_records`; negatives = `round(n_pos (1-p)/p)`, drawn as `match_negatives_on` says; if
+  fewer exist, all are kept.
+- **Per-view validation metrics** mirror `experiments/scoring.view_mask` in `chagas.model.view_mask` (scoring imports pandas);
+  equality is tested. They are NaN (logged) / `null` (manifest) when a view lacks a class. `resolve_monitor` checks the
+  validation entries before training: an unscorable view falls back to `val_challenge` with a `RuntimeWarning`, and the
+  manifest's new `split` block records the monitor actually used. `best_by_stage` is chosen by that monitor. WiSE-FT alpha
+  selection still uses `val_challenge` (unchanged; no r3 config uses WiSE-FT).
+- **Window stride lives in `preprocess`, not `model`** (all window settings and the only consumer, `preprocess_array`, are
+  there). Strided starts every `stride` from 0 plus a right-aligned last window; more than `max_windows` are thinned to evenly
+  spaced ones keeping the first and last. Test-time use is `predict_batched.py --window-stride` (not an environment variable
+  in `load_model`), so the judged path reads nothing new. `run_r3.sh` writes `predictions_{A,C}_tta.csv`, `report_tta.md`,
+  `report_tta_*.csv`; `aggregate.py` reads them with the run spec `run:tta` (per-run suffix rather than a global
+  `--predictions-suffix` flag, so one table can mix normal and TTA groups).
+- **`aggregate.py --rule r3`:** primary = S10+ AUROC delta > 1 SE with S7 TPR@5% delta >= -1 SE; secondary = S7 TPR@5% delta
+  > 1 SE with S10+ AUROC delta >= -1 SE; `--rule r2` stays the default.
+- **Status:** implemented and unit-tested; round-3 smoke and array not yet run.

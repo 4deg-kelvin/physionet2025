@@ -24,11 +24,18 @@ smoke set) is asserted by ``tests/test_predict_batched.py`` and by
 ``experiments/batch_r2_smoke.sh`` (against real ``run_model.py`` output files).
 
     python experiments/predict_batched.py -m MODEL_FOLDER -d DATA_FOLDER -o preds.csv
+
+``--window-stride S`` (round 3, ``window_mode: multi`` models only) re-scores a model
+with overlapping test-time windows every ``S`` seconds
+(``preprocess.window_stride_seconds``; :func:`chagas.preprocessing.window_starts`)
+instead of the placement it was validated with.  It is an experiment-side override on
+purpose: the judged ``load_model`` / ``run_model`` path reads nothing but the checkpoint.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import sys
 import time
@@ -49,7 +56,7 @@ from chagas.dataset import find_records  # noqa: E402
 from chagas.inference import ChagasPredictor, load_model, samples_to_arrays  # noqa: E402
 from chagas.preprocessing import Sample, preprocess_record  # noqa: E402
 
-__all__ = ["RecordDataset", "predict_folder", "predict_records"]
+__all__ = ["RecordDataset", "predict_folder", "predict_records", "with_window_stride"]
 
 
 class RecordDataset(Dataset):
@@ -110,6 +117,19 @@ def predict_records(
     })
 
 
+def with_window_stride(predictor: ChagasPredictor, seconds: float) -> ChagasPredictor:
+    """Make ``predictor`` place its test-time windows every ``seconds`` (validated).
+
+    Only the preprocessing config changes; members, thresholds and the logit/probability
+    averaging are untouched.  Raises :class:`ValueError` for a single-window model or a
+    stride outside ``(0, window_seconds]`` (the :class:`chagas.config.PreprocessCfg`
+    checks).
+    """
+    preprocess = dataclasses.replace(predictor.cfg.preprocess, window_stride_seconds=float(seconds))
+    predictor.cfg = dataclasses.replace(predictor.cfg, preprocess=preprocess)
+    return predictor
+
+
 def predict_folder(
     model_folder: str,
     data_folder: str,
@@ -119,15 +139,20 @@ def predict_folder(
     device: Optional[str] = None,
     limit: int = 0,
     verbose: bool = True,
+    window_stride: Optional[float] = None,
 ) -> pd.DataFrame:
     """Load the model in ``model_folder`` and score every record under ``data_folder``."""
     predictor = load_model(model_folder, verbose=verbose, device=device)
+    if window_stride is not None:
+        predictor = with_window_stride(predictor, window_stride)
     records = find_records(data_folder)
     if limit > 0:
         records = records[:limit]
     if verbose:
         print(f"[predict] {len(records)} records, batch {batch_size}, {num_workers} workers, "
-              f"window_mode={predictor.window_mode}, wise_ft_alpha={predictor.wise_ft_alphas}", flush=True)
+              f"window_mode={predictor.window_mode}, "
+              f"window_stride={predictor.cfg.preprocess.window_stride_seconds}, "
+              f"wise_ft_alpha={predictor.wise_ft_alphas}", flush=True)
     return predict_records(predictor, records, batch_size=batch_size, num_workers=num_workers)
 
 
@@ -141,6 +166,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--device", default=None)
     ap.add_argument("--cap-gib", type=float, default=14.5, help="CUDA allocator cap (T4 emulation)")
     ap.add_argument("--limit", type=int, default=0, help="score only the first N records (debug)")
+    ap.add_argument("--window-stride", type=float, default=None,
+                    help="test-time window stride in seconds (multi-window models only)")
     args = ap.parse_args(argv)
 
     if torch.cuda.is_available() and args.cap_gib > 0:
@@ -152,6 +179,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     df = predict_folder(
         args.model_folder, args.data_folder, batch_size=args.batch_size,
         num_workers=args.workers, device=args.device, limit=args.limit,
+        window_stride=args.window_stride,
     )
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

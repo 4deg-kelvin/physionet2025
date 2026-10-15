@@ -1,0 +1,21 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.5.1-cuda11.8-cudnn9-devel
+
+# Fallback when fakeroot emulation cannot run apt-get: a base image that already carries
+# python and torch==2.5.1 (cu118, the Dockerfile's pin), so %post needs only pip.  Checks the
+# dependency set and the entry scripts in a clean environment; it is NOT the Dockerfile image.
+
+%files
+    /juice2/scr2/kelvinkn/other_work/edwards/containers/stage /challenge
+    /juice2/scr2/kelvinkn/other_work/edwards/physionet2025/submission/mimic_iv_ecg_finetuned.pt /opt/ecgfm/mimic_iv_ecg_finetuned.pt
+
+%post
+    python -m pip install --upgrade pip
+    pip install gdown "transformers==4.53.0"
+    cd /challenge
+    pip install -r requirements_linux.txt
+    ln -sf /opt/ecgfm/mimic_iv_ecg_finetuned.pt /challenge/mimic_iv_ecg_finetuned.pt
+    python -m pip install -e fairseq-signals/
+
+%runscript
+    cd /challenge && exec "$@"

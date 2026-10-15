@@ -253,21 +253,42 @@ def window_and_pad(x: np.ndarray, window_size: int) -> Tuple[np.ndarray, int]:
     return out, int(n)
 
 
-def window_starts(n: int, window_size: int, max_windows: int = 4) -> np.ndarray:
+def window_starts(
+    n: int, window_size: int, max_windows: int = 4, stride: Optional[int] = None
+) -> np.ndarray:
     """Start sample of each inference window for a record of ``n`` samples.
 
-    ``K = min(max_windows, ceil(n / window_size))`` windows, evenly spaced from 0 to
-    ``n - window_size`` (rounded), so the first window starts at the first sample and
-    the last one ends at the last.  A record no longer than one window gets a single
-    window at 0 (it is then zero-padded and keeps its padding mask).  At 500 Hz and
-    5 s windows: 7.34 s -> 2 windows, 10 s -> 2, 10.24 s -> 3, 4 s -> 1, 23 s -> 4 (cap).
-    PLAN_R2.md section 3.2; window averaging at inference follows FjordNet (CinC 2025,
-    DOI 10.22489/CinC.2025.091).
+    ``stride=None`` (round 2): ``K = min(max_windows, ceil(n / window_size))`` windows,
+    evenly spaced from 0 to ``n - window_size`` (rounded), so the first window starts at
+    the first sample and the last one ends at the last.  At 500 Hz and 5 s windows:
+    7.34 s -> 2 windows, 10 s -> 2, 10.24 s -> 3, 4 s -> 1, 23 s -> 4 (cap).
+
+    ``stride`` (samples, round 3 test-time averaging): a window starts every ``stride``
+    samples from 0 while it fits, plus one right-aligned to the record end if the end
+    is not yet covered.  More than ``max_windows`` candidates are thinned to
+    ``max_windows`` evenly spaced ones that keep the first and the last, so both ends
+    stay covered.  At 500 Hz, 5 s windows and a 2.5 s stride: 7.34 s -> [0, 1170],
+    10 s -> [0, 1250, 2500], 10.24 s -> [0, 1250, 2500, 2620].
+
+    A record no longer than one window gets a single window at 0 either way (it is then
+    zero-padded and keeps its padding mask).  PLAN_R2.md section 3.2; window averaging
+    at inference follows FjordNet (CinC 2025, DOI 10.22489/CinC.2025.091).
     """
     if window_size <= 0:
         raise ValueError("window_size must be positive")
     if n <= window_size:
         return np.zeros(1, dtype=np.int64)
+    if stride is not None:
+        if int(stride) <= 0:
+            raise ValueError("stride must be positive")
+        starts = np.arange(0, n - window_size + 1, int(stride), dtype=np.int64)
+        if starts[-1] + window_size < n:
+            starts = np.append(starts, np.int64(n - window_size))
+        cap = max(1, int(max_windows))
+        if starts.size > cap:
+            keep = np.round(np.linspace(0, starts.size - 1, cap)).astype(np.int64)
+            starts = starts[keep]
+        return starts
     k = max(1, min(int(max_windows), int(math.ceil(n / float(window_size)))))
     if k == 1:
         return np.zeros(1, dtype=np.int64)
@@ -275,14 +296,15 @@ def window_starts(n: int, window_size: int, max_windows: int = 4) -> np.ndarray:
 
 
 def extract_windows(
-    x: np.ndarray, window_size: int, max_windows: int = 4
+    x: np.ndarray, window_size: int, max_windows: int = 4, stride: Optional[int] = None
 ) -> Tuple[np.ndarray, np.ndarray]:
     """``(12, T)`` -> ``(K, 12, window_size)`` windows and their ``(K,)`` valid lengths.
 
-    Only a record shorter than ``window_size`` is padded (prefix-valid, as
+    Window placement is :func:`window_starts` (``stride`` in samples, ``None`` = evenly
+    spaced).  Only a record shorter than ``window_size`` is padded (prefix-valid, as
     :func:`window_and_pad`); every window of a longer record is all signal.
     """
-    starts = window_starts(int(x.shape[-1]), window_size, max_windows)
+    starts = window_starts(int(x.shape[-1]), window_size, max_windows, stride)
     windows = []
     lengths = []
     for start in starts:
@@ -400,7 +422,11 @@ def preprocess_array(
             x, cfg.window_size, rng if rng is not None else np.random.default_rng()
         )
     else:
-        signal, valid_len = extract_windows(x, cfg.window_size, cfg.max_windows)
+        stride = (
+            None if cfg.window_stride_seconds is None
+            else max(1, int(round(float(cfg.window_stride_seconds) * cfg.sampling_rate)))
+        )
+        signal, valid_len = extract_windows(x, cfg.window_size, cfg.max_windows, stride)
     if not np.isfinite(signal).all():
         signal = np.nan_to_num(signal, nan=0.0, posinf=0.0, neginf=0.0)
     return signal.astype(np.float32, copy=False), valid_len

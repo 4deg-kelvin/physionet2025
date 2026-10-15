@@ -315,6 +315,77 @@ def r2_configs() -> List[Tuple[str, ExperimentCfg]]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Round 3: a fixed, natural-prevalence validation split (carved before the cap, PTB-XL
+# grouped by patient), a prevalence-based negative cap, and checkpoint selection on the
+# shortcut-blind S7 view, under which B0 / W1 / W1R / W1S are re-measured.  Every change
+# is a config flag; the shipped default is untouched.
+# ---------------------------------------------------------------------------
+R3_SEEDS: Tuple[int, ...] = (42, 43, 44)
+#: W1 gets two more seeds, so its seed variance is estimated from 5 runs.
+R3_W1_EXTRA_SEEDS: Tuple[int, ...] = (45, 46)
+#: PTB-XL's ``ecg_id -> patient_id`` table.  ``data_train_full`` holds only the WFDB
+#: records, so the fixed split is pointed at the copy the training folder was built from.
+PTBXL_DATABASE = (
+    "/juice2/scr2/kelvinkn/other_work/edwards/physionet2025/training_data/"
+    "ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3/ptbxl_database.csv"
+)
+
+
+def r3_base(cfg: ExperimentCfg) -> None:
+    """Round-3 protocol on top of finalA_negcap: fixed validation split (seed 12345,
+    stratified by source x label x length group, natural prevalence), all positives +
+    negatives to 6.5% prevalence, checkpoints selected on validation S7 TPR@5%."""
+    cfg.train.val_protocol = "fixed"
+    cfg.train.monitor = "val_challenge_s7"
+    cfg.data.cap_mode = "prevalence"
+    cfg.data.cap_prevalence = 0.065
+    cfg.data.ptbxl_database_csv = PTBXL_DATABASE
+
+
+def r3_ranking(cfg: ExperimentCfg) -> None:
+    """+ margin-ranking loss on hard negatives with the existing defaults (Hong, Chou &
+    Gonzalez, CinC 2025, eq. 2-3; ladder row 7)."""
+    cfg.train.ranking_loss = True
+    cfg.train.ranking_weight = 2.5
+    cfg.train.ranking_margin = 0.5
+    cfg.train.ranking_top_frac = 0.2
+
+
+def r3_no_ptbxl(cfg: ExperimentCfg) -> None:
+    """Drop PTB-XL (all negative, all 10 s, European) from training and validation, so
+    no all-negative source can be told apart by its recording format or population."""
+    cfg.data.exclude_sources = ("ptbxl",)
+
+
+R3_VARIANTS: List[Tuple[str, str, Sequence[Callable[[ExperimentCfg], None]], Tuple[int, ...]]] = [
+    ("B0", "round-3 protocol only", (), R3_SEEDS),
+    ("W1", "5 s windows", (r2_windows,), R3_SEEDS + R3_W1_EXTRA_SEEDS),
+    ("W1R", "5 s windows + hard-negative ranking loss", (r2_windows, r3_ranking), R3_SEEDS),
+    ("W1S", "5 s windows, PTB-XL excluded", (r2_windows, r3_no_ptbxl), R3_SEEDS),
+]
+
+
+def r3_configs() -> List[Tuple[str, ExperimentCfg]]:
+    """The 14 round-3 runs: ``r3_<variant>_s<seed>``, each finalA_negcap + r3_base + the variant."""
+    out: List[Tuple[str, ExperimentCfg]] = []
+    for variant, what, steps, seeds in R3_VARIANTS:
+        for seed in seeds:
+            cfg = _base()
+            final_a(cfg)
+            r3_base(cfg)
+            for step in steps:
+                step(cfg)
+            cfg.train.seed = seed
+            cfg.name = f"r3_{variant}_s{seed}"
+            cfg.description = (
+                f"Round 3 {variant}: shipped config + fixed val split, prevalence cap, S7 monitor; "
+                f"{what}; seed {seed}."
+            )
+            out.append((cfg.name, cfg))
+    return out
+
+
 def smoke(cfg: ExperimentCfg) -> None:
     """Two very short epochs on the 400-record smoke set (PLAN section 5 item 12)."""
     row5(cfg)
@@ -347,14 +418,29 @@ def smoke_r2(cfg: ExperimentCfg) -> None:
     cfg.description = "Round-2 smoke: matched negatives + 5 s multi-window + WiSE-FT select, tiny budget."
 
 
+def r3_smoke(cfg: ExperimentCfg) -> None:
+    """The round-3 contract smoke: r3_base + 5 s windows, tiny budget, 400-record set.
+
+    ``cap_prevalence = 0.4`` so the prevalence cap actually thins the smoke set's
+    negatives (at 0.065 it would keep all of them).
+    """
+    smoke(cfg)
+    r3_base(cfg)
+    r2_windows(cfg)
+    cfg.data.cap_prevalence = 0.4
+    cfg.name = "r3_smoke"
+    cfg.description = "Round-3 smoke: fixed val split + prevalence cap + S7 monitor + 5 s windows, tiny budget."
+
+
 def all_configs() -> List[Tuple[str, ExperimentCfg]]:
     """``(relative path without .yaml, config)`` for every generated file."""
     out: List[Tuple[str, ExperimentCfg]] = []
-    for name, fn in ROWS + [("smoke", smoke), ("smoke_r2", smoke_r2)]:
+    for name, fn in ROWS + [("smoke", smoke), ("smoke_r2", smoke_r2), ("r3_smoke", r3_smoke)]:
         cfg = _base()
         fn(cfg)
         out.append((name, cfg))
     out.extend((f"r2/{name}", cfg) for name, cfg in r2_configs())
+    out.extend((f"r3/{name}", cfg) for name, cfg in r3_configs())
     return out
 
 

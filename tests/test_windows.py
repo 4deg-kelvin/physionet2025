@@ -171,3 +171,77 @@ def test_record_logit_is_the_mean_of_its_window_logits(shared_module, real_recor
         ])
     assert joint.shape == (1,)
     assert torch.allclose(joint[0], per_window.mean(), atol=1e-5), (joint, per_window)
+
+
+# ---------------------------------------------------------------------------
+# round 3: overlapping test-time windows (``preprocess.window_stride_seconds``)
+# ---------------------------------------------------------------------------
+def _round2_window_starts(n, window_size, max_windows):
+    """Verbatim round-2 placement, the reference for ``stride=None``."""
+    import math
+
+    if n <= window_size:
+        return np.zeros(1, dtype=np.int64)
+    k = max(1, min(int(max_windows), int(math.ceil(n / float(window_size)))))
+    if k == 1:
+        return np.zeros(1, dtype=np.int64)
+    return np.round(np.linspace(0.0, float(n - window_size), k)).astype(np.int64)
+
+
+def test_stride_none_is_the_round_two_placement():
+    for n in list(range(1, 12_000, 37)) + [3670, 5000, 5120, 11500]:
+        for cap in (1, 2, 4, 8):
+            assert np.array_equal(window_starts(n, W, cap), _round2_window_starts(n, W, cap)), (n, cap)
+            assert np.array_equal(window_starts(n, W, cap, None), _round2_window_starts(n, W, cap))
+
+
+@pytest.mark.parametrize(
+    "seconds, expected",
+    [
+        (7.34, [0, 1170]),                 # 3670 samples: one strided window + the right-aligned one
+        (10.0, [0, 1250, 2500]),           # ends exactly at the record end, nothing appended
+        (10.24, [0, 1250, 2500, 2620]),    # 5120 samples: + right-aligned
+        (4.0, [0]),
+    ],
+)
+def test_strided_window_starts(seconds, expected):
+    n = int(round(seconds * FS))
+    assert window_starts(n, W, max_windows=4, stride=W // 2).tolist() == expected
+
+
+def test_strided_windows_cover_the_record_and_respect_max_windows():
+    for n in range(W + 1, 20_000, 113):
+        for cap in (2, 3, 4, 6):
+            starts = window_starts(n, W, cap, stride=W // 2)
+            assert 1 <= starts.size <= cap
+            assert starts[0] == 0 and starts[-1] == n - W, "first and last windows are kept"
+            assert (np.diff(starts) > 0).all() and (starts + W <= n).all()
+            uncapped = window_starts(n, W, 10_000, stride=W // 2)
+            covered = np.zeros(n, dtype=bool)
+            for s in uncapped:
+                covered[s:s + W] = True
+            assert covered.all(), n
+            assert set(starts.tolist()) <= set(uncapped.tolist())
+    with pytest.raises(ValueError):
+        window_starts(6000, W, 4, stride=0)
+
+
+def test_window_stride_flows_through_preprocess_array_and_is_validated():
+    cfg = _multi_cfg()
+    x = np.random.default_rng(1).normal(size=(12, 4096))  # 10.24 s at 400 Hz -> 5120 at 500 Hz
+    default, _ = preprocess_array(x, 400.0, cfg.preprocess, train=False)
+    assert default.shape[0] == 3
+    cfg.preprocess.window_stride_seconds = 2.5
+    strided, lengths = preprocess_array(x, 400.0, cfg.preprocess, train=False)
+    assert strided.shape == (4, 12, W) and lengths.tolist() == [W] * 4
+    assert np.array_equal(strided[0], default[0]) and np.array_equal(strided[-1], default[-1])
+    one, valid = preprocess_array(x, 400.0, cfg.preprocess, train=True, aug=cfg.aug,
+                                  rng=np.random.default_rng(0))
+    assert one.shape == (12, W) and valid == W, "training still takes one random crop"
+    from chagas.config import ExperimentCfg
+
+    for bad in ({"window_mode": "multi", "window_seconds": 5.0, "window_stride_seconds": 6.0},
+                {"window_mode": "multi", "window_seconds": 5.0, "window_stride_seconds": 0.0},
+                {"window_stride_seconds": 2.5}):  # single mode has no windows to stride
+        with pytest.raises(ValueError):
+            ExperimentCfg.from_dict({"preprocess": bad})

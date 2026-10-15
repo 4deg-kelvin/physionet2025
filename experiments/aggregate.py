@@ -12,12 +12,15 @@ view (``S7``, ``S10``, ``S10+``, ``A``, ``B``; see ``experiments/scoring.py``):
   of a difference reflects only model-to-model variation.  Reported for the seed means
   and for the ensembles;
 * the **length-cue gap** (CODE-15 negatives, short minus long mean probability), mean +/- sd;
-* the pre-registered decision rule of PLAN_R2.md section 5, when ``S7`` and ``S10+`` are
-  among the views.
+* a pre-registered decision rule, when ``S7`` and ``S10+`` are among the views:
+  ``--rule r2`` (default) is PLAN_R2.md section 5, ``--rule r3`` the round-3 rule
+  (:func:`decision_rule_r3`).
 
 Runs are directories under ``--results-dir`` holding ``predictions_A.csv`` /
 ``predictions_C.csv`` as written by ``eval_report.py``; a WiSE-FT mixture is a
-sub-directory, e.g. ``r2_MW_s42/alpha0.50``.
+sub-directory, e.g. ``r2_MW_s42/alpha0.50``.  ``run:suffix`` reads
+``predictions_<A|C>_<suffix>.csv`` from the run instead, e.g. ``r3_W1_s42:tta`` for the
+overlapping-window re-scoring that ``run_r3.sh`` writes.
 
     python experiments/aggregate.py \\
         --group B0=finalA_negcap,lrsweep_lr2e5_s43,lrsweep_lr2e5_s44 \\
@@ -72,10 +75,16 @@ def parse_group(spec: str) -> Tuple[str, List[str]]:
     return name.strip(), names
 
 
+def predictions_file(results_dir: Path, run: str, which: str) -> Path:
+    """``run`` -> its predictions CSV; ``run:suffix`` -> ``predictions_<which>_<suffix>.csv``."""
+    name, _, suffix = run.partition(":")
+    path = Path(name) if Path(name).is_absolute() else results_dir / name
+    return path / (f"predictions_{which}_{suffix}.csv" if suffix else f"predictions_{which}.csv")
+
+
 def load_run(results_dir: Path, run: str, which: str, durations: Optional[pd.DataFrame]) -> pd.DataFrame:
-    """One run's saved predictions (``predictions_<which>.csv``), with durations attached."""
-    path = Path(run) if Path(run).is_absolute() else results_dir / run
-    df = pd.read_csv(path / f"predictions_{which}.csv", dtype={"stem": str}, low_memory=False)
+    """One run's saved predictions (:func:`predictions_file`), with durations attached."""
+    df = pd.read_csv(predictions_file(results_dir, run, which), dtype={"stem": str}, low_memory=False)
     if "prob_filled" not in df.columns:
         df["prob_filled"] = df["prob"].fillna(-1.0)
     if durations is not None:
@@ -238,6 +247,58 @@ def decision_rule(rows: pd.DataFrame, gaps: pd.DataFrame, baseline: str) -> pd.D
     return pd.DataFrame(out)
 
 
+def decision_rule_r3(rows: pd.DataFrame, gaps: pd.DataFrame, baseline: str) -> pd.DataFrame:
+    """The round-3 rule, applied mechanically to seed means.
+
+    Round 2 made the 10 s format a guard only, and every remedy that removed the length
+    cue moved S10+ AUROC by 4-5.5 SE while S7 stayed within noise (DECISIONS.md
+    D-2026-10-01-5).  The hidden cohorts are ~10 s recordings, so round 3 makes S10+ the
+    primary criterion:
+
+    * **primary**: S10+ AUROC gain > its paired SE, and S7 TPR@5% not lower by more than
+      its SE;
+    * **secondary**: S7 TPR@5% gain > its SE, and S10+ AUROC not lower by more than its SE.
+
+    ``qualifies`` = primary or secondary.  The length-cue gap is reported, not required.
+    """
+    out = []
+    by = rows.set_index(["group", "view"])
+    gap_by = gaps.set_index("group")
+    base_gap = float(gap_by.loc[baseline, "gap_mean"])
+    for name in rows["group"].unique():
+        if name == baseline or (name, "S7") not in by.index or (name, "S10+") not in by.index:
+            continue
+        s7, s10 = by.loc[(name, "S7")], by.loc[(name, "S10+")]
+        s10_gain = s10["d_auroc"] > s10["d_auroc_se"]
+        s10_not_lower = s10["d_auroc"] >= -s10["d_auroc_se"]
+        s7_gain = s7["d_challenge"] > s7["d_challenge_se"]
+        s7_not_lower = s7["d_challenge"] >= -s7["d_challenge_se"]
+        primary = bool(s10_gain and s7_not_lower)
+        secondary = bool(s7_gain and s10_not_lower)
+        out.append({
+            "group": name,
+            "S10+_auroc_gain_gt_se": bool(s10_gain),
+            "S7_tpr_not_lower": bool(s7_not_lower),
+            "S7_tpr_gain_gt_se": bool(s7_gain),
+            "S10+_auroc_not_lower": bool(s10_not_lower),
+            "gap_shrinks": bool(float(gap_by.loc[name, "gap_mean"]) < base_gap),
+            "primary": primary,
+            "secondary": secondary,
+            "qualifies": primary or secondary,
+            "S10+_d_auroc": float(s10["d_auroc"]),
+            "S7_d_challenge": float(s7["d_challenge"]),
+        })
+    return pd.DataFrame(out)
+
+
+#: ``--rule`` -> (rule function, markdown heading).
+RULES = {
+    "r2": (decision_rule, "PLAN_R2.md §5 decision rule (mechanical; seed means)"),
+    "r3": (decision_rule_r3, "Round-3 decision rule (mechanical; seed means): primary = S10+ AUROC, "
+                             "secondary = S7 TPR@5%"),
+}
+
+
 # ---------------------------------------------------------------------------
 # output
 # ---------------------------------------------------------------------------
@@ -254,7 +315,7 @@ def _d(point: float, se: float) -> str:
 
 
 def to_markdown(rows: pd.DataFrame, gaps: pd.DataFrame, rule: pd.DataFrame, baseline: str,
-                which: str, n_boot: int) -> str:
+                which: str, n_boot: int, rule_name: str = "r2") -> str:
     lines = [f"# Aggregate ({which} predictions; baseline `{baseline}`; {n_boot} paired resamples)", ""]
     lines.append("TPR@5% = challenge score.  `mean ± sd` over seeds; ensemble = mean of probabilities "
                  "with a 95% bootstrap CI; Δ = difference vs the baseline ± paired-bootstrap SE.")
@@ -281,7 +342,7 @@ def to_markdown(rows: pd.DataFrame, gaps: pd.DataFrame, rule: pd.DataFrame, base
     for _, r in gaps.iterrows():
         lines.append(f"| {r['group']} | {_pm(r['gap_mean'], r['gap_sd'])} | {r['ens_gap']:.4f} |")
     if not rule.empty:
-        lines += ["", "## PLAN_R2.md §5 decision rule (mechanical; seed means)", "",
+        lines += ["", f"## {RULES[rule_name][1]}", "",
                   "```", rule.to_string(index=False), "```"]
     return "\n".join(lines) + "\n"
 
@@ -296,8 +357,11 @@ def run(
     durations_path: Optional[str] = None,
     n_boot: int = S.DEFAULT_N_BOOT,
     seed: int = S.DEFAULT_SEED,
+    rule: str = "r2",
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str]:
     """Load, aggregate and format; returns ``(rows, gaps, rule, markdown)``."""
+    if rule not in RULES:
+        raise ValueError(f"unknown rule {rule!r}; choose from {sorted(RULES)}")
     durations = S.load_durations(durations_path)
     groups = []
     for spec in specs:
@@ -309,13 +373,14 @@ def run(
         rows.extend(aggregate_view(groups, baseline, view, n_boot=n_boot, seed=seed))
     table = pd.DataFrame(rows)
     gaps = pd.DataFrame(length_gap_rows(groups))
-    rule = decision_rule(table, gaps, baseline) if {"S7", "S10+"} <= set(views) else pd.DataFrame()
-    return table, gaps, rule, to_markdown(table, gaps, rule, baseline, which, n_boot)
+    decided = RULES[rule][0](table, gaps, baseline) if {"S7", "S10+"} <= set(views) else pd.DataFrame()
+    return table, gaps, decided, to_markdown(table, gaps, decided, baseline, which, n_boot, rule)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--group", action="append", required=True, help="NAME=run1,run2,... (repeatable)")
+    ap.add_argument("--group", action="append", required=True,
+                    help="NAME=run1,run2[:suffix],... (repeatable)")
     ap.add_argument("--baseline", required=True, help="name of the baseline group")
     ap.add_argument("--which", default="A", choices=("A", "C"), help="which prediction set")
     ap.add_argument("--views", default=",".join(DEFAULT_VIEWS))
@@ -323,6 +388,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--durations", default=str(S.DEFAULT_DURATIONS))
     ap.add_argument("--n-boot", type=int, default=S.DEFAULT_N_BOOT)
     ap.add_argument("--seed", type=int, default=S.DEFAULT_SEED)
+    ap.add_argument("--rule", default="r2", choices=sorted(RULES), help="decision rule (default r2)")
     ap.add_argument("--out", default="", help="output prefix: writes <out>.md, <out>.csv, <out>_gap.csv")
     args = ap.parse_args(argv)
 
@@ -330,7 +396,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     table, gaps, rule, md = run(
         args.group, args.baseline, which=args.which, views=views,
         results_dir=Path(args.results_dir), durations_path=args.durations,
-        n_boot=args.n_boot, seed=args.seed,
+        n_boot=args.n_boot, seed=args.seed, rule=args.rule,
     )
     print(md)
     if args.out:

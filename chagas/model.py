@@ -38,7 +38,7 @@ import torch.utils.checkpoint
 from torch import Tensor, nn
 
 from . import metrics as M
-from .config import CONV_DOWNSAMPLE, ExperimentCfg
+from .config import CONV_DOWNSAMPLE, MONITOR_METRICS, ExperimentCfg
 from .lengths import LENGTH_GROUP_IDS
 from .losses import (
     GradientReversal,
@@ -142,6 +142,69 @@ def within_length_metrics(
     return out
 
 
+#: Round-3 validation metrics and the ``experiments/scoring.py`` view each is computed in.
+VIEW_METRICS: Dict[str, str] = {
+    "val_challenge_s7": "S7",
+    "val_auroc_s7": "S7",
+    "val_auroc_s10p": "S10+",
+}
+assert set(VIEW_METRICS) <= set(MONITOR_METRICS)
+
+
+def view_mask(
+    view: str,
+    labels: np.ndarray,
+    length_groups: np.ndarray,
+    source_ids: np.ndarray,
+    code15_id: int = 0,
+) -> np.ndarray:
+    """Records of test view ``view`` among validation records, as boolean mask.
+
+    The same definitions as ``experiments/scoring.view_mask`` (which needs pandas, so it
+    is mirrored here rather than imported; ``tests/test_val_protocol.py`` asserts the
+    two agree): ``S7`` = CODE-15 and shorter than 7.5 s; ``S10`` = CODE-15 and at least
+    9.9 s; ``S10+`` = at least 9.9 s and (CODE-15 or positive).  Length groups come
+    from :mod:`chagas.lengths`, whose thresholds scoring also uses; CODE-15 is source id
+    0, which also covers ``unknown`` (DECISIONS.md D-2026-10-01-2).
+    """
+    groups = np.asarray(length_groups)
+    code15 = np.asarray(source_ids) == code15_id
+    if view == "S7":
+        return code15 & (groups == LENGTH_GROUP_IDS["short"])
+    long_ = groups == LENGTH_GROUP_IDS["long"]
+    if view == "S10":
+        return code15 & long_
+    if view == "S10+":
+        return long_ & (code15 | (np.asarray(labels) == 1))
+    raise KeyError(f"unknown view {view!r}")
+
+
+def view_metrics(
+    labels: np.ndarray,
+    probs: np.ndarray,
+    length_groups: Optional[np.ndarray],
+    source_ids: Optional[np.ndarray],
+) -> Dict[str, float]:
+    """Every :data:`VIEW_METRICS` entry on the validation predictions; NaN if not scorable.
+
+    A view with no positive or no negative (small smoke sets) gives NaN rather than an
+    error, so it is always logged; :func:`chagas.training.resolve_monitor` makes sure a
+    NaN metric is never the one being monitored.
+    """
+    out = {name: float("nan") for name in VIEW_METRICS}
+    if length_groups is None or source_ids is None or labels.size == 0:
+        return out
+    for name, view in VIEW_METRICS.items():
+        mask = view_mask(view, labels, length_groups, source_ids)
+        y = labels[mask]
+        if y.size == 0 or np.unique(y).size < 2:
+            continue
+        p = probs[mask]
+        metric = M.challenge_score(y, p) if name.startswith("val_challenge") else M.compute_auc(y, p)[0]
+        out[name] = float(metric)
+    return out
+
+
 def format_val_line(record: Dict[str, Any]) -> str:
     """The one-line validation summary printed to the SLURM log.
 
@@ -160,6 +223,11 @@ def format_val_line(record: Dict[str, Any]) -> str:
                 f" {name}: challenge={record[f'val_challenge_{name}']:.4f}"
                 f" auroc={record[f'val_auroc_{name}']:.4f}"
             )
+    views = [(k, record.get(k)) for k in VIEW_METRICS]
+    if any(v is not None and np.isfinite(v) for _k, v in views):
+        line += " views: " + " ".join(
+            f"{k[len('val_'):]}={v:.4f}" for k, v in views if v is not None and np.isfinite(v)
+        )
     if record.get("windows_per_record", 1.0) != 1.0:
         line += f" windows/record={record['windows_per_record']:.2f}"
     if "wise_ft_alpha" in record:
@@ -643,6 +711,11 @@ class ChagasModule(pl.LightningModule):
         within = within_length_metrics(labels, probs, groups, sources)
         for key, value in within.items():
             self.log(key, value, batch_size=n)
+        # Round 3: the S7 / S10+ test views on validation, always logged (NaN when a view
+        # has no positive or no negative) because ``train.monitor`` may select on them.
+        views = view_metrics(labels, probs, groups, sources)
+        for key, value in views.items():
+            self.log(key, value, batch_size=n)
         windows_per_record = float(np.concatenate(self._val_windows).mean()) if self._val_windows else 1.0
         self.log("val_windows_per_record", windows_per_record, batch_size=n)
         if self.wise_ft_alpha is not None:
@@ -660,6 +733,8 @@ class ChagasModule(pl.LightningModule):
                 "windows_per_record": windows_per_record,
             }
             record.update({k: float(v) for k, v in within.items()})
+            # NaN -> None so chagas_manifest.json stays strict JSON.
+            record.update({k: (float(v) if np.isfinite(v) else None) for k, v in views.items()})
             if self.wise_ft_alpha is not None:
                 record["wise_ft_alpha"] = float(self.wise_ft_alpha)
             self.val_history.append(record)

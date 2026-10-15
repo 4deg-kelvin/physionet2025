@@ -7,6 +7,10 @@ data:
   data_folder: null
   max_records: 100000
   match_negatives_on: duration
+  cap_mode: count
+  cap_prevalence: 0.065
+  exclude_sources: []
+  ptbxl_database_csv: null
   exclude_label_issues: false
   label_issues_csv: code15_label_issues.csv
   scan_workers: 8
@@ -15,6 +19,7 @@ preprocess:
   window_seconds: 10.0
   window_mode: single
   max_windows: 4
+  window_stride_seconds: null
   min_seconds: 2.0
   clean: butterworth
   bandpass_low_hz: 0.5
@@ -141,6 +146,8 @@ train:
   ranking_margin: 0.5
   ranking_top_frac: 0.2
   val_fraction: 0.1
+  val_protocol: legacy
+  val_seed: 12345
   early_stop_patience: 3
   monitor: val_challenge
   threshold_quantile: 0.95

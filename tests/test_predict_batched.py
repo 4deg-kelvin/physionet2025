@@ -11,6 +11,7 @@ the files the unmodified ``run_model.py`` wrote with a trained model.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -68,3 +69,20 @@ def test_batched_predictions_equal_the_run_model_path(tmp_path, checkpoint_path,
     delta = np.abs(probs - per_record).max()
     assert delta < 1e-4, delta
     assert np.array_equal(batched["binary"].to_numpy(), (probs > predictor.threshold).astype(float))
+
+
+def test_window_stride_override_changes_only_the_preprocessing_config():
+    """``predict_batched.py --window-stride`` (round 3 test-time windows), no backbone needed."""
+    from chagas.inference import ChagasPredictor
+    from predict_batched import with_window_stride
+
+    cfg = default_config()
+    cfg.preprocess.window_seconds = 5.0
+    cfg.preprocess.window_mode = "multi"
+    predictor = ChagasPredictor([SimpleNamespace(threshold=0.5)], cfg, torch.device("cpu"))  # members untouched
+    with_window_stride(predictor, 2.5)
+    assert predictor.cfg.preprocess.window_stride_seconds == 2.5
+    assert predictor.cfg.preprocess.window_seconds == 5.0 and predictor.window_mode == "multi"
+    assert cfg.preprocess.window_stride_seconds is None, "the loaded config object is not mutated"
+    with pytest.raises(ValueError):
+        with_window_stride(ChagasPredictor([SimpleNamespace(threshold=0.5)], default_config(), torch.device("cpu")), 2.5)

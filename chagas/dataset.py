@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pytorch_lightning as pl
@@ -95,19 +95,26 @@ def scan_records(
     cfg: ExperimentCfg,
     *,
     table: Optional[L.Code15Table] = None,
+    ptbxl_patients: Optional[Mapping[str, str]] = None,
     workers: int = 8,
 ) -> List[RecordEntry]:
     """Read every header once and build the label/group metadata for the whole split.
 
     Done up front rather than per ``__getitem__`` because the soft label of a CODE-15
     record depends on its patient's *other* exams (Hong et al. 2025 eq. 1), which is not
-    knowable from one record in isolation.
+    knowable from one record in isolation.  Records of a source in
+    ``cfg.data.exclude_sources`` are dropped here, before anything else sees them.
+    ``ptbxl_patients`` (:func:`chagas.labels.load_ptbxl_patients`) groups PTB-XL records
+    by patient; ``None`` keeps one group per record (rounds 1-2).
     """
     if table is None:
         table = L.Code15Table.from_csv(cfg.code15_exams_path, cfg.labels.aux_columns)
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         raw = [r for r in pool.map(_read_header_meta, paths) if r is not None]
+    excluded = set(cfg.data.exclude_sources)
+    if excluded:
+        raw = [r for r in raw if r[3] not in excluded]
 
     stats = None
     if cfg.labels.soft_labels and cfg.labels.multi_report:
@@ -131,7 +138,7 @@ def scan_records(
                 source=source,
                 label_hard=int(label),
                 label_soft=float(label if soft is None else soft),
-                group=L.patient_group(record_id, source, table),
+                group=L.patient_group(record_id, source, table, ptbxl_patients),
                 source_id=L.SOURCE_IDS.get(source, 0),
                 aux=aux,
                 aux_mask=aux_mask,

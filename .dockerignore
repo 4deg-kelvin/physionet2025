@@ -49,3 +49,9 @@ EDA/
 random_forest/
 transformers-autoencoder/
 xgboost-cleandata/
+
+# Experiment artefacts and the manuscript are never needed inside the container.
+experiments/results/
+experiments/logs/
+paper/
+*.sif

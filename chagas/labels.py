@@ -31,6 +31,10 @@ __all__ = [
     "soft_label",
     "aux_targets",
     "patient_group",
+    "PTBXL_DATABASE_FILENAME",
+    "ptbxl_record_key",
+    "find_ptbxl_database",
+    "load_ptbxl_patients",
     "SOURCE_IDS",
 ]
 
@@ -350,16 +354,76 @@ def aux_targets(
     return values, mask
 
 
-def patient_group(record_id: str, source: str, table: Optional[Code15Table]) -> str:
+def patient_group(
+    record_id: str,
+    source: str,
+    table: Optional[Code15Table],
+    ptbxl_patients: Optional[Mapping[str, str]] = None,
+) -> str:
     """Grouping key for the patient-grouped split (PLAN.md section 3.7).
 
     CODE-15 has ~1.48 exams per patient, so an exam-level split leaks the same patient
     into both halves; the repo's own ``train_val_test_sets.csv`` leaks 45.5% of test
-    exams' patients into train.  Records whose patient is unknown are their own group,
-    which is conservative (it can only reduce leakage, never create it).
+    exams' patients into train.  PTB-XL (21,799 records of 18,869 patients) is grouped
+    by ``patient_id`` when ``ptbxl_patients`` (:func:`load_ptbxl_patients`) is given,
+    as the held-out split ``fixbranch_test/build_split.py`` does.  Records whose
+    patient is unknown are their own group, which is conservative (it can only reduce
+    leakage, never create it).
     """
     if source == "code15" and table is not None:
         pid = table.patient_id(record_id)
         if pid is not None:
             return f"c15_{pid}"
+    if source == "ptbxl" and ptbxl_patients:
+        pid = ptbxl_patients.get(ptbxl_record_key(record_id))
+        if pid:
+            return f"ptb_{pid}"
     return f"rec_{source}_{record_id}"
+
+
+#: PTB-XL's metadata table (Wagner et al., Sci. Data 2020), ``ecg_id -> patient_id``.
+PTBXL_DATABASE_FILENAME = "ptbxl_database.csv"
+
+
+def ptbxl_record_key(record_id: str) -> str:
+    """``ecg_id`` of a PTB-XL record stem: ``"00017_hr"`` -> ``"17"``.
+
+    The organisers' ``prepare_ptbxl_data.py`` names records after the zero-padded
+    ``ecg_id`` with an ``_hr`` suffix; the mapping is the one ``build_split.py`` uses.
+    """
+    return str(record_id).replace("_hr", "").lstrip("0") or "0"
+
+
+def find_ptbxl_database(data_folder: Optional[str]) -> Optional[Path]:
+    """``ptbxl_database.csv`` at the top of ``data_folder`` or one directory down.
+
+    Deliberately shallow: the training folder holds ~366k files, and a full walk just
+    to look for one CSV would double the scan time.
+    """
+    if not data_folder:
+        return None
+    root = Path(data_folder)
+    candidates = [root / PTBXL_DATABASE_FILENAME]
+    try:
+        candidates += sorted(p / PTBXL_DATABASE_FILENAME for p in root.iterdir() if p.is_dir())
+    except OSError:
+        return None
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
+def load_ptbxl_patients(path: Path) -> Dict[str, str]:
+    """``{ecg_id: patient_id}`` from ``ptbxl_database.csv`` (both read as strings)."""
+    import csv
+
+    with open(path, "r", newline="") as fh:
+        reader = csv.DictReader(fh)
+        if not reader.fieldnames or not {"ecg_id", "patient_id"} <= set(reader.fieldnames):
+            raise ValueError(f"{path} has no ecg_id/patient_id columns")
+        return {
+            row["ecg_id"].strip(): row["patient_id"].strip()
+            for row in reader
+            if row["ecg_id"] and row["patient_id"]
+        }

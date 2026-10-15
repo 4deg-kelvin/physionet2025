@@ -18,6 +18,8 @@ import json
 import os
 import shutil
 import time
+import warnings
+import zlib
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -29,10 +31,10 @@ from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, Mode
 from pytorch_lightning.loggers import CSVLogger
 
 from . import labels as L
-from .config import ExperimentCfg, load_config
+from .config import ExperimentCfg, load_config, resolve_path
 from .dataset import ChagasDataModule, RecordEntry, find_records, scan_records
-from .lengths import LENGTH_GROUPS, length_group
-from .model import ChagasModule
+from .lengths import LENGTH_GROUP_IDS, LENGTH_GROUPS, length_group
+from .model import VIEW_METRICS, ChagasModule, view_mask
 from .wise_ft import interpolate_state_dicts, select_alpha, snapshot_state
 
 __all__ = [
@@ -42,6 +44,8 @@ __all__ = [
     "MODEL_FILENAME",
     "member_filename",
     "matched_negative_quota",
+    "negative_budget",
+    "resolve_monitor",
     "data_summary",
 ]
 
@@ -103,34 +107,57 @@ class TimeLimitCallback(pl.Callback):
 # split
 # ---------------------------------------------------------------------------
 def split_entries(
-    entries: Sequence[RecordEntry], val_fraction: float, seed: int
+    entries: Sequence[RecordEntry],
+    val_fraction: float,
+    seed: int,
+    protocol: str = "legacy",
 ) -> Tuple[List[RecordEntry], List[RecordEntry]]:
-    """Patient-grouped, source x label stratified 90/10 split (PLAN.md section 3.7).
+    """Patient-grouped, stratified 90/10 split (PLAN.md section 3.7).
 
     Grouping is by :func:`chagas.labels.patient_group`, i.e. CODE-15 ``patient_id`` from
-    the shipped ``code15_exams.csv`` and the record itself for every other source.  A
-    patient is never split: CODE-15 has ~1.48 exams per patient, and the repo's own
-    ``train_val_test_sets.csv`` leaks 45.5% of its test exams' patients into train, which
-    inflates every number computed on it.
+    the shipped ``code15_exams.csv`` (and PTB-XL ``patient_id`` when the scan was given
+    ``ptbxl_database.csv``), the record itself otherwise.  A patient is never split:
+    CODE-15 has ~1.48 exams per patient, and the repo's own ``train_val_test_sets.csv``
+    leaks 45.5% of its test exams' patients into train, which inflates every number
+    computed on it.
 
-    Stratification is on ``(source, whether the group contains a positive)`` so the small
+    ``protocol="legacy"`` (rounds 1-2): strata ``(source, whether the group contains a
+    positive)``, one generator shared by the strata in sorted order, so the small
     SaMi-Trop cohort and the CODE-15 positives are both represented in the holdout.
+
+    ``protocol="fixed"`` (round 3, ``train.val_protocol``): strata ``(source, positive,
+    length group of the group's first record)``, so the holdout also keeps each
+    source's 7.3 s / 10 s mix, and every stratum draws from its own generator seeded by
+    ``(seed, crc32(stratum))``: a stratum's validation groups do not depend on which
+    other strata exist (e.g. ``exclude_sources: [ptbxl]`` removes PTB-XL from the
+    holdout and leaves every other record where it was).
     """
+    if protocol not in ("legacy", "fixed"):
+        raise ValueError(f"unknown split protocol {protocol!r}")
+    fixed = protocol == "fixed"
     by_group: Dict[str, List[RecordEntry]] = defaultdict(list)
     for e in entries:
         by_group[e.group].append(e)
 
-    strata: Dict[Tuple[str, int], List[str]] = defaultdict(list)
+    strata: Dict[Tuple[Any, ...], List[str]] = defaultdict(list)
     for group, members in by_group.items():
         source = members[0].source
         positive = int(any(m.label_hard == 1 for m in members))
-        strata[(source, positive)].append(group)
+        if fixed:
+            key: Tuple[Any, ...] = (
+                source, positive, length_group(getattr(members[0], "duration_s", float("nan")))
+            )
+        else:
+            key = (source, positive)
+        strata[key].append(group)
 
     rng = np.random.default_rng(seed)
     train: List[RecordEntry] = []
     val: List[RecordEntry] = []
     for key in sorted(strata):
         groups = sorted(strata[key])
+        if fixed:
+            rng = np.random.default_rng([int(seed), zlib.crc32("|".join(map(str, key)).encode())])
         rng.shuffle(groups)
         n_val = int(round(val_fraction * len(groups)))
         # Never take the whole stratum, and take at least one group when the stratum is
@@ -144,13 +171,30 @@ def split_entries(
     return train, val
 
 
+def negative_budget(n_pos: int, prevalence: float) -> int:
+    """Negatives that put ``n_pos`` positives at ``prevalence``: ``round(n_pos (1 - p) / p)``."""
+    p = float(prevalence)
+    if not 0.0 < p < 1.0:
+        raise ValueError(f"prevalence must lie in (0, 1), got {p}")
+    return int(round(n_pos * (1.0 - p) / p))
+
+
 def _subsample(
-    entries: Sequence[RecordEntry], max_records: int, seed: int, match_on: str = "none"
+    entries: Sequence[RecordEntry],
+    max_records: int,
+    seed: int,
+    match_on: str = "none",
+    *,
+    cap_mode: str = "count",
+    cap_prevalence: float = 0.065,
 ) -> List[RecordEntry]:
-    """Thin the negatives to ``max_records``, keeping every positive.
+    """Thin the negatives, keeping every positive.
 
     The positive count is what binds learning at 2% prevalence, so budgeted runs drop
-    negatives rather than sampling uniformly.
+    negatives rather than sampling uniformly.  ``cap_mode="count"`` (rounds 1-2) keeps
+    ``max_records`` records in total; ``"prevalence"`` keeps
+    :func:`negative_budget` ``(n_pos, cap_prevalence)`` negatives and ignores
+    ``max_records`` (``data.cap_mode``).
 
     ``match_on="duration"`` chooses the kept negatives so that their distribution over
     length groups equals the positives' (:func:`matched_negative_quota`), removing the
@@ -158,11 +202,20 @@ def _subsample(
     section 3.1).  ``"none"`` is the round-1 code path, untouched.
     """
     entries = list(entries)
-    if max_records <= 0 or len(entries) <= max_records:
-        return entries
-    pos = [e for e in entries if e.label_hard == 1]
-    neg = [e for e in entries if e.label_hard != 1]
-    budget = max(0, max_records - len(pos))
+    if cap_mode == "prevalence":
+        pos = [e for e in entries if e.label_hard == 1]
+        neg = [e for e in entries if e.label_hard != 1]
+        budget = negative_budget(len(pos), cap_prevalence)
+        if budget >= len(neg):
+            return entries
+    elif cap_mode == "count":
+        if max_records <= 0 or len(entries) <= max_records:
+            return entries
+        pos = [e for e in entries if e.label_hard == 1]
+        neg = [e for e in entries if e.label_hard != 1]
+        budget = max(0, max_records - len(pos))
+    else:
+        raise ValueError(f"unknown cap_mode {cap_mode!r}")
     if match_on == "duration":
         return pos + _matched_negatives(pos, neg, budget, seed)
     if match_on != "none":
@@ -259,6 +312,31 @@ def _matched_negatives(
     return [neg[i] for i in sorted(keep)]
 
 
+def resolve_monitor(monitor: str, val: Sequence[RecordEntry]) -> str:
+    """The metric checkpoints are actually selected on.
+
+    ``monitor`` itself, unless it is a view metric (:data:`chagas.model.VIEW_METRICS`)
+    whose view has no positive or no negative in ``val``: then the metric would be NaN
+    on every pass, so ``val_challenge`` is used instead and a warning says so.
+    """
+    view = VIEW_METRICS.get(monitor)
+    if view is None or not val:
+        return monitor
+    labels = np.array([int(e.label_hard) for e in val])
+    groups = np.array([LENGTH_GROUP_IDS[e.length_group] for e in val])
+    sources = np.array([int(e.source_id) for e in val])
+    y = labels[view_mask(view, labels, groups, sources)]
+    if y.size and np.unique(y).size == 2:
+        return monitor
+    warnings.warn(
+        f"monitor {monitor!r}: view {view} has {int(y.sum())} positive(s) and "
+        f"{int(y.size - y.sum())} negative(s) in validation; selecting on val_challenge instead",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+    return "val_challenge"
+
+
 def data_summary(
     train: Sequence[RecordEntry], val: Sequence[RecordEntry]
 ) -> List[Dict[str, Any]]:
@@ -301,12 +379,15 @@ def _make_trainer(
     deadline: Optional[float],
     has_val: bool,
     log_dir: Optional[Path] = None,
+    monitor: Optional[str] = None,
 ) -> Tuple[pl.Trainer, ModelCheckpoint, TimeLimitCallback]:
+    """``monitor`` overrides ``cfg.train.monitor`` (the :func:`resolve_monitor` result)."""
+    monitor = monitor or cfg.train.monitor
     ckpt_dir = work_dir / f"stage{stage}"
     checkpoint = ModelCheckpoint(
         dirpath=str(ckpt_dir),
         filename=f"best-stage{stage}",
-        monitor=cfg.train.monitor if has_val else None,
+        monitor=monitor if has_val else None,
         mode="max",
         save_top_k=1,
         # A budget-limited or step-limited stage may stop before any validation has run,
@@ -327,7 +408,7 @@ def _make_trainer(
     if has_val and cfg.train.early_stop_patience > 0:
         callbacks.append(
             EarlyStopping(
-                monitor=cfg.train.monitor,
+                monitor=monitor,
                 mode="max",
                 patience=cfg.train.early_stop_patience,
                 check_on_train_epoch_end=False,
@@ -390,6 +471,7 @@ def _train_member(
     verbose: bool,
     log_dir: Optional[Path] = None,
     wise_dir: Optional[Path] = None,
+    monitor: Optional[str] = None,
 ) -> ChagasModule:
     pl.seed_everything(seed, workers=True)
     has_val = datamodule.val_dataset is not None and len(datamodule.val_dataset) > 0
@@ -398,7 +480,8 @@ def _train_member(
 
     stage1_hours = max_hours * cfg.train.stage1_budget_frac if cfg.train.two_stage else max_hours
     trainer, checkpoint, _ = _make_trainer(
-        cfg, work_dir, stage=1, max_hours=stage1_hours, deadline=deadline, has_val=has_val, log_dir=log_dir
+        cfg, work_dir, stage=1, max_hours=stage1_hours, deadline=deadline, has_val=has_val,
+        log_dir=log_dir, monitor=monitor,
     )
     if verbose:
         print(f"[chagas] stage 1 (frozen encoder), budget {stage1_hours:.3f} h", flush=True)
@@ -412,7 +495,8 @@ def _train_member(
         module.enter_stage_two()
         stage2_hours = max_hours * cfg.train.stage2_budget_frac
         trainer2, checkpoint2, _ = _make_trainer(
-            cfg, work_dir, stage=2, max_hours=stage2_hours, deadline=deadline, has_val=has_val, log_dir=log_dir
+            cfg, work_dir, stage=2, max_hours=stage2_hours, deadline=deadline, has_val=has_val,
+            log_dir=log_dir, monitor=monitor,
         )
         if verbose:
             print(
@@ -506,12 +590,22 @@ def _save_wise_folder(
         )
 
 
-def _summarise_val_history(member: int, module: ChagasModule) -> dict:
-    """Best validation score and epoch per stage, plus the full per-epoch history.
+#: Fields of a validation record copied into ``best_by_stage``.
+_BEST_FIELDS = ("epoch", "val_challenge", "val_auroc", "val_auprc") + tuple(VIEW_METRICS)
+
+
+def _monitor_value(rec: Dict[str, Any], monitor: str) -> float:
+    value = rec.get(monitor)
+    return float(value) if value is not None and np.isfinite(value) else float("-inf")
+
+
+def _summarise_val_history(member: int, module: ChagasModule, monitor: str = "val_challenge") -> dict:
+    """Best validation record per stage by ``monitor``, plus the full per-epoch history.
 
     Written into chagas_manifest.json so a finished run records its own model
     selection; previously the only trace was the checkpoint filename
-    (DECISIONS.md, 2026-09-22).
+    (DECISIONS.md, 2026-09-22).  ``monitor`` is the metric the checkpoint callback
+    selected on (:func:`resolve_monitor`); ties keep the earlier pass, as Lightning does.
     """
     history = list(getattr(module, "val_history", []) or [])
     best_by_stage: dict = {}
@@ -519,8 +613,9 @@ def _summarise_val_history(member: int, module: ChagasModule) -> dict:
         if "wise_ft_alpha" in rec:
             continue  # mixtures are summarised separately below
         key = f"stage{rec['stage']}"
-        if key not in best_by_stage or rec["val_challenge"] > best_by_stage[key]["val_challenge"]:
-            best_by_stage[key] = {k: rec[k] for k in ("epoch", "val_challenge", "val_auroc", "val_auprc")}
+        if key not in best_by_stage or _monitor_value(rec, monitor) > _monitor_value(best_by_stage[key], monitor):
+            best_by_stage[key] = {k: rec[k] for k in _BEST_FIELDS if k in rec}
+            best_by_stage[key]["monitor"] = monitor
     summary = {"member": member, "best_by_stage": best_by_stage, "history": history}
     if getattr(module, "wise_ft_results", None) is not None:
         summary["wise_ft"] = {
@@ -562,17 +657,39 @@ def train_model(
     table = L.Code15Table.from_csv(cfg.code15_exams_path, cfg.labels.aux_columns)
     if verbose:
         print(f"[chagas] code15_exams.csv: {len(table)} exams", flush=True)
-    entries = scan_records(paths, cfg, table=table, workers=cfg.data.scan_workers)
+    fixed = cfg.train.val_protocol == "fixed"
+    ptbxl_patients = _ptbxl_patients(cfg, data_folder, verbose) if fixed else None
+    entries = scan_records(
+        paths, cfg, table=table, ptbxl_patients=ptbxl_patients, workers=cfg.data.scan_workers
+    )
     if not entries:
         raise RuntimeError("no records carried a readable Chagas label")
-    entries = _subsample(
-        entries, cfg.data.max_records, cfg.train.seed, cfg.data.match_negatives_on
-    )
 
-    train_entries, val_entries = split_entries(
-        entries, cfg.train.val_fraction, cfg.train.seed
-    )
+    def cap(records: Sequence[RecordEntry]) -> List[RecordEntry]:
+        return _subsample(
+            records, cfg.data.max_records, cfg.train.seed, cfg.data.match_negatives_on,
+            cap_mode=cfg.data.cap_mode, cap_prevalence=cfg.data.cap_prevalence,
+        )
+
+    if fixed:
+        # Round 3: validation is carved from every scanned record first, with its own
+        # seed, and never capped or matched -- it stays at natural prevalence and is the
+        # same for every training seed and every cap.  Only training is capped.
+        train_entries, val_entries = split_entries(
+            entries, cfg.train.val_fraction, cfg.train.val_seed, protocol="fixed"
+        )
+        train_entries = cap(train_entries)
+    else:
+        train_entries, val_entries = split_entries(
+            cap(entries), cfg.train.val_fraction, cfg.train.seed
+        )
+    monitor = resolve_monitor(cfg.train.monitor, val_entries)
     if verbose:
+        print(
+            f"[chagas] val_protocol={cfg.train.val_protocol} cap_mode={cfg.data.cap_mode} "
+            f"monitor={monitor}",
+            flush=True,
+        )
         n_pos = sum(e.label_hard for e in train_entries)
         n_vpos = sum(e.label_hard for e in val_entries)
         print(
@@ -601,6 +718,7 @@ def train_model(
             verbose=verbose,
             log_dir=Path(model_folder) / "metrics" / f"member{member}",
             wise_dir=Path(model_folder) / "wise_ft" / f"member{member}",
+            monitor=monitor,
         )
         out_path = os.path.join(model_folder, member_filename(member))
         selected = getattr(module, "wise_ft_selected_alpha", None)
@@ -609,7 +727,7 @@ def train_model(
             extra_meta=None if selected is None else {"wise_ft_alpha": float(selected)},
         )
         saved.append(out_path)
-        summaries.append(_summarise_val_history(member, module))
+        summaries.append(_summarise_val_history(member, module, monitor))
         if verbose:
             print(f"[chagas] saved {out_path}", flush=True)
 
@@ -619,12 +737,43 @@ def train_model(
             {
                 "members": [os.path.basename(p) for p in saved],
                 "training": summaries,
+                "split": {
+                    "val_protocol": cfg.train.val_protocol,
+                    "val_seed": cfg.train.val_seed if fixed else cfg.train.seed,
+                    "monitor": monitor,
+                    "ptbxl_patients": len(ptbxl_patients) if ptbxl_patients else 0,
+                },
                 "data_summary": data_summary(train_entries, val_entries),
                 "config": cfg.to_dict(),
             },
             fh,
             indent=2,
         )
+
+
+def _ptbxl_patients(
+    cfg: ExperimentCfg, data_folder: str, verbose: bool
+) -> Optional[Dict[str, str]]:
+    """PTB-XL ``ecg_id -> patient_id`` for the ``"fixed"`` split, or ``None``.
+
+    ``data.ptbxl_database_csv`` when set (it must exist), else ``ptbxl_database.csv``
+    found in the data folder (:func:`chagas.labels.find_ptbxl_database`).
+    """
+    explicit = cfg.data.ptbxl_database_csv
+    if explicit:
+        path = resolve_path(explicit)
+        if path is None or not path.is_file():
+            raise FileNotFoundError(f"data.ptbxl_database_csv not found: {explicit}")
+    else:
+        path = L.find_ptbxl_database(data_folder)
+    if path is None:
+        if verbose:
+            print("[chagas] no ptbxl_database.csv: PTB-XL records are one group each", flush=True)
+        return None
+    patients = L.load_ptbxl_patients(path)
+    if verbose:
+        print(f"[chagas] {path}: {len(patients)} PTB-XL records grouped by patient", flush=True)
+    return patients
 
 
 def _save_checkpoint(

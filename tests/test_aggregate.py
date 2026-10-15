@@ -83,3 +83,57 @@ def test_group_spec_parsing():
     assert AG.parse_group("M1=r2_M1_s42, r2_M1_s43") == ("M1", ["r2_M1_s42", "r2_M1_s43"])
     with pytest.raises(ValueError):
         AG.parse_group("no_equals_sign")
+
+
+def test_run_suffix_reads_the_tta_predictions(toy_results):
+    results, dur = toy_results
+    tta = pd.read_csv(results / "b" / "predictions_A.csv")
+    tta.to_csv(results / "a" / "predictions_A_tta.csv", index=False)
+    assert AG.predictions_file(results, "a:tta", "C") == results / "a" / "predictions_C_tta.csv"
+    assert AG.predictions_file(results, "a", "A") == results / "a" / "predictions_A.csv"
+    table, _gaps, _rule, _md = AG.run(["b=b", "a_tta=a:tta", "a=a"], "b",
+                                      results_dir=results, durations_path=str(dur), n_boot=50)
+    rows = table[table["view"] == "A"].set_index("group")
+    assert rows.loc["a_tta", "d_challenge"] == 0.0 and rows.loc["a_tta", "d_auroc"] == 0.0
+    assert rows.loc["a", "auroc_mean"] != rows.loc["a_tta", "auroc_mean"]
+
+
+def _rule_rows(s7_d, s7_se, s10_d, s10_se):
+    rows = []
+    for group, (d7, d10) in {"base": (0.0, 0.0), "x": (s7_d, s10_d)}.items():
+        rows.append({"group": group, "view": "S7", "d_challenge": d7, "d_challenge_se": s7_se,
+                     "d_auroc": 0.0, "d_auroc_se": 0.01})
+        rows.append({"group": group, "view": "S10+", "d_challenge": 0.0, "d_challenge_se": 0.01,
+                     "d_auroc": d10, "d_auroc_se": s10_se})
+    gaps = pd.DataFrame({"group": ["base", "x"], "gap_mean": [0.17, 0.05]})
+    return pd.DataFrame(rows), gaps
+
+
+@pytest.mark.parametrize(
+    "s7_d, s10_d, primary, secondary",
+    [
+        (0.000, 0.050, True, False),    # S10+ up 5 SE, S7 flat
+        (-0.006, 0.050, False, False),  # S10+ up but S7 down by more than 1 SE
+        (0.010, 0.000, False, True),    # S7 up 2 SE, S10+ flat
+        (0.010, -0.020, False, False),  # S7 up but S10+ down by more than 1 SE
+        (0.010, 0.050, True, True),
+    ],
+)
+def test_round_three_rule(s7_d, s10_d, primary, secondary):
+    rows, gaps = _rule_rows(s7_d, 0.005, s10_d, 0.010)
+    out = AG.decision_rule_r3(rows, gaps, "base").set_index("group")
+    assert list(out.index) == ["x"]
+    assert out.loc["x", "primary"] == primary and out.loc["x", "secondary"] == secondary
+    assert out.loc["x", "qualifies"] == (primary or secondary)
+    assert out.loc["x", "gap_shrinks"]
+
+
+def test_rule_option_defaults_to_round_two(toy_results):
+    results, dur = toy_results
+    _t, _g, r2, md2 = AG.run(["a=a", "b=b"], "a", results_dir=results, durations_path=str(dur), n_boot=20)
+    _t, _g, r3, md3 = AG.run(["a=a", "b=b"], "a", results_dir=results, durations_path=str(dur), n_boot=20,
+                             rule="r3")
+    assert "S7_auroc_gain_gt_0.010_tpr_not_lower" in r2.columns and "primary" in r3.columns
+    assert "PLAN_R2.md §5" in md2 and "Round-3 decision rule" in md3
+    with pytest.raises(ValueError):
+        AG.run(["a=a"], "a", results_dir=results, durations_path=str(dur), n_boot=5, rule="r9")
