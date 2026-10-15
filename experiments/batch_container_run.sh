@@ -35,7 +35,7 @@ export APPTAINER_TMPDIR=$CTR/tmp
 
 echo "host $(hostname)  gpu $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)  run $RUN"
 date
-EXEC="apptainer exec --nv --containall --cleanenv --pwd /challenge \
+EXEC="apptainer exec --nv --containall --cleanenv --env PYTHONNOUSERSITE=1 --pwd /challenge \
   --bind $FIX/testdata:/challenge/training_data:ro \
   --bind $FIX/testdata:/challenge/holdout_data:ro \
   --bind $RUN/model:/challenge/model \

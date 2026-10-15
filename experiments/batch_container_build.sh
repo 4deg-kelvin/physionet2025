@@ -51,5 +51,5 @@ else
 fi
 date
 ls -la "$CTR/chagas.sif"; cat "$CTR/chagas.variant"
-apptainer exec "$CTR/chagas.sif" bash -c 'cd /challenge && python -c "import torch, lightning, chagas, fairseq_signals; print(torch.__version__, lightning.__version__)" && ls -la mimic_iv_ecg_finetuned.pt'
+apptainer exec --containall --cleanenv --env PYTHONNOUSERSITE=1 "$CTR/chagas.sif" bash -c 'cd /challenge && python -c "import torch, lightning, chagas, fairseq_signals; print(torch.__version__, lightning.__version__)" && ls -la mimic_iv_ecg_finetuned.pt'
 echo "BUILD OK ($(cat "$CTR/chagas.variant"))"

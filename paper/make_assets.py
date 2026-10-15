@@ -106,9 +106,38 @@ def style() -> None:
 # ---------------------------------------------------------------------------
 # data access
 # ---------------------------------------------------------------------------
+R3_SEEDS = (42, 43, 44)
+R3_RUNS: Dict[str, List[str]] = {
+    "B0": [f"r3_B0_s{s}" for s in R3_SEEDS],
+    "W1": [f"r3_W1_s{s}" for s in R3_SEEDS],
+    "W1x5": [f"r3_W1_s{s}" for s in (42, 43, 44, 45, 46)],
+    "W1R": [f"r3_W1R_s{s}" for s in R3_SEEDS],
+    "W1S": [f"r3_W1S_s{s}" for s in R3_SEEDS],
+    "W1tta": [f"r3_W1_s{s}:tta" for s in R3_SEEDS],
+}
+R3_LABEL = {
+    "B0": "Baseline (B0)",
+    "W1": "+ 5 s windows (W1)",
+    "W1x5": "W1, 5 seeds",
+    "W1R": "W1 + ranking loss (W1R)",
+    "W1S": "W1 without PTB-XL (W1S)",
+    "W1tta": "W1, overlapping windows",
+}
+R3_TEX = {
+    "B0": "Baseline (B0)",
+    "W1": "+ 5 s windows (W1)",
+    "W1x5": "\\quad W1 with 5 seeds",
+    "W1R": "W1 + ranking loss (W1R)",
+    "W1S": "W1 without PTB-XL (W1S)",
+    "W1tta": "\\quad W1, windows every 2.5 s",
+}
+
+
 def load_predictions(run: str, durations: pd.DataFrame, which: str = "A") -> pd.DataFrame:
-    df = pd.read_csv(RES / run / f"predictions_{which}.csv", dtype={"stem": str})
-    return scoring.attach_durations(df, durations)
+    """Predictions of one run on Test A (or C); ``<run>:tta`` reads the overlapping-window pass."""
+    run, _, suffix = run.partition(":")
+    name = f"predictions_{which}_tta.csv" if suffix == "tta" else f"predictions_{which}.csv"
+    return scoring.attach_durations(pd.read_csv(RES / run / name, dtype={"stem": str}), durations)
 
 
 def gap_of(runs: Sequence[str], durations: pd.DataFrame) -> Dict[str, float]:
@@ -120,7 +149,8 @@ def gap_of(runs: Sequence[str], durations: pd.DataFrame) -> Dict[str, float]:
 
 def run_views(run: str, rescored: pd.DataFrame) -> pd.DataFrame:
     """Per-view scores of one run on Test A: new-format summary.csv, else the re-scored table."""
-    path = RES / run / "summary.csv"
+    run, _, suffix = run.partition(":")
+    path = RES / run / ("report_tta_summary.csv" if suffix == "tta" else "summary.csv")
     if path.is_file():
         s = pd.read_csv(path)
         if "S7" in set(s["view"]):
@@ -342,6 +372,95 @@ def tab_round2(r2: pd.DataFrame, gaps: Dict[str, Dict[str, float]], out: Path) -
         + "\n".join(rows) + "\n\\hline\n\\end{tabular}\n")
 
 
+def fig_round3(r3: pd.DataFrame, rescored: pd.DataFrame, out: Path) -> None:
+    """Round 3, same layout as figure 5: seeds, seed mean, ensemble with CI; vertical line = B0 mean."""
+    panels = [("S7", "challenge", "(a) TPR@5%\\n7.34 s records"), ("S7", "auroc", "(b) AUROC\\n7.34 s records"), ("S10+", "auroc", "(c) AUROC\\n10 s format")]
+    keys = list(R3_RUNS)
+    ys = np.arange(len(keys))[::-1]
+    fig, axes = plt.subplots(1, 3, figsize=(6.1, 2.7), sharey=True, gridspec_kw={"wspace": 0.12})
+    for ax, (view, metric, title) in zip(axes, panels):
+        base = r3[(r3["group"] == "B0") & (r3["view"] == view)].iloc[0]
+        ax.axvline(base[f"{metric}_mean"], color=AXIS, lw=0.9, zorder=1)
+        for y, key in zip(ys, keys):
+            row = r3[(r3["group"] == key) & (r3["view"] == view)].iloc[0]
+            seeds = [run_views(r, rescored).loc[view, metric] for r in R3_RUNS[key]]
+            ax.scatter(seeds, [y + 0.17] * len(seeds), s=16, color=MUTED, marker="o", zorder=2, linewidth=0)
+            ax.scatter(row[f"{metric}_mean"], y + 0.17, s=40, color=BLUE, marker="o", zorder=3, edgecolor="white", linewidth=1.1)
+            ax.plot([row[f"ens_{metric}_lo"], row[f"ens_{metric}_hi"]], [y - 0.17, y - 0.17], color=INK2, lw=1.0, zorder=2, solid_capstyle="round")
+            ax.scatter(row[f"ens_{metric}"], y - 0.17, s=38, facecolor="white", edgecolor=INK, marker="D", zorder=3, linewidth=1.1)
+        ax.set_title(title)
+        ax.grid(axis="y", visible=False)
+        ax.tick_params(axis="y", length=0)
+        ax.set_ylim(-0.6, len(keys) - 0.4)
+    axes[0].set_yticks(ys, [R3_LABEL[k] for k in keys])
+    handles = [Line2D([], [], marker="o", color="none", markerfacecolor=MUTED, markersize=4, label="single seed"),
+               Line2D([], [], marker="o", color="none", markerfacecolor=BLUE, markeredgecolor="white", markersize=7, label="mean of seeds"),
+               Line2D([], [], marker="D", color=INK2, lw=1.0, markerfacecolor="white", markeredgecolor=INK, markersize=6, label="seed ensemble, 95% CI")]
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.6, -0.1), ncol=3, handletextpad=0.3, columnspacing=1.6)
+    fig.savefig(out)
+    plt.close(fig)
+
+
+def source_gap(runs: Sequence[str], durations: pd.DataFrame) -> float:
+    """Source-cue diagnostic (PLAN_R3 section 5): mean probability of SaMi-Trop positives minus that of
+    CODE-15 positives on Test A, averaged over runs.  A model that scores positives by their source
+    rather than their ECG widens it."""
+    vals = []
+    for run in runs:
+        pred = load_predictions(run, durations)
+        pos = pred[pred["label"] == 1]
+        src = pos["source"].astype(str).str.upper()
+        vals.append(float(pos.loc[src.str.startswith("SAMI"), "prob"].mean() - pos.loc[src.str.startswith("CODE"), "prob"].mean()))
+    return float(np.mean(vals))
+
+
+def tab_round3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[str, float], out: Path) -> None:
+    rows = []
+    for key in R3_RUNS:
+        v = r3[r3["group"] == key].set_index("view")
+        s7, sp, a = v.loc["S7"], v.loc["S10+"], v.loc["A"]
+        if key == "B0":
+            d1, d2, d3 = "--", "--", "--"
+        else:
+            d1, d2, d3 = pm(s7["d_challenge"], s7["d_challenge_se"]), pm(s7["d_auroc"], s7["d_auroc_se"]), pm(sp["d_auroc"], sp["d_auroc_se"])
+        rows.append(f"{R3_TEX[key]} & {f3(a['challenge_mean'])} & {f3(s7['challenge_mean'])} & {d1} & {f3(s7['auroc_mean'])} & {d2} & {f3(sp['auroc_mean'])} & {d3} & {f3(sp['ens_auroc'])} & ${gaps[key]['gap']:+.2f}$ & ${sgaps[key]:+.2f}$ \\\\")
+    out.write_text(
+        "\\begin{tabular}{l c c c c c c c c c c}\n\\hline\n"
+        " & Pooled & \\multicolumn{4}{c}{Within 7.34 s records (S7)} & \\multicolumn{3}{c}{10 s format (S10+) AUROC} & Length- & Source \\\\\n"
+        "Configuration & TPR@5\\% & TPR@5\\% & $\\Delta$ & AUROC & $\\Delta$ & mean & $\\Delta$ & ensemble & cue gap & gap \\\\\n\\hline\n"
+        + "\n".join(rows) + "\n\\hline\n\\end{tabular}\n")
+
+
+def numbers_r3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[str, float], rule: pd.DataFrame, out: Path) -> None:
+    """Macros for the round-3 text (numbers_r3.tex); empty file when the table does not exist yet."""
+    lines = ["% generated by paper/make_assets.py -- do not edit"]
+
+    def macro(name: str, value: str) -> None:
+        lines.append(f"\\newcommand{{\\{name}}}{{{value}}}")
+
+    def R(group: str, view: str, col: str) -> float:
+        return float(r3[(r3["group"] == group) & (r3["view"] == view)].iloc[0][col])
+
+    names = {"B0": "rThreeBz", "W1": "rThreeWone", "W1x5": "rThreeWfive", "W1R": "rThreeWoneR", "W1S": "rThreeWoneS", "W1tta": "rThreeWoneTta"}
+    for key, nm in names.items():
+        macro(nm + "A", f3(R(key, "A", "challenge_mean")))
+        macro(nm + "Sseven", f3(R(key, "S7", "challenge_mean")))
+        macro(nm + "SsevenAuc", f3(R(key, "S7", "auroc_mean")))
+        macro(nm + "StenPlusAuc", f3(R(key, "S10+", "auroc_mean")))
+        macro(nm + "EnsSseven", f3(R(key, "S7", "ens_challenge")))
+        macro(nm + "EnsStenPlusAuc", f3(R(key, "S10+", "ens_auroc")))
+        macro(nm + "Gap", f"${gaps[key]['gap']:+.2f}$")
+        macro(nm + "SrcGap", f"${sgaps[key]:+.2f}$")
+        if key != "B0":
+            macro(nm + "DSseven", f"${R(key, 'S7', 'd_challenge'):+.3f} \\pm {R(key, 'S7', 'd_challenge_se'):.3f}$")
+            macro(nm + "DSsevenAuc", f"${R(key, 'S7', 'd_auroc'):+.3f} \\pm {R(key, 'S7', 'd_auroc_se'):.3f}$")
+            macro(nm + "DStenPlusAuc", f"${R(key, 'S10+', 'd_auroc'):+.3f} \\pm {R(key, 'S10+', 'd_auroc_se'):.3f}$")
+    if rule is not None and "qualifies" in rule.columns:
+        q = [g for g, ok in zip(rule["group"], rule["qualifies"]) if bool(ok)]
+        macro("rThreeQualifies", ", ".join(q) if q else "none")
+    out.write_text("\n".join(lines) + "\n")
+
+
 def ptb_mean(run: str) -> float:
     """Mean predicted probability of held-out PTB-XL records (all negative): the source cue."""
     d = pd.read_csv(RES / run / "per_source.csv")
@@ -464,6 +583,20 @@ def main() -> None:
     tab_lr(agg, best_epoch, PAPER / "tables" / "tab_lr.tex")
     tab_round2(r2, gaps, PAPER / "tables" / "tab_round2.tex")
     numbers(split, durations, agg, r2, r2c, gaps, best_epoch, dur_only, PAPER / "numbers.tex")
+
+    # Round 3 (PLAN_R3.md) is optional until its table job has run.
+    if (RES / "R3_TABLE_A.csv").is_file():
+        r3 = pd.read_csv(RES / "R3_TABLE_A.csv")
+        rule_path = RES / "R3_TABLE_A_rule.csv"
+        rule = pd.read_csv(rule_path) if rule_path.is_file() else None
+        gaps3 = {key: gap_of(runs, durations) for key, runs in R3_RUNS.items()}
+        sgaps3 = {key: source_gap(runs, durations) for key, runs in R3_RUNS.items()}
+        fig_round3(r3, rescored, PAPER / "figures" / "fig_round3.pdf")
+        tab_round3(r3, gaps3, sgaps3, PAPER / "tables" / "tab_round3.tex")
+        numbers_r3(r3, gaps3, sgaps3, rule, PAPER / "numbers_r3.tex")
+        print("wrote round-3 assets")
+    else:
+        (PAPER / "numbers_r3.tex").write_text("% round 3 not available yet: no experiments/results/R3_TABLE_A.csv\n")
     print("wrote figures/, tables/, numbers.tex")
 
 
