@@ -478,3 +478,39 @@ WiSE-FT selected α on validation: 0.5 (seed 42), 1.0 (seeds 43, 44).
 S7 AUROC gain (+0.008) is under the 0.010 bar. What the remedies do: remove the length cue (gap 0.17 → 0.01), leave S7
 within ~1–2 SE, and raise AUROC in the 10 s format by 4–5.5 SE. Fine-tuning beats a frozen encoder once the cue is
 controlled (S7 0.375 vs 0.343). Interpolation (α=0.5) is not better than α=1. Shipped default unchanged.
+
+## Round 3 (PLAN_R3.md): validation protocol, submission candidate, last exploration before the external test
+
+Launched 2026-10-15 at commit 12896b6 (chain: smoke 17885828 → runner smoke 17885829 → array 17885830, 14 tasks
+%4 → table 17885831).  Everything is in `REPRODUCE.md` §7.
+
+**Why a new validation protocol.** Rounds 1–2 carved validation *after* the negative cap and shuffled it with
+the training seed: each seed validated on different records at 6.5% prevalence, validation was length-matched
+whenever training was, checkpoints were selected on pooled `val_challenge` (inflated by the length cue), and
+PTB-XL was grouped per record (per patient in the held-out split).  `train.val_protocol: fixed` splits before
+the cap with `val_seed` 12345, strata source × label × length group, PTB-XL by patient, and selects on
+`val_challenge_s7`.  Validation is ~29k records / ~650 positives at natural prevalence and identical across
+seeds, so seed spread now measures model variance only.  The held-out test split is unchanged
+(`results/SPLIT_AUDIT.md`: 0 groups in both splits, 0 duplicate stems; test 73,300 records / 1,662 positives,
+2.27%; train 292,885 / 6,528, 2.23%).
+
+**Cap.** `data.cap_mode: prevalence` (0.065) replaces the 100,000-record count for round 3 and the entry: the
+count cap would give 8.2% on the organisers' ~366k-record set.
+
+| Key | Variant | Seeds |
+|---|---|---|
+| B0 | shipped config under the new protocol (re-baseline) | 42–44 |
+| W1 | + 5 s windows | 42–46 |
+| W1R | W1 + hard-negative ranking loss (Hong et al. 2025; 2.5 / 0.5 / top 20%) | 42–44 |
+| W1S | W1 without PTB-XL | 42–44 |
+| W1tta | W1 members re-scored with overlapping windows every 2.5 s (inference only) | 42–44 |
+
+**Rule (PLAN_R3 §5, fixed before launch; D-2026-10-15-2).** Primary S10+ AUROC (3-seed mean, paired bootstrap vs
+B0), guard S7 TPR@5% not lower than B0 by more than one SE.  A variant replaces W1 as the candidate if it beats W1
+on S10+ AUROC by > 1 SE with the guard, or on S7 TPR@5% by > 1 SE without losing S10+ by > 1 SE.  Five members if
+the 5-seed W1 ensemble beats the 3-seed one on S10+ AUROC by > its SE and the T4 projection stays < 48 h.  TTA if
+it loses on none of S7 TPR / S7 AUROC / S10+ AUROC and gains on one by > 1 SE.  Diagnostics: length-cue gap ≈ 0
+for every W1 variant; W1S must not widen the SaMi-Trop − CODE-15 positive-probability gap.
+
+### Round-3 results
+(to be filled from `results/R3_TABLE_A.md` when the table job finishes)

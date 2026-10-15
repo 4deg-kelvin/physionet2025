@@ -241,3 +241,19 @@ and batching code as `team_code.run_model`, with a DataLoader and batches of 64;
 
 **Decision rule (pre-registered, PLAN_R2.md §5).**  Primary: 3-seed mean TPR@5% on S7; co-primary S7 AUROC; S10+
 AUROC must not drop by more than its SE; the length-cue gap must shrink.  `aggregate.py` applies it mechanically.
+
+## Round 3: a validation protocol that cannot see the shortcut (PLAN_R3.md)
+
+- **Validation split** (`train.val_protocol: fixed`): carved before the negative cap, at natural prevalence,
+  stratified by source × label × length group, shuffled by a fixed `val_seed` with one generator per stratum
+  (so removing a source leaves every other stratum's holdout unchanged), PTB-XL grouped by patient as in the
+  held-out split.  Legacy order (cap, then split, seeded by the training seed) remains the default.
+- **Per-view validation metrics**: `val_challenge_s7`, `val_auroc_s7`, `val_auroc_s10p` from the same
+  predictions as the pooled metrics; any of them can be `train.monitor`; a view with one class falls back to
+  `val_challenge` with a warning (small smoke sets).
+- **Prevalence cap** (`data.cap_mode: prevalence`): negatives = n_pos·(1 − p)/p, uniform or length-matched.
+- **Test-time windows** (`preprocess.window_stride_seconds`): overlapping 5 s windows at inference, last one
+  right-aligned, thinned to `max_windows` keeping first and last; the judged path is unchanged unless a config sets it.
+- **Source exclusion** (`data.exclude_sources`), used by W1S to drop PTB-XL.
+- **Split audit** (`experiments/check_split.py`) re-verifies the held-out split and writes `SPLIT_AUDIT.md`.
+- **Container**: Apptainer definitions mirroring the Dockerfile, because no Docker daemon is reachable here.

@@ -94,3 +94,33 @@ Every run since round 2 has `results/<run>/run_info.json` (commit, dirty flag, c
 versions, `pip freeze` SHA-256, start/end, train/val counts by source × label × length group) and
 `results/<run>/model/chagas_manifest.json` (selection history per validation, WiSE-FT per-alpha metrics) and
 `results/<run>/model/metrics/member0/stage*/metrics.csv` (per-step loss and LR, every validation metric).
+
+## 7. Round 3 (PLAN_R3.md §4)
+
+```bash
+sbatch experiments/batch_split_audit.sh                       # results/SPLIT_AUDIT.{md,csv}: the held-out split re-checked
+S1=$(sbatch --parsable experiments/batch_r3_smoke.sh)         # contract smoke, 400 records, configs/r3_smoke.yaml
+S2=$(sbatch --parsable --dependency=afterok:$S1 experiments/batch_r3_runner_smoke.sh)   # run_r3.sh end to end
+A=$(sbatch  --parsable --dependency=afterok:$S2 experiments/batch_r3.sh)                # 14 tasks, at most 4 at once
+sbatch --dependency=afterany:$A experiments/batch_r3_table.sh                           # results/R3_TABLE_{A,C}.*
+```
+
+Configs come from `make_configs.py` (`r3_configs()`): the shipped configuration plus `train.val_protocol: fixed`
+(validation carved before the cap, `val_seed` 12345, strata source × label × length group, PTB-XL grouped by
+patient from `data.ptbxl_database_csv`), `train.monitor: val_challenge_s7`, `data.cap_mode: prevalence` at 0.065;
+then B0 (nothing else), W1 (5 s multi-window; seeds 42–46), W1R (+ `ranking_loss`), W1S (+ `exclude_sources:
+[ptbxl]`).  Each task runs `experiments/run_r3.sh`: `train_model.py` on `data_train_full`, `predict_batched.py`
+on Test A and Test C, the report, and, for multi-window configs, a second scoring pass with `--window-stride 2.5`
+into `predictions_{A,C}_tta.csv` (test-time windows; the judged `run_model.py` path is untouched).  The table
+job applies the pre-registered round-3 rule (`aggregate.py --rule r3`: primary S10+ AUROC, guard S7 TPR@5%)
+against B0; the variant-vs-W1 comparisons of PLAN_R3 §5 are a second call with `--baseline W1`.
+
+The CPU test suite that gated the chain: `sbatch experiments/batch_slurm_tests_cpu.sh` (173 tests).
+
+## 8. Container check (PLAN_R3.md §9.3)
+
+No Docker daemon is reachable from the cluster, so `experiments/container/chagas.def` renders the unmodified
+`Dockerfile` for Apptainer (same base image, packages, pins and paths; the 1 GB checkpoint is copied from the
+local file instead of gdown).  `batch_container_build.sh` stages the worktree through `.dockerignore`, builds the
+SIF rootless, and `batch_container_run.sh` (afterok) runs `train_model.py`, `run_model.py` and
+`evaluate_model.py` inside it on the 400-record set with the default config, exactly as the organisers do.

@@ -77,3 +77,15 @@ actually built.
 
 Engineering that is ours and carries no citation: the durations builder and its full cross-check, batched inference
 (`experiments/predict_batched.py`), `run_info.json`, the multi-window collate.
+
+## Round 3 (PLAN_R3.md, 2026-10-15)
+
+- **This project:** the fixed validation protocol (pre-cap, seed-independent, length-stratified, S7 monitor),
+  the prevalence cap, the split audit, the S10+-primary rule and the reasons for it (D-2026-10-15-1..3).
+- **Hong, Chou and González, CinC 2025 (doi 10.22489/CinC.2025.100):** hard-negative ranking loss (W1R), as
+  implemented in round 1 (`chagas/losses.py`), with their weight 2.5, margin 0.5 and top-20% hard negatives.
+- **Test-time averaging over overlapping windows (W1-TTA):** standard test-time augmentation; window averaging
+  follows FjordNet, CinC 2025 (091) and round 2's fixed windows (McKeen et al. 2025 for the 5 s / 500 Hz format).
+- **Dropping a source that exists only as negatives (W1S):** motivated by the group-shortcut literature cited in
+  round 2 (Geirhos et al. 2020; Idrissi et al. 2022); the test itself is this project's.
+- **Seed ensembles:** Lakshminarayanan et al. 2017; Jidling et al. 2023; Nejedly et al. (ISIBrno), CinC 2025.
