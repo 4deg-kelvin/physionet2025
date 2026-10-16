@@ -64,7 +64,7 @@ class PreprocessCfg:
     #: ECG-FM's pretraining rate (McKeen et al. 2025).  (team default, kept)
     sampling_rate: int = 500
     #: Model input length in seconds.  10 s == every PTB-XL record.  (team)
-    window_seconds: float = 10.0
+    window_seconds: float = 5.0
     #: ``"single"`` -- one window from the start of the record, zero-padded at the end
     #: (round 1, the shipped behaviour; training varies it with ``aug.crop_shift``).
     #: ``"multi"`` -- training takes one random ``window_seconds`` crop from the valid
@@ -77,7 +77,7 @@ class PreprocessCfg:
     #: averaging at inference are FjordNet's (CinC 2025, DOI 10.22489/CinC.2025.091); the
     #: team's own paper named "random padding or random windowing" as future work
     #: (Nguyen et al., CinC 2025, DOI 10.22489/CinC.2025.416).
-    window_mode: str = "single"
+    window_mode: str = "multi"
     #: Cap on the number of inference windows per record in ``"multi"`` mode.
     max_windows: int = 4
     #: Validation/inference window stride in ``"multi"`` mode.  ``None`` keeps the
@@ -335,7 +335,7 @@ class TrainCfg:
     #: aggressive than any top team.
     oversample: float = 5.0
     #: Margin-ranking loss on hard negatives (Hong et al. 2025 eq. 2-3).
-    ranking_loss: bool = False
+    ranking_loss: bool = True
     ranking_weight: float = 2.5
     ranking_margin: float = 0.5
     ranking_top_frac: float = 0.2
@@ -349,7 +349,7 @@ class TrainCfg:
     #: at natural prevalence and is identical across training seeds, caps and
     #: ``match_negatives_on``, and PTB-XL records are grouped by patient when
     #: ``ptbxl_database.csv`` is available.
-    val_protocol: str = "legacy"
+    val_protocol: str = "fixed"
     #: Seed of the ``"fixed"`` validation split; ignored by ``"legacy"``.
     val_seed: int = 12345
     #: Early stopping on the challenge score (Physiol. Meas. 2026 used patience 3).
@@ -357,7 +357,7 @@ class TrainCfg:
     #: Checkpoint selection / early stopping metric, one of :data:`MONITOR_METRICS`.  A
     #: view metric falls back to ``val_challenge`` (with a warning) when the validation
     #: split has no positive or no negative in that view.
-    monitor: str = "val_challenge"
+    monitor: str = "val_challenge_s7"
     #: Decision threshold = this quantile of the validation probabilities; the metric's
     #: own operating point is the top 5%, so 0.95 (audit defect D9).
     threshold_quantile: float = 0.95
@@ -371,7 +371,7 @@ class TrainCfg:
 
     #: Seed ensemble; each member gets an equal share of the remaining budget
     #: (Jidling et al. 2023 averaged 15 seeds; inference cost scales linearly, so <= 3).
-    ensemble_members: int = 1
+    ensemble_members: int = 3
 
     # -- WiSE-FT weight interpolation (PLAN_R2.md section 3.3) -------------------
     #: ``"off"`` ships the best stage-2 weights (round 1).  ``"select"`` evaluates
@@ -430,7 +430,7 @@ class DataCfg:
     #: ``round(n_pos * (1 - p) / p)`` negatives, ``p = cap_prevalence``, so the training
     #: prevalence no longer depends on the folder size; ``max_records`` is then unused.
     #: The negatives are drawn as ``match_negatives_on`` says in both modes.
-    cap_mode: str = "count"
+    cap_mode: str = "prevalence"
     #: Target training prevalence of ``cap_mode: prevalence``.  0.065 is what the
     #: shipped 100k cap gave on the full training split (6.5k positives in 100k).
     cap_prevalence: float = 0.065

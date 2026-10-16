@@ -24,6 +24,7 @@ _spec.loader.exec_module(build_test_C)
 
 from chagas.config import default_config
 from chagas.preprocessing import load_record, preprocess_record
+from _legacy import legacy_config
 
 
 def test_record_seed_is_stable_and_stem_dependent():
@@ -57,7 +58,7 @@ def test_perturbation_actually_perturbs_but_keeps_the_waveform():
 
 def test_written_records_load_through_the_pipeline(tmp_path, real_records):
     """Round trip: write a few perturbed records and read them back with our own loader."""
-    cfg = default_config()
+    cfg = legacy_config()
     cfg.aug.enabled = False
     dest = tmp_path / "data_test_C"
 

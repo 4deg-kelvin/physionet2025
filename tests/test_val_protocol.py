@@ -27,6 +27,7 @@ from chagas.config import ExperimentCfg, default_config
 from chagas.dataset import RecordEntry, scan_records
 from chagas.lengths import LENGTH_GROUP_IDS, length_group
 from chagas.training import resolve_monitor, split_entries
+from _legacy import legacy_config
 
 
 def _entry(rid: str, source: str, label: int, group: str, duration: float) -> RecordEntry:
@@ -173,7 +174,7 @@ def test_legacy_train_model_splits_after_the_cap(monkeypatch, tmp_path):
     from chagas.training import _subsample
 
     entries = _synthetic()
-    cfg = default_config()
+    cfg = legacy_config()
     cfg.data.max_records = 400
     got = _run_train_model(monkeypatch, tmp_path, cfg, entries)
     _t, expected = split_entries(_subsample(entries, 400, cfg.train.seed), cfg.train.val_fraction, cfg.train.seed)
@@ -246,15 +247,15 @@ def test_scan_records_groups_ptbxl_patients_and_drops_excluded_sources(tmp_path)
 
 def test_ptbxl_table_is_only_for_the_fixed_protocol():
     with pytest.raises(ValueError):
-        ExperimentCfg.from_dict({"data": {"ptbxl_database_csv": "x.csv"}})
+        ExperimentCfg.from_dict({"data": {"ptbxl_database_csv": "x.csv"}, "train": {"val_protocol": "legacy"}})
     cfg = ExperimentCfg.from_dict({"data": {"ptbxl_database_csv": "x.csv"}, "train": {"val_protocol": "fixed"}})
     assert cfg.data.ptbxl_database_csv == "x.csv"
     with pytest.raises(ValueError):
         ExperimentCfg.from_dict({"train": {"val_protocol": "random"}})
 
 
-def test_round_three_options_default_to_round_two_behaviour():
-    cfg = default_config()
+def test_legacy_config_reproduces_round_two_behaviour():
+    cfg = legacy_config()
     assert cfg.train.val_protocol == "legacy" and cfg.train.monitor == "val_challenge"
     assert cfg.data.cap_mode == "count" and cfg.data.exclude_sources == ()
     assert cfg.data.ptbxl_database_csv is None

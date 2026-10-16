@@ -15,6 +15,7 @@ import torch
 from chagas.config import CONV_DOWNSAMPLE, default_config
 from chagas.model import build_padding_mask, masked_mean, token_lengths
 from chagas.preprocessing import load_record, preprocess_array
+from _legacy import legacy_config
 
 pytestmark = pytest.mark.backbone
 
@@ -158,7 +159,7 @@ def test_resample_invariance_of_the_logit(shared_module, real_records):
     """
     from scipy.signal import resample_poly
 
-    cfg = default_config()
+    cfg = legacy_config()
     cfg.aug.enabled = False
     records = []
     for path in real_records:

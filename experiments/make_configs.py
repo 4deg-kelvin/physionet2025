@@ -33,6 +33,16 @@ def _base() -> ExperimentCfg:
     cfg.train.max_epochs = 16
     cfg.train.stage2_max_epochs = 16
     cfg.train.max_hours = 20.0
+    # The shipped defaults moved to the round-3 entry (final_r3, D-2026-10-16-1); the
+    # ladder and rounds 1-3 are defined against the round-1 values, pinned here so every
+    # committed config stays byte-identical.
+    cfg.preprocess.window_seconds = 10.0
+    cfg.preprocess.window_mode = "single"
+    cfg.train.ranking_loss = False
+    cfg.train.val_protocol = "legacy"
+    cfg.train.monitor = "val_challenge"
+    cfg.train.ensemble_members = 1
+    cfg.data.cap_mode = "count"
     return cfg
 
 
@@ -228,6 +238,23 @@ def final_a(cfg: ExperimentCfg) -> None:
     cfg.data.max_records = 100_000
 
 
+def final_r3(cfg: ExperimentCfg) -> None:
+    """The round-3 entry (D-2026-10-16-1): final A + the fixed validation protocol and
+    prevalence cap (r3_base without the cluster path to ptbxl_database.csv, which the
+    entry looks up in the data folder) + 5 s windows + the hard-negative ranking loss,
+    trained as a 3-seed ensemble inside one ``train_model.py`` call.  Equals the
+    ``chagas.config`` defaults (tests/test_config_r2.py)."""
+    final_a(cfg)
+    r3_base(cfg)
+    cfg.data.ptbxl_database_csv = None
+    r2_windows(cfg)
+    r3_ranking(cfg)
+    cfg.train.ensemble_members = 3
+    cfg.name = "final_r3"
+    cfg.description = ("Round-3 entry: final A + fixed val split, prevalence cap 0.065, S7 monitor, "
+                       "5 s multi-window, hard-negative ranking loss, 3-seed ensemble.")
+
+
 def final_b(cfg: ExperimentCfg) -> None:
     """Final candidate B: the 5c config on all data, stage 2 validated every 500 optimiser steps.
 
@@ -258,6 +285,7 @@ ROWS: List[Tuple[str, Callable[[ExperimentCfg], None]]] = [
     ("row9_ensemble", row9),
     ("final_full", row_final),
     ("finalA_negcap", final_a),
+    ("final_r3", final_r3),
     ("finalB_stepval", final_b),
 ]
 

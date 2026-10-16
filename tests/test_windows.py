@@ -23,6 +23,7 @@ from chagas.preprocessing import (
     window_starts,
     zscore_per_record,
 )
+from _legacy import legacy_config
 
 FS = 500
 W = 5 * FS  # 2500 samples
@@ -115,7 +116,7 @@ def _round1_preprocess_array(x, fs, cfg, *, train, aug, rng):
 
 
 def test_single_mode_is_bit_exact_round_one(real_records):
-    cfg = default_config()
+    cfg = legacy_config()
     assert cfg.preprocess.window_mode == "single"
     for path in real_records[:12]:
         x, fs, _ = load_record(path)
@@ -242,6 +243,6 @@ def test_window_stride_flows_through_preprocess_array_and_is_validated():
 
     for bad in ({"window_mode": "multi", "window_seconds": 5.0, "window_stride_seconds": 6.0},
                 {"window_mode": "multi", "window_seconds": 5.0, "window_stride_seconds": 0.0},
-                {"window_stride_seconds": 2.5}):  # single mode has no windows to stride
+                {"window_mode": "single", "window_stride_seconds": 2.5}):  # single mode has no windows to stride
         with pytest.raises(ValueError):
             ExperimentCfg.from_dict({"preprocess": bad})

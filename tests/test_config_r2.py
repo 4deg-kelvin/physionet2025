@@ -32,20 +32,38 @@ def _strip(d):
     return d
 
 
-def test_shipped_default_equals_finalA_negcap():
+#: What the round-3 entry changed against the round-1/2 shipped config (D-2026-10-16-1).
+ENTRY_CHANGES = {
+    ("preprocess", "window_seconds"): (10.0, 5.0),
+    ("preprocess", "window_mode"): ("single", "multi"),
+    ("train", "ranking_loss"): (False, True),
+    ("train", "val_protocol"): ("legacy", "fixed"),
+    ("train", "monitor"): ("val_challenge", "val_challenge_s7"),
+    ("train", "ensemble_members"): (1, 3),
+    ("data", "cap_mode"): ("count", "prevalence"),
+}
+
+
+def test_shipped_default_equals_final_r3():
     shipped = default_config().to_dict()
-    final_a = ExperimentCfg.from_yaml(CONFIGS / "finalA_negcap.yaml").to_dict()
-    assert _strip(shipped) == _strip(final_a)
+    final = ExperimentCfg.from_yaml(CONFIGS / "final_r3.yaml").to_dict()
+    assert _strip(shipped) == _strip(final)
 
 
-def test_round_two_flags_default_to_round_one_behaviour():
+def test_final_r3_differs_from_finalA_negcap_only_in_the_entry_changes():
+    old = ExperimentCfg.from_yaml(CONFIGS / "finalA_negcap.yaml").to_dict()
+    new = ExperimentCfg.from_yaml(CONFIGS / "final_r3.yaml").to_dict()
+    diff = {(sec, key): (old[sec][key], new[sec][key])
+            for sec in old if isinstance(old[sec], dict)
+            for key in old[sec] if old[sec][key] != new[sec][key]}
+    assert diff == ENTRY_CHANGES
+
+
+def test_round_two_flags_still_validate_and_wise_ft_stays_off():
     cfg = default_config()
     assert cfg.data.match_negatives_on == "none"
-    assert cfg.preprocess.window_mode == "single"
-    assert cfg.preprocess.window_seconds == 10.0
     assert cfg.train.wise_ft == "off"
     assert cfg.train.wise_ft_save_all is False
-    assert cfg.train.ensemble_members == 1
     for bad in ({"data": {"match_negatives_on": "length"}},
                 {"preprocess": {"window_mode": "many"}},
                 {"train": {"wise_ft": "on"}},

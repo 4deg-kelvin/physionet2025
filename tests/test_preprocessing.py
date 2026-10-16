@@ -21,12 +21,13 @@ from chagas.preprocessing import (
     window_and_pad,
     zscore_per_record,
 )
+from _legacy import legacy_config
 
 N_PARITY_RECORDS = 50
 
 
 def _cfg_no_aug() -> ExperimentCfg:
-    cfg = default_config()
+    cfg = legacy_config()
     cfg.aug.enabled = False
     return cfg
 
@@ -176,7 +177,7 @@ def test_window_and_pad_reports_valid_len():
 
 def test_demographics_vector_encodes_missing_age():
     """Audit defect D16: a missing age used to be encoded as 0.0 == the training mean."""
-    cfg = default_config().preprocess
+    cfg = legacy_config().preprocess
     known = demographics_vector(53.8, "Male", cfg)
     missing = demographics_vector(None, "Male", cfg)
     assert not np.array_equal(known, missing)
