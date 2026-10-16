@@ -527,3 +527,13 @@ Against W1 (`R3_TABLE_W1_A_rule.csv`): W1R S7 TPR@5% +0.006 ± 0.005 (secondary 
 lower); W1S and TTA meet neither; 5-seed ensemble S10+ AUROC +0.003 ± 0.003 (not > SE).
 **Verdict (D-2026-10-16-1): entry = W1R, 3 members; TTA off.** Test C (perturbed) tracks A within 0.005 on S7 for every
 config. B0 under the fixed protocol matches round-2 B0 (S7 0.386 vs 0.384), so the protocol itself changed little.
+
+### The entry (final_r3) — checks (2026-10-16)
+
+| Check | Job | Result |
+|---|---|---|
+| Time budget: default config on `data_train_full`, 3 members, Titan RTX, 14.5 GiB cap | 17902758 | train 14,896 s (4.1 h), inference 3,139 s for 2 × 73,300 records; T4 projection ~10 h of 72 |
+| Entry scores (3-member ensemble, one `train_model.py` call) | 17902758 | S7 0.416 / 0.808, S10+ AUROC 0.854, S10 AUROC 0.765, A 0.454 / 0.845 |
+| Container: Apptainer rendering of the Dockerfile, built rootless from commit 3103ff9 | 17902785 | BUILD OK (22 min) |
+| Entry scripts inside the container on the 400-record set | 17902786 | RUN OK, 400/400 outputs |
+| CPU test suite after the default flip | 17902757 | 174 passed |

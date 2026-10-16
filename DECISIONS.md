@@ -508,3 +508,18 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   remains the fallback if the entry's time-budget check fails.
 - **Protocol effect:** B0 under the fixed protocol scored S7 0.386 / S10+ 0.781 vs 0.384 / 0.779 in round 2 — unchanged.
 - **Status:** active; time-budget check and container check pending.
+
+## D-2026-10-16-2 — Entry checks pass: time budget, container, end-to-end
+- **Time budget (SLURM 17902758, Titan RTX, 14.5 GiB cap, `data_train_full` 292,885 records):** the unmodified
+  `train_model.py` with the default config trained the three members in 14,896 s (4.1 h; 1.4 h per member), and
+  inference over 2 × 73,300 records took 3,139 s. At a 2.5× T4 slowdown the training projection is ~10.3 h against the
+  organisers' 72 h, a margin far beyond the 30% required (PLAN_R3 §9.2). The TimeLimitCallback split (71 h / 3 members)
+  is never reached.
+- **Entry scores (3-member ensemble from one call):** S7 TPR@5% 0.416 / AUROC 0.808; S10+ AUROC 0.854; S10 AUROC 0.765;
+  pooled A 0.454 / 0.845 — consistent with the round-3 W1R seed ensemble (0.410 / 0.841 on S7 / S10+).
+- **Container (17902785 / 17902786):** the Apptainer rendering of the unmodified Dockerfile builds (22 min, rootless) and
+  `train_model.py` → `run_model.py` → `evaluate_model.py` run inside it on the 400-record set with the default config
+  (400/400 outputs). The organisers' Docker build itself is not exercised here (no daemon on the cluster); the
+  rendering follows the Dockerfile step for step.
+- **Decision:** `final_r3` (commit 3103ff9) is the entry to submit for external scoring; no further change before that.
+- **Status:** active.

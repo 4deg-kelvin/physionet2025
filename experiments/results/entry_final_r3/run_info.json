@@ -1,0 +1,39 @@
+{
+  "name": "final_r3",
+  "config_path": "/juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/configs/final_r3.yaml",
+  "config_sha256": "908415093ad39e87dd9f53006aa704d26129fb2171488d55dc4057fe1fb8d961",
+  "seed": 42,
+  "git": {
+    "commit": "b5414ab7ddeef6d8fc664088ab387a9c6c281336",
+    "branch": "improve/robust-finetune",
+    "dirty": true,
+    "dirty_paths": [
+      "chagas/config.py",
+      "experiments/R3_PROGRESS.md",
+      "experiments/make_configs.py",
+      "tests/test_backbone.py",
+      "tests/test_build_test_c.py",
+      "tests/test_config_r2.py",
+      "tests/test_predict_batched.py",
+      "tests/test_preprocessing.py",
+      "tests/test_val_protocol.py",
+      "tests/test_windows.py"
+    ]
+  },
+  "environment": {
+    "hostname": "jagupard27.stanford.edu",
+    "slurm_job_id": "17902758",
+    "slurm_array_task_id": "",
+    "python": "3.9.23",
+    "torch": "2.7.1+cu118",
+    "numpy": "1.26.4",
+    "cuda_available": true,
+    "gpu": "NVIDIA TITAN RTX",
+    "lightning": "2.5.2",
+    "pytorch_lightning": "2.5.2",
+    "pip_freeze_sha256": "6835e50d311ed3b540b8716a9df5e0ddb9073d8febe4adea915feb2e2ceb64d8",
+    "pip_freeze_lines": 226
+  },
+  "start_time": "2026-10-16T00:19:14-07:00",
+  "end_time": "2026-10-16T05:19:50-07:00"
+}
