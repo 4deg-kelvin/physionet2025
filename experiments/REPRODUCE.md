@@ -124,3 +124,22 @@ No Docker daemon is reachable from the cluster, so `experiments/container/chagas
 local file instead of gdown).  `batch_container_build.sh` stages the worktree through `.dockerignore`, builds the
 SIF rootless, and `batch_container_run.sh` (afterok) runs `train_model.py`, `run_model.py` and
 `evaluate_model.py` inside it on the 400-record set with the default config, exactly as the organisers do.
+
+## 9. The entry (final_r3) and its checks
+
+`chagas/config.py` defaults equal `experiments/configs/final_r3.yaml` (D-2026-10-16-1): final A + fixed validation
+protocol + prevalence cap 0.065 + S7 monitor + 5 s multi-window + hard-negative ranking loss + `ensemble_members: 3`.
+`make_configs._base()` pins the round-1 values for every historical config, and tests written against the old
+behaviour use `tests/_legacy.legacy_config()`; `tests/test_config_r2.py` asserts the default equals `final_r3.yaml`
+and differs from `finalA_negcap.yaml` in exactly the seven entry fields.
+
+```bash
+sbatch experiments/batch_entry_check.sh        # unmodified train_model.py with the DEFAULT config on data_train_full,
+                                               # then predict_batched/eval_report on data_test and data_test_C;
+                                               # prints TRAIN_SECONDS (all three members) for the T4 projection
+B=$(sbatch --parsable experiments/batch_container_build.sh)         # Apptainer image from the Dockerfile rendering
+sbatch --dependency=afterok:$B experiments/batch_container_run.sh   # the three entry scripts inside it, 400 records
+```
+
+Results land in `results/entry_final_r3/` (report, run_info, manifest with per-member `best_by_stage`) and
+`/juice2/scr2/kelvinkn/other_work/edwards/containers/run_<timestamp>/`.
