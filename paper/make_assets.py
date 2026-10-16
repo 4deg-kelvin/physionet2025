@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Sequence
@@ -482,6 +483,17 @@ def numbers_r3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
             macro(nm + "VsWoneDStenPlusAuc", f"${W(key, 'S10+', 'd_auroc'):+.3f} \\pm {W(key, 'S10+', 'd_auroc_se'):.3f}$")
             macro(nm + "VsWoneDEnsStenPlusAuc", f"${W(key, 'S10+', 'd_ens_auroc'):+.3f} \\pm {W(key, 'S10+', 'd_ens_auroc_se'):.3f}$")
             macro(nm + "VsWoneDEnsSseven", f"${W(key, 'S7', 'd_ens_challenge'):+.3f} \\pm {W(key, 'S7', 'd_ens_challenge_se'):.3f}$")
+    # The entry trained as one train_model.py call (3 members) and its wall time (REPRODUCE section 9).
+    entry = RES / "entry_final_r3"
+    if (entry / "summary.csv").is_file():
+        es = pd.read_csv(entry / "summary.csv").set_index("view")
+        macro("entrySseven", f3(es.loc["S7", "challenge"])); macro("entrySsevenAuc", f3(es.loc["S7", "auroc"]))
+        macro("entryStenPlusAuc", f3(es.loc["S10+", "auroc"])); macro("entryA", f3(es.loc["A", "challenge"]))
+        log = (entry.parent.parent / "logs" / "entry_check.out").read_text() if (entry.parent.parent / "logs" / "entry_check.out").is_file() else ""
+        m = re.search(r"TRAIN_SECONDS (\d+)", log)
+        if m:
+            hours = int(m.group(1)) / 3600
+            macro("entryTrainHours", f"{hours:.1f}"); macro("entryTfourHours", f"{2.5 * hours:.0f}")
     out.write_text("\n".join(lines) + "\n")
 
 
