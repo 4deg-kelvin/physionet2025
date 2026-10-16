@@ -1,0 +1,13 @@
+\begin{tabular}{l c c c c c c c c c c}
+\hline
+ & Pooled & \multicolumn{4}{c}{Within 7.34 s records (S7)} & \multicolumn{3}{c}{10 s format (S10+) AUROC} & Length- & Source \\
+Configuration & TPR@5\% & TPR@5\% & $\Delta$ & AUROC & $\Delta$ & mean & $\Delta$ & ensemble & cue gap & gap \\
+\hline
+Baseline (B0) & 0.427 & 0.385 & -- & 0.788 & -- & 0.781 & -- & 0.809 & $+0.15$ & $-0.04$ \\
++ 5 s windows (W1) & 0.422 & 0.383 & $-0.002 \pm 0.005$ & 0.794 & $+0.006 \pm 0.002$ & 0.824 & $+0.043 \pm 0.010$ & 0.834 & $+0.08$ & $-0.02$ \\
+\quad W1 with 5 seeds & 0.417 & 0.375 & $-0.010 \pm 0.005$ & 0.792 & $+0.004 \pm 0.002$ & 0.824 & $+0.043 \pm 0.010$ & 0.837 & $+0.08$ & $-0.02$ \\
+W1 + ranking loss (W1R) & 0.425 & 0.389 & $+0.004 \pm 0.005$ & 0.797 & $+0.009 \pm 0.003$ & 0.827 & $+0.046 \pm 0.012$ & 0.841 & $+0.01$ & $-0.01$ \\
+W1 without PTB-XL (W1S) & 0.414 & 0.384 & $-0.001 \pm 0.005$ & 0.793 & $+0.005 \pm 0.003$ & 0.819 & $+0.038 \pm 0.011$ & 0.839 & $+0.07$ & $-0.01$ \\
+\quad W1, windows every 2.5 s & 0.422 & 0.383 & $-0.002 \pm 0.005$ & 0.794 & $+0.006 \pm 0.002$ & 0.822 & $+0.041 \pm 0.010$ & 0.832 & $+0.09$ & $-0.02$ \\
+\hline
+\end{tabular}

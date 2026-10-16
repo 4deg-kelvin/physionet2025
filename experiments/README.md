@@ -512,5 +512,18 @@ the 5-seed W1 ensemble beats the 3-seed one on S10+ AUROC by > its SE and the T4
 it loses on none of S7 TPR / S7 AUROC / S10+ AUROC and gains on one by > 1 SE.  Diagnostics: length-cue gap ≈ 0
 for every W1 variant; W1S must not widen the SaMi-Trop − CODE-15 positive-probability gap.
 
-### Round-3 results
-(to be filled from `results/R3_TABLE_A.md` when the table job finishes)
+### Round-3 results (2026-10-15/16; array 17885830, 14/14 completed on jagupard27, 1.6–2.8 h each; tables 17885831 vs B0, 17899069 vs W1)
+
+| Config | Pooled A | S7 TPR@5% (Δ vs B0 ± SE) | S7 AUROC (Δ ± SE) | S10+ AUROC (Δ ± SE) | S10+ ens. AUROC | S7 ens. TPR | length gap | source gap |
+|---|---|---|---|---|---|---|---|---|
+| B0 (fixed protocol) | 0.427 | 0.385 | 0.788 | 0.781 | 0.809 | 0.395 | +0.15 | −0.04 |
+| W1 5 s windows | 0.422 | 0.383 (−0.002 ± 0.005) | 0.794 (+0.006 ± 0.002) | 0.824 (+0.043 ± 0.010) | 0.834 | 0.388 | +0.08 | −0.02 |
+| W1 ×5 seeds | 0.417 | 0.375 (−0.010 ± 0.005) | 0.792 (+0.004 ± 0.002) | 0.824 (+0.043 ± 0.010) | 0.837 | 0.397 | +0.08 | −0.02 |
+| **W1R + ranking loss** | 0.425 | 0.389 (+0.004 ± 0.005) | 0.797 (+0.009 ± 0.003) | 0.827 (+0.046 ± 0.012) | **0.841** | **0.410** | **+0.01** | −0.01 |
+| W1S no PTB-XL | 0.414 | 0.384 (−0.001 ± 0.005) | 0.793 (+0.005 ± 0.003) | 0.819 (+0.038 ± 0.011) | 0.839 | 0.390 | +0.07 | −0.01 |
+| W1-TTA stride 2.5 s | 0.422 | 0.383 (−0.002 ± 0.005) | 0.794 (+0.006 ± 0.002) | 0.822 (+0.041 ± 0.010) | 0.832 | 0.388 | +0.09 | −0.02 |
+
+Against W1 (`R3_TABLE_W1_A_rule.csv`): W1R S7 TPR@5% +0.006 ± 0.005 (secondary criterion met, S10+ +0.003 ± 0.007 not
+lower); W1S and TTA meet neither; 5-seed ensemble S10+ AUROC +0.003 ± 0.003 (not > SE).
+**Verdict (D-2026-10-16-1): entry = W1R, 3 members; TTA off.** Test C (perturbed) tracks A within 0.005 on S7 for every
+config. B0 under the fixed protocol matches round-2 B0 (S7 0.386 vs 0.384), so the protocol itself changed little.

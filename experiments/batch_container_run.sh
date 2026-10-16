@@ -20,7 +20,9 @@
 #   python train_model.py -d training_data -m model -v
 #   python run_model.py   -d holdout_data  -m model -o holdout_outputs -v
 #   python evaluate_model.py -d holdout_data -o holdout_outputs
-# The container filesystem is read-only, so model/ and outputs/ are bind-mounted.
+# The container filesystem is read-only, so model/ and outputs/ are bind-mounted.  The smoke
+# set is a folder of symlinks into physionet2025/training_data, so that tree is bound too
+# (--containall hides everything else; without it the headers read as empty -> no labels).
 #
 #   sbatch --dependency=afterok:<build job> experiments/batch_container_run.sh
 set -euo pipefail
@@ -30,16 +32,20 @@ FIX=/juice2/scr2/kelvinkn/other_work/edwards/fixbranch_test
 CTR=/juice2/scr2/kelvinkn/other_work/edwards/containers
 RUN=$CTR/run_$(date +%Y%m%d_%H%M%S)
 mkdir -p "$RUN/model" "$RUN/outputs"
+LTMP=/tmp/kelvinkn/ctr_$SLURM_JOB_ID; mkdir -p "$LTMP"   # /tmp inside --containall is a small tmpfs; use node-local disk (NFS gives .nfs "busy" errors on unlink)
+trap 'rm -rf "$LTMP"' EXIT
 export APPTAINER_CACHEDIR=$CTR/cache
 export APPTAINER_TMPDIR=$CTR/tmp
 
 echo "host $(hostname)  gpu $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)  run $RUN"
 date
 EXEC="apptainer exec --nv --containall --cleanenv --env PYTHONNOUSERSITE=1 --pwd /challenge \
+  --bind /juice2/scr2/kelvinkn/other_work/edwards/physionet2025/training_data:/juice2/scr2/kelvinkn/other_work/edwards/physionet2025/training_data:ro \
   --bind $FIX/testdata:/challenge/training_data:ro \
   --bind $FIX/testdata:/challenge/holdout_data:ro \
   --bind $RUN/model:/challenge/model \
   --bind $RUN/outputs:/challenge/holdout_outputs \
+  --bind $LTMP:/tmp \
   $CTR/chagas.sif"
 $EXEC python train_model.py -d training_data -m model -v
 date

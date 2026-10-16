@@ -490,3 +490,21 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - **`aggregate.py --rule r3`:** primary = S10+ AUROC delta > 1 SE with S7 TPR@5% delta >= -1 SE; secondary = S7 TPR@5% delta
   > 1 SE with S10+ AUROC delta >= -1 SE; `--rule r2` stays the default.
 - **Status:** implemented and unit-tested; round-3 smoke and array not yet run.
+
+## D-2026-10-16-1 — Round-3 verdict: W1R (5 s windows + hard-negative ranking loss), 3-seed ensemble, is the entry
+- **Result (fixed validation protocol; 3 seeds; paired bootstrap; array 17885830, tables 17885831 / 17899069):**
+  vs B0 — S10+ AUROC: W1 +0.043 ± 0.010, W1R +0.046 ± 0.012, W1S +0.038 ± 0.011, W1-TTA +0.041 ± 0.010; S7 TPR@5%:
+  W1 −0.002 ± 0.005, W1R +0.004 ± 0.005, W1S −0.001 ± 0.005. All four pass the primary criterion against B0.
+  vs W1 — S10+ AUROC: W1R +0.003 ± 0.007, W1S −0.005 ± 0.008, TTA −0.001 ± 0.001 (none > 1 SE); S7 TPR@5%: W1R
+  +0.006 ± 0.005 (> 1 SE, S10+ not lower → secondary criterion), W1S +0.001 ± 0.004, TTA 0. Ensembles: W1R S7 0.410
+  (+0.021 ± 0.007 vs W1 ensemble), S10+ AUROC 0.841; 5-seed W1 ensemble vs 3-seed: S10+ +0.003 ± 0.003 (not > SE).
+  Length-cue gap: B0 +0.15, W1 +0.08, W1R +0.01, W1S +0.07. Source gap (SaMi-Trop − CODE-15 positives): B0 −0.04,
+  W1 −0.02, W1S −0.01 (did not grow).
+- **Decision (PLAN_R3 §5 applied as written):** candidate = **W1R**; ensemble size **3**; TTA **not** adopted (no gain);
+  W1S not adopted. The entry is `final_r3`: shipped config + fixed validation protocol + prevalence cap 0.065 +
+  S7 monitor + 5 s multi-window + ranking loss (Hong et al. 2025; 2.5 / 0.5 / top 20%) + `ensemble_members: 3`.
+- **Caveat recorded:** W1R beat W1 on S7 by 1.2 SE, the weakest margin that satisfies the rule. Its stronger evidence is
+  indirect: it removed the residual length-cue gap (+0.08 → +0.01) and gave the best ensemble on both views. W1
+  remains the fallback if the entry's time-budget check fails.
+- **Protocol effect:** B0 under the fixed protocol scored S7 0.386 / S10+ 0.781 vs 0.384 / 0.779 in round 2 — unchanged.
+- **Status:** active; time-budget check and container check pending.

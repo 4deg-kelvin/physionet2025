@@ -374,7 +374,7 @@ def tab_round2(r2: pd.DataFrame, gaps: Dict[str, Dict[str, float]], out: Path) -
 
 def fig_round3(r3: pd.DataFrame, rescored: pd.DataFrame, out: Path) -> None:
     """Round 3, same layout as figure 5: seeds, seed mean, ensemble with CI; vertical line = B0 mean."""
-    panels = [("S7", "challenge", "(a) TPR@5%\\n7.34 s records"), ("S7", "auroc", "(b) AUROC\\n7.34 s records"), ("S10+", "auroc", "(c) AUROC\\n10 s format")]
+    panels = [("S7", "challenge", "(a) TPR@5%\n7.34 s records"), ("S7", "auroc", "(b) AUROC\n7.34 s records"), ("S10+", "auroc", "(c) AUROC\n10 s format")]
     keys = list(R3_RUNS)
     ys = np.arange(len(keys))[::-1]
     fig, axes = plt.subplots(1, 3, figsize=(6.1, 2.7), sharey=True, gridspec_kw={"wspace": 0.12})
@@ -458,6 +458,30 @@ def numbers_r3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
     if rule is not None and "qualifies" in rule.columns:
         q = [g for g, ok in zip(rule["group"], rule["qualifies"]) if bool(ok)]
         macro("rThreeQualifies", ", ".join(q) if q else "none")
+    # Validation-set size under the fixed protocol, from the first B0 manifest (identical across seeds).
+    import json
+    man = json.load(open(RES / R3_RUNS["B0"][0] / "model" / "chagas_manifest.json"))
+    val = [r for r in man["data_summary"] if r["split"] == "val"]
+    tr = [r for r in man["data_summary"] if r["split"] == "train"]
+    macro("rThreeValN", f"{sum(r['n'] for r in val):,}")
+    macro("rThreeValPos", f"{sum(r['n'] for r in val if int(r['label']) == 1):,}")
+    macro("rThreeTrainN", f"{sum(r['n'] for r in tr):,}")
+    macro("rThreeTrainPos", f"{sum(r['n'] for r in tr if int(r['label']) == 1):,}")
+    macro("rThreeValPrev", f"{100 * sum(r['n'] for r in val if int(r['label']) == 1) / sum(r['n'] for r in val):.2f}")
+    # Variant-vs-W1 and ensemble-size comparisons (second aggregate call with --baseline W1).
+    w1_path = RES / "R3_TABLE_W1_A.csv"
+    if w1_path.is_file():
+        w1 = pd.read_csv(w1_path)
+
+        def W(group: str, view: str, col: str) -> float:
+            return float(w1[(w1["group"] == group) & (w1["view"] == view)].iloc[0][col])
+
+        for key, nm in (("W1R", "rThreeWoneR"), ("W1S", "rThreeWoneS"), ("W1tta", "rThreeWoneTta"), ("W1x5", "rThreeWfive")):
+            macro(nm + "VsWoneDSseven", f"${W(key, 'S7', 'd_challenge'):+.3f} \\pm {W(key, 'S7', 'd_challenge_se'):.3f}$")
+            macro(nm + "VsWoneDSsevenAuc", f"${W(key, 'S7', 'd_auroc'):+.3f} \\pm {W(key, 'S7', 'd_auroc_se'):.3f}$")
+            macro(nm + "VsWoneDStenPlusAuc", f"${W(key, 'S10+', 'd_auroc'):+.3f} \\pm {W(key, 'S10+', 'd_auroc_se'):.3f}$")
+            macro(nm + "VsWoneDEnsStenPlusAuc", f"${W(key, 'S10+', 'd_ens_auroc'):+.3f} \\pm {W(key, 'S10+', 'd_ens_auroc_se'):.3f}$")
+            macro(nm + "VsWoneDEnsSseven", f"${W(key, 'S7', 'd_ens_challenge'):+.3f} \\pm {W(key, 'S7', 'd_ens_challenge_se'):.3f}$")
     out.write_text("\n".join(lines) + "\n")
 
 
