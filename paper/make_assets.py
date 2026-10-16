@@ -448,6 +448,8 @@ def numbers_r3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
         macro(nm + "Sseven", f3(R(key, "S7", "challenge_mean")))
         macro(nm + "SsevenAuc", f3(R(key, "S7", "auroc_mean")))
         macro(nm + "StenPlusAuc", f3(R(key, "S10+", "auroc_mean")))
+        macro(nm + "StenAuc", f3(R(key, "S10", "auroc_mean")))
+        macro(nm + "EnsStenAuc", f3(R(key, "S10", "ens_auroc")))
         macro(nm + "EnsSseven", f3(R(key, "S7", "ens_challenge")))
         macro(nm + "EnsStenPlusAuc", f3(R(key, "S10+", "ens_auroc")))
         macro(nm + "Gap", f"${gaps[key]['gap']:+.2f}$")
@@ -456,6 +458,7 @@ def numbers_r3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
             macro(nm + "DSseven", f"${R(key, 'S7', 'd_challenge'):+.3f} \\pm {R(key, 'S7', 'd_challenge_se'):.3f}$")
             macro(nm + "DSsevenAuc", f"${R(key, 'S7', 'd_auroc'):+.3f} \\pm {R(key, 'S7', 'd_auroc_se'):.3f}$")
             macro(nm + "DStenPlusAuc", f"${R(key, 'S10+', 'd_auroc'):+.3f} \\pm {R(key, 'S10+', 'd_auroc_se'):.3f}$")
+            macro(nm + "DStenAuc", f"${R(key, 'S10', 'd_auroc'):+.3f} \\pm {R(key, 'S10', 'd_auroc_se'):.3f}$")
     if rule is not None and "qualifies" in rule.columns:
         q = [g for g, ok in zip(rule["group"], rule["qualifies"]) if bool(ok)]
         macro("rThreeQualifies", ", ".join(q) if q else "none")
@@ -468,6 +471,10 @@ def numbers_r3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
     macro("rThreeValPos", f"{sum(r['n'] for r in val if int(r['label']) == 1):,}")
     macro("rThreeTrainN", f"{sum(r['n'] for r in tr):,}")
     macro("rThreeTrainPos", f"{sum(r['n'] for r in tr if int(r['label']) == 1):,}")
+    # Validation positives by format: checkpoints are selected within 7.34 s CODE-15 records (S7)
+    # because the 10 s format (CODE-15 and SaMi-Trop records of at least 9.9 s) has few positives.
+    macro("rThreeValPosSseven", f"{sum(r['n'] for r in val if int(r['label']) == 1 and r['length_group'] == 'short' and str(r['source']).upper().startswith('CODE')):,}")
+    macro("rThreeValPosStenPlus", f"{sum(r['n'] for r in val if int(r['label']) == 1 and r['length_group'] == 'long'):,}")
     macro("rThreeValPrev", f"{100 * sum(r['n'] for r in val if int(r['label']) == 1) / sum(r['n'] for r in val):.2f}")
     # Variant-vs-W1 and ensemble-size comparisons (second aggregate call with --baseline W1).
     w1_path = RES / "R3_TABLE_W1_A.csv"
@@ -494,6 +501,9 @@ def numbers_r3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
         if m:
             hours = int(m.group(1)) / 3600
             macro("entryTrainHours", f"{hours:.1f}"); macro("entryTfourHours", f"{2.5 * hours:.0f}")
+        m = re.search(r"INFER_SECONDS (\d+)", log)
+        if m:
+            macro("entryInferHours", f"{int(m.group(1)) / 3600:.1f}")
     out.write_text("\n".join(lines) + "\n")
 
 
@@ -530,6 +540,7 @@ def numbers(split, dur, agg, r2, r2c, gaps, best_epoch, dur_only, out: Path) -> 
         macro("nStenPos", f"{int(tc[tc['length_group']=='long']['label'].sum()):,}"),
         macro("nSseven", f"{int((tc['length_group']=='short').sum()):,}"), macro("nSten", f"{int((tc['length_group']=='long').sum()):,}"),
         macro("nStenPlusPos", f"{int(R('B0','S10+','positives')):,}"),
+        macro("nStenPlusPosSami", f"{int(test[test['source'].astype(str).str.upper().str.startswith('SAMI') & (test['length_group'] == 'long')]['label'].sum()):,}"),
         macro("durOnlyB", f3(dur_only["B"])), macro("durOnlyA", f3(dur_only["A"])),
         # round-1 ladder
         macro("rowZeroA", f3(A("row0_baseline", "A", "challenge_mean"))), macro("rowZeroAauc", f3(A("row0_baseline", "A", "auroc_mean"))),
@@ -544,6 +555,9 @@ def numbers(split, dur, agg, r2, r2c, gaps, best_epoch, dur_only, out: Path) -> 
         macro("fullAuc", f3(A("full-data final", "A", "auroc_mean"))), macro("fullA", f3(A("full-data final", "A", "challenge_mean"))),
         macro("fullSsevenAuc", f3(A("full-data final", "S7", "auroc_mean"))),
         macro("aucInflation", f"{A(B0g,'B','auroc_mean') - A(B0g,'S7','auroc_mean'):.3f}"),
+        # what the cue adds to the original entry's pooled score: view A minus within-short (S7)
+        macro("rowZeroInflA", f"{A('row0_baseline','A','challenge_mean') - A('row0_baseline','S7','challenge_mean'):.3f}"),
+        macro("rowZeroInflAuc", f"{A('row0_baseline','A','auroc_mean') - A('row0_baseline','S7','auroc_mean'):.3f}"),
         macro("ladderGainA", f"{A(B0g,'A','challenge_mean') - A('row0_baseline','A','challenge_mean'):.3f}"),
         macro("ptbRowFour", f"{ptb_mean('row4_film'):.2f}"), macro("ptbRowFive", f"{ptb_mean('row5_two_stage_ft'):.2f}"),
         macro("ptbRowFiveB", f"{ptb_mean('row5b_no_demographics'):.2f}"),

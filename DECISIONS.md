@@ -523,3 +523,15 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   rendering follows the Dockerfile step for step.
 - **Decision:** `final_r3` (commit 3103ff9) is the entry to submit for external scoring; no further change before that.
 - **Status:** active.
+
+## D-2026-10-16-3 — Manuscript revised after an independent review; PTB-XL grouping difference in the entry is deliberate
+- **Review (Fable, read-only) and rewrite (Opus):** 15 required and 4 optional changes applied: full round-3 rule stated in
+  Methods (W1R qualified by its second clause), S10-only round-3 gain reported (+0.084 ± 0.027) against the SaMi-Trop
+  source-cue objection, why W1 rather than MW was carried in and that the entry has no length-matched sampling, the
+  held-out split named as the selection set of three rounds, "pre-registered" replaced by "fixed in writing before the
+  runs", rounds named, original vs post-Challenge entry disambiguated, T4 time stated as a projection with its factor,
+  source-cue diagnostics defined in Methods. Abstract 250 words; 13 pages.
+- **Entry grouping:** the organisers' data folder has no `ptbxl_database.csv`, so the entry groups PTB-XL records
+  individually (validation 29,273 records) while the round-3 runs grouped them by patient (29,250). All PTB-XL records are
+  negative; the paper states the difference. Not a defect; no re-run.
+- **Status:** active; `TODO(authors)` items remain (authors, funding, CRediT, AI disclosure, three literature numbers).
