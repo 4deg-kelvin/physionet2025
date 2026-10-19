@@ -261,6 +261,10 @@ def run_model(
     try:
         pred, prob = model.predict_record(record)
         if prob is None:
+            # Unreadable or too-short record.  The organisers score a missing output as a
+            # miss, so it must show in the log rather than vanish silently.
+            if verbose:
+                print(f"[chagas] no prediction for {record}: record could not be preprocessed", flush=True)
             return None, None
         return pred, prob
     except NotImplementedError as exc:

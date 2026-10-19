@@ -46,3 +46,6 @@ transformers-autoencoder/
 xgboost-cleandata/
 pipeline.logexperiments/logs/
 experiments/.ladder_ids
+
+# Local symlink to the ECG-FM checkpoint (the Dockerfile creates its own)
+/mimic_iv_ecg_finetuned.pt

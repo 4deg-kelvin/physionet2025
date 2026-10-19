@@ -3,6 +3,8 @@ neurokit2
 pyentrp
 pywavelets
 lightning==2.5.2
+# chagas/ imports pytorch_lightning directly; `lightning` leaves it unpinned.
+pytorch-lightning==2.5.2
 torchmetrics
 wandb
 scikit-learn

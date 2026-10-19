@@ -16,7 +16,8 @@ From: nvidia/cuda:12.1.0-devel-ubuntu22.04
     /juice2/scr2/kelvinkn/other_work/edwards/physionet2025/submission/mimic_iv_ecg_finetuned.pt /opt/ecgfm/mimic_iv_ecg_finetuned.pt
 
 %post
-    export DEBIAN_FRONTEND=noninteractive
+    export DEBIAN_FRONTEND=noninteractive PIP_NO_CACHE_DIR=1
+    echo "f3e07588ee808d7e1e9e5608a997c9132883239518349f0565fd890590617b3d  /opt/ecgfm/mimic_iv_ecg_finetuned.pt" | sha256sum -c -
     APT='-o APT::Sandbox::User=root -o Dpkg::Options::=--force-unsafe-io'
     apt-get $APT update && apt-get $APT install -y --no-install-recommends \
         python3 python3-pip python3-dev python3-venv curl git wget bzip2 ca-certificates \
@@ -33,7 +34,7 @@ From: nvidia/cuda:12.1.0-devel-ubuntu22.04
     python -m pip install -e fairseq-signals/
 
 %environment
-    export DEBIAN_FRONTEND=noninteractive
+    export DEBIAN_FRONTEND=noninteractive HF_HUB_OFFLINE=1 WANDB_MODE=disabled
 
 %runscript
     cd /challenge && exec "$@"

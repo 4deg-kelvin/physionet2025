@@ -1,6 +1,8 @@
 FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+# No pip cache in the image (saves ~3 GB); no network lookups at run time.
+ENV PIP_NO_CACHE_DIR=1 HF_HUB_OFFLINE=1 WANDB_MODE=disabled
 
 # ---------------------------------------------------------------------------
 # Repo-independent setup.
@@ -41,9 +43,16 @@ RUN python -m pip install --upgrade pip
 # training and inference only on the organizers' machine.
 RUN pip install gdown
 
+# Google Drive rate-limits popular files; the authors' Hugging Face mirror holds the same
+# bytes (sha256 checked below), so a Drive refusal falls back to it instead of failing the
+# build. A truncated or substituted file fails the build here rather than at training time.
 RUN mkdir -p /opt/ecgfm \
-    && gdown 1uI2J_gMk0eh0vu3MbKPBEoupgakZ06j2 \
-         -O /opt/ecgfm/mimic_iv_ecg_finetuned.pt
+    && ( gdown 1uI2J_gMk0eh0vu3MbKPBEoupgakZ06j2 \
+           -O /opt/ecgfm/mimic_iv_ecg_finetuned.pt \
+         || wget -q -O /opt/ecgfm/mimic_iv_ecg_finetuned.pt \
+           https://huggingface.co/wanglab/ecg-fm/resolve/main/mimic_iv_ecg_finetuned.pt ) \
+    && echo "f3e07588ee808d7e1e9e5608a997c9132883239518349f0565fd890590617b3d  /opt/ecgfm/mimic_iv_ecg_finetuned.pt" \
+       | sha256sum -c -
 
 # torch is pinned deliberately: torch>=2.6 flipped torch.load to weights_only=True,
 # which the fairseq-signals checkpoint loader cannot satisfy (its `cfg` is an
