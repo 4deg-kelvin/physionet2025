@@ -12,19 +12,20 @@ TPR@5% within 7.34 s CODE-15% records. The configuration is the package default 
 `evaluate_model.py`. The four organiser files (`train_model.py`, `run_model.py`, `evaluate_model.py`, `helper_code.py`)
 and the `Dockerfile` block they mark "DO NOT EDIT" are unchanged.
 
-## Steps (run by the repository owner; the cluster shell cannot push)
+## Where it lives
+
+`main` is the entry (fast-forwarded to the tagged commit on 2026-10-19); `improve/robust-finetune` is kept as the
+development branch and points at the same commit. Clone cost for the organisers: 525 files, 59 MB checked out
+(Docker build context ~61 MB after `.dockerignore`); the history reachable from `main` holds 160 MB of blobs
+uncompressed, ~300 MB packed with every branch. No file in the tree exceeds 50 MB.
 
 ```bash
-cd /juice2/scr2/kelvinkn/other_work/edwards/improve_wt
-git push origin improve/robust-finetune              # the entry branch
-git push origin r3-submission                        # the tag on the submitted commit
-# If the submission form takes only a repository URL (default branch), fast-forward main to the entry:
-git push origin improve/robust-finetune:main         # origin/main is an ancestor; this is a fast-forward
+git clone https://github.com/4deg-kelvin/physionet2025.git     # default branch main == tag r3-submission
 ```
 
 Submission form text (adjust to the form's fields):
 
-> Repository: https://github.com/4deg-kelvin/physionet2025 — branch `improve/robust-finetune`, tag `r3-submission`
+> Repository: https://github.com/4deg-kelvin/physionet2025 — default branch `main`, tag `r3-submission`
 > (the commit the tag points to: `git rev-parse r3-submission`). Entry point: unmodified `train_model.py` / `run_model.py`.
 > Training trains three models sequentially in one call; measured 4.1 h on an NVIDIA Titan RTX for the full public
 > training set (292,885 records), projected ~10 h on a T4; peak GPU memory 5.0 GiB reserved in training, 2.7 GiB at
