@@ -1,0 +1,110 @@
+jagupard27.stanford.edu
+Fri Oct 16 12:18:56 AM PDT 2026
+b5414ab7ddeef6d8fc664088ab387a9c6c281336
+[run_info] start: wrote /juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/results/entry_final_r3/run_info.json
+[train] capped at 14.5 GiB of 23.5 GiB (NVIDIA TITAN RTX, sm (7, 5))
+[chagas] 292885 records under /juice2/scr2/kelvinkn/other_work/edwards/fixbranch_test/data_train_full
+[chagas] code15_exams.csv: 345779 exams
+[chagas] no ptbxl_database.csv: PTB-XL records are one group each
+[chagas] val_protocol=fixed cap_mode=prevalence monitor=val_challenge_s7
+[chagas] train 89954 (5847 pos) / val 29273 (681 pos); groups disjoint: True
+[chagas] stage 1 (frozen encoder), budget 1.183 h
+[chagas] stage 1 epoch 0 step 1406 val_challenge=0.3275 val_auroc=0.7991 val_auprc=0.1438 n=29273 short: challenge=0.3071 auroc=0.7496 long: challenge=0.1765 auroc=0.6456 views: challenge_s7=0.3071 auroc_s7=0.7496 auroc_s10p=0.7944 windows/record=2.36
+[chagas] stage 2 (12 transformer layers unfrozen, LLRD 0.85), budget 18.933 h
+[chagas] stage 2 epoch 0 step 1406 val_challenge=0.3642 val_auroc=0.8053 val_auprc=0.1747 n=29273 short: challenge=0.3184 auroc=0.7521 long: challenge=0.1176 auroc=0.6150 views: challenge_s7=0.3184 auroc_s7=0.7521 auroc_s10p=0.8021 windows/record=2.36
+[chagas] stage 2 epoch 1 step 2812 val_challenge=0.3935 val_auroc=0.8138 val_auprc=0.1933 n=29273 short: challenge=0.3446 auroc=0.7574 long: challenge=0.1176 auroc=0.6089 views: challenge_s7=0.3446 auroc_s7=0.7574 auroc_s10p=0.7941 windows/record=2.36
+[chagas] stage 2 epoch 2 step 4218 val_challenge=0.4038 val_auroc=0.8254 val_auprc=0.1965 n=29273 short: challenge=0.3502 auroc=0.7754 long: challenge=0.1176 auroc=0.6711 views: challenge_s7=0.3502 auroc_s7=0.7754 auroc_s10p=0.8101 windows/record=2.36
+[chagas] stage 2 epoch 3 step 5624 val_challenge=0.3965 val_auroc=0.8235 val_auprc=0.1905 n=29273 short: challenge=0.3434 auroc=0.7739 long: challenge=0.1765 auroc=0.6903 views: challenge_s7=0.3434 auroc_s7=0.7739 auroc_s10p=0.8369 windows/record=2.36
+[chagas] stage 2 epoch 4 step 7030 val_challenge=0.3946 val_auroc=0.8105 val_auprc=0.1881 n=29273 short: challenge=0.3352 auroc=0.7621 long: challenge=0.1765 auroc=0.6208 views: challenge_s7=0.3352 auroc_s7=0.7621 auroc_s10p=0.8059 windows/record=2.36
+[chagas] stage 2 epoch 5 step 8436 val_challenge=0.3847 val_auroc=0.7507 val_auprc=0.1807 n=29273 short: challenge=0.3258 auroc=0.7212 long: challenge=0.1765 auroc=0.5137 views: challenge_s7=0.3258 auroc_s7=0.7212 auroc_s10p=0.7501 windows/record=2.36
+[chagas] stage 2 epoch 6 step 8436 val_challenge=0.4038 val_auroc=0.8254 val_auprc=0.1965 n=29273 short: challenge=0.3502 auroc=0.7754 long: challenge=0.1176 auroc=0.6711 views: challenge_s7=0.3502 auroc_s7=0.7754 auroc_s10p=0.8101 windows/record=2.36
+[chagas] threshold = q0.95 = 0.642881
+[chagas] layer weights = [0.083  0.0843 0.0852 0.0861 0.0863 0.0866 0.086  0.0857 0.0864 0.0851
+ 0.0782 0.067 ]
+[chagas] saved /juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/results/entry_final_r3/model/chagas_model.ckpt
+[chagas] stage 1 (frozen encoder), budget 1.183 h
+[chagas] stage 1 epoch 0 step 1406 val_challenge=0.3348 val_auroc=0.7943 val_auprc=0.1412 n=29273 short: challenge=0.3034 auroc=0.7519 long: challenge=0.1765 auroc=0.6249 views: challenge_s7=0.3034 auroc_s7=0.7519 auroc_s10p=0.7884 windows/record=2.36
+[chagas] stage 2 (12 transformer layers unfrozen, LLRD 0.85), budget 18.933 h
+[chagas] stage 2 epoch 0 step 1406 val_challenge=0.3789 val_auroc=0.8056 val_auprc=0.1675 n=29273 short: challenge=0.3184 auroc=0.7502 long: challenge=0.1176 auroc=0.6062 views: challenge_s7=0.3184 auroc_s7=0.7502 auroc_s10p=0.7755 windows/record=2.36
+[chagas] stage 2 epoch 1 step 2812 val_challenge=0.4023 val_auroc=0.8258 val_auprc=0.1986 n=29273 short: challenge=0.3408 auroc=0.7767 long: challenge=0.1765 auroc=0.6707 views: challenge_s7=0.3408 auroc_s7=0.7767 auroc_s10p=0.8114 windows/record=2.36
+[chagas] stage 2 epoch 2 step 4218 val_challenge=0.3979 val_auroc=0.8161 val_auprc=0.1882 n=29273 short: challenge=0.3315 auroc=0.7612 long: challenge=0.1765 auroc=0.6925 views: challenge_s7=0.3315 auroc_s7=0.7612 auroc_s10p=0.8018 windows/record=2.36
+[chagas] stage 2 epoch 3 step 5624 val_challenge=0.4068 val_auroc=0.8032 val_auprc=0.1953 n=29273 short: challenge=0.3521 auroc=0.7498 long: challenge=0.1765 auroc=0.5890 views: challenge_s7=0.3521 auroc_s7=0.7498 auroc_s10p=0.7560 windows/record=2.36
+[chagas] stage 2 epoch 4 step 7030 val_challenge=0.3847 val_auroc=0.7924 val_auprc=0.1615 n=29273 short: challenge=0.3127 auroc=0.7421 long: challenge=0.1176 auroc=0.6758 views: challenge_s7=0.3127 auroc_s7=0.7421 auroc_s10p=0.8052 windows/record=2.36
+[chagas] stage 2 epoch 5 step 8436 val_challenge=0.3744 val_auroc=0.7704 val_auprc=0.1473 n=29273 short: challenge=0.3090 auroc=0.7368 long: challenge=0.1765 auroc=0.6170 views: challenge_s7=0.3090 auroc_s7=0.7368 auroc_s10p=0.7733 windows/record=2.36
+[chagas] stage 2 epoch 6 step 9842 val_challenge=0.3877 val_auroc=0.6887 val_auprc=0.1458 n=29273 short: challenge=0.3127 auroc=0.6699 long: challenge=0.1202 auroc=0.5405 views: challenge_s7=0.3127 auroc_s7=0.6699 auroc_s10p=0.7114 windows/record=2.36
+[chagas] stage 2 epoch 7 step 9842 val_challenge=0.4068 val_auroc=0.8032 val_auprc=0.1953 n=29273 short: challenge=0.3521 auroc=0.7498 long: challenge=0.1765 auroc=0.5890 views: challenge_s7=0.3521 auroc_s7=0.7498 auroc_s10p=0.7560 windows/record=2.36
+[chagas] threshold = q0.95 = 0.593668
+[chagas] layer weights = [0.0838 0.0847 0.0853 0.0858 0.0856 0.0867 0.0865 0.0859 0.0862 0.0844
+ 0.078  0.0671]
+[chagas] saved /juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/results/entry_final_r3/model/chagas_model_1.ckpt
+[chagas] stage 1 (frozen encoder), budget 1.183 h
+[chagas] stage 1 epoch 0 step 1406 val_challenge=0.3289 val_auroc=0.7982 val_auprc=0.1466 n=29273 short: challenge=0.2978 auroc=0.7543 long: challenge=0.1765 auroc=0.6311 views: challenge_s7=0.2978 auroc_s7=0.7543 auroc_s10p=0.7934 windows/record=2.36
+[chagas] stage 2 (12 transformer layers unfrozen, LLRD 0.85), budget 18.933 h
+[chagas] stage 2 epoch 0 step 1406 val_challenge=0.3803 val_auroc=0.8167 val_auprc=0.1785 n=29273 short: challenge=0.3408 auroc=0.7681 long: challenge=0.1176 auroc=0.6558 views: challenge_s7=0.3408 auroc_s7=0.7681 auroc_s10p=0.8162 windows/record=2.36
+[chagas] stage 2 epoch 1 step 2812 val_challenge=0.3906 val_auroc=0.8172 val_auprc=0.1818 n=29273 short: challenge=0.3464 auroc=0.7649 long: challenge=0.1765 auroc=0.6568 views: challenge_s7=0.3464 auroc_s7=0.7649 auroc_s10p=0.7778 windows/record=2.36
+[chagas] stage 2 epoch 2 step 4218 val_challenge=0.3950 val_auroc=0.8303 val_auprc=0.1791 n=29273 short: challenge=0.3296 auroc=0.7891 long: challenge=0.2353 auroc=0.7038 views: challenge_s7=0.3296 auroc_s7=0.7891 auroc_s10p=0.8067 windows/record=2.36
+[chagas] stage 2 epoch 3 step 5624 val_challenge=0.4038 val_auroc=0.8223 val_auprc=0.1938 n=29273 short: challenge=0.3539 auroc=0.7766 long: challenge=0.1176 auroc=0.6861 views: challenge_s7=0.3539 auroc_s7=0.7766 auroc_s10p=0.8187 windows/record=2.36
+[chagas] stage 2 epoch 4 step 7030 val_challenge=0.3759 val_auroc=0.8049 val_auprc=0.1580 n=29273 short: challenge=0.3277 auroc=0.7591 long: challenge=0.1176 auroc=0.6345 views: challenge_s7=0.3277 auroc_s7=0.7591 auroc_s10p=0.7929 windows/record=2.36
+[chagas] stage 2 epoch 5 step 8436 val_challenge=0.3568 val_auroc=0.7998 val_auprc=0.1547 n=29273 short: challenge=0.2959 auroc=0.7493 long: challenge=0.1176 auroc=0.6327 views: challenge_s7=0.2959 auroc_s7=0.7493 auroc_s10p=0.8164 windows/record=2.36
+[chagas] stage 2 epoch 6 step 9842 val_challenge=0.3377 val_auroc=0.7251 val_auprc=0.1413 n=29273 short: challenge=0.2865 auroc=0.7050 long: challenge=0.1765 auroc=0.5810 views: challenge_s7=0.2865 auroc_s7=0.7050 auroc_s10p=0.7154 windows/record=2.36
+[chagas] stage 2 epoch 7 step 9842 val_challenge=0.4038 val_auroc=0.8223 val_auprc=0.1938 n=29273 short: challenge=0.3539 auroc=0.7766 long: challenge=0.1176 auroc=0.6861 views: challenge_s7=0.3539 auroc_s7=0.7766 auroc_s10p=0.8187 windows/record=2.36
+[chagas] threshold = q0.95 = 0.615284
+[chagas] layer weights = [0.0835 0.0841 0.0849 0.0855 0.0855 0.0866 0.086  0.0857 0.0868 0.0856
+ 0.0786 0.0671]
+[chagas] saved /juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/results/entry_final_r3/model/chagas_model_2.ckpt
+[train] PEAK ALLOCATED: 4.14 GiB
+[train] PEAK RESERVED : 5.00 GiB
+[train] WALL TIME     : 248.2 min
+TRAIN_SECONDS 14896  members: 3
+[chagas] loaded chagas_model.ckpt (threshold 0.642881)
+[chagas] loaded chagas_model_1.ckpt (threshold 0.593668)
+[chagas] loaded chagas_model_2.ckpt (threshold 0.615284)
+[chagas] 3 member(s) on cuda:0; decision threshold 0.617278
+[predict] 73300 records, batch 64, 10 workers, window_mode=multi, window_stride=None, wise_ft_alpha=[None, None, None]
+[predict] wrote /juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/results/entry_final_r3/raw_predictions_A.csv: 73300 records, 0 failed, 25.0 min (49 records/s)
+[predict] PEAK ALLOCATED: 2.70 GiB
+[chagas] loaded chagas_model.ckpt (threshold 0.642881)
+[chagas] loaded chagas_model_1.ckpt (threshold 0.593668)
+[chagas] loaded chagas_model_2.ckpt (threshold 0.615284)
+[chagas] 3 member(s) on cuda:0; decision threshold 0.617278
+[predict] 73300 records, batch 64, 10 workers, window_mode=multi, window_stride=None, wise_ft_alpha=[None, None, None]
+[predict] wrote /juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/results/entry_final_r3/raw_predictions_C.csv: 73300 records, 0 failed, 24.1 min (51 records/s)
+[predict] PEAK ALLOCATED: 2.70 GiB
+# Evaluation report -- entry_final_r3
+
+## Views (TPR@5% = `challenge`; 95% bootstrap CIs, 1000 resamples)
+
+* `A`: full held-out (source and length cues available)
+* `B`: CODE-15 only (source cue removed; length cue still available)
+* `S7`: CODE-15, duration < 7.5 s (no source or length cue) -- PRIMARY
+* `S10`: CODE-15, duration >= 9.9 s (closest format to the hidden cohorts)
+* `S10+`: CODE-15 >= 9.9 s negatives + all >= 9.9 s positives (secondary)
+* `·C`: the same view on Test C (organiser-style perturbations)
+
+```
+  view     n  positives  prevalence  challenge  challenge_lo  challenge_hi  auroc  auroc_lo  auroc_hi  auprc  ceiling  n_failed
+     A 73300       1662      0.0227     0.4543        0.4310        0.4768 0.8447    0.8338    0.8548 0.2057   1.0000         0
+     B 68575       1336      0.0195     0.4521        0.4266        0.4766 0.8391    0.8266    0.8508 0.1780   1.0000         0
+    S7 40867       1259      0.0308     0.4162        0.3930        0.4424 0.8080    0.7936    0.8226 0.2168   1.0000         0
+   S10 26435         77      0.0029     0.3636        0.2545        0.4723 0.7649    0.7061    0.8183 0.0186   1.0000         0
+  S10+ 26598        240      0.0090     0.4708        0.4088        0.5347 0.8536    0.8284    0.8764 0.1101   1.0000         0
+   A·C 73300       1662      0.0227     0.4477        0.4250        0.4715 0.8409    0.8304    0.8519 0.2025   1.0000         0
+   B·C 68575       1336      0.0195     0.4461        0.4206        0.4721 0.8336    0.8213    0.8458 0.1743   1.0000         0
+  S7·C 40867       1259      0.0308     0.4114        0.3873        0.4368 0.8059    0.7917    0.8206 0.2166   1.0000         0
+ S10·C 26435         77      0.0029     0.3636        0.2632        0.4675 0.7452    0.6844    0.8042 0.0174   1.0000         0
+S10+·C 26598        240      0.0090     0.4667        0.4046        0.5281 0.8459    0.8180    0.8699 0.1058   1.0000         0
+```
+
+**C - A gap: -0.0066** (robust); A = 0.4543, C = 0.4477.
+**S7·C - S7 gap: -0.0048** (the C-A gap with the length cue removed).
+
+## Length-shortcut diagnostics
+
+[run_info] end: wrote /juice2/scr2/kelvinkn/other_work/edwards/improve_wt/experiments/results/entry_final_r3/run_info.json
+INFER_SECONDS 3139
+members: ['chagas_model.ckpt', 'chagas_model_1.ckpt', 'chagas_model_2.ckpt']
+split: {'val_protocol': 'fixed', 'val_seed': 12345, 'monitor': 'val_challenge_s7', 'ptbxl_patients': 0}
+member 0 best_by_stage: {'stage1': 0.3071, 'stage2': 0.3502}
+member 1 best_by_stage: {'stage1': 0.3034, 'stage2': 0.3521}
+member 2 best_by_stage: {'stage1': 0.2978, 'stage2': 0.3539}
+ENTRY CHECK OK

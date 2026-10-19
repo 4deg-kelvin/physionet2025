@@ -10,12 +10,13 @@ Updated at every milestone so the work can be resumed by reading this file.
   run_r3.sh, batch_r3*.sh, aggregate `--rule r3`, tests, split audit — implemented by an Opus agent (reviewed). CPU tests 17885765: 173 passed. Split audit 17885742: PASS.
 
 ## In progress
-- Chain submitted (code committed as 12896b6 before the array started): r3 smoke 17885828 -> runner smoke 17885829 (afterok) -> array 17885830 (afterok, 14 tasks %4) -> table 17885831 (afterany). DO NOT edit chagas/ or experiments/*.py|sh while it runs.
+- Nothing. The entry is frozen (tag `r3-submission` == `main`); the organisers' own `docker build` is the only unexercised step.
 
-## Todo
-- Apply the rule; set the default config; T4 time-budget check; container check (docker daemon is not reachable
-  from the login node — permission denied on docker.sock; apptainer 1.5.4 is available).
-- README round-3 section, REPRODUCE §7, METHODS/PROVENANCE, paper (Methods 2.1/2.2, Results 3.6).
+## Done (round 3 → submission)
+- Array 17885830 (14/14) and tables 17885831 / 17899069: rule adopted W1R (D-2026-10-16-1).
+- Default config = final_r3; tests 174→175 passed; entry time-budget check 17902758 (4.1 h for 3 members); container
+  build + in-container run (17902785/6, 17967832/3, 17969157/8) all passed; audits in SUBMISSION_AUDIT.md;
+  organisers' instructions checked (D-2026-10-19-2); README, SUBMISSION.md.
 
 ## Job ids
 - Website check + unlabelled-header tolerance (2026-10-19): 17969156 CPU tests; 17969157 container rebuild; 17969158 in-container entry run

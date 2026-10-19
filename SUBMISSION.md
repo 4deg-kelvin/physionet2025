@@ -15,7 +15,7 @@ and the `Dockerfile` block they mark "DO NOT EDIT" are unchanged.
 ## Where it lives
 
 `main` is the entry (fast-forwarded to the tagged commit on 2026-10-19); `improve/robust-finetune` is kept as the
-development branch and points at the same commit. Clone cost for the organisers: 525 files, 59 MB checked out
+development branch and points at the same commit. Clone cost for the organisers: 526 files, 59 MB checked out
 (Docker build context ~61 MB after `.dockerignore`); the history reachable from `main` holds 160 MB of blobs
 uncompressed, ~300 MB packed with every branch. No file in the tree exceeds 50 MB.
 
@@ -34,13 +34,15 @@ Submission form text (adjust to the form's fields):
 
 ## Evidence that it runs as the organisers run it
 
+The logs cited below are committed under `experiments/logs/` (the SLURM job ids are the cluster's).
+
 | Check | Where | Result |
 |---|---|---|
-| Container build from the Dockerfile rendering (Apptainer, rootless; no Docker daemon on the cluster), hardened Dockerfile incl. checkpoint sha256 check | `experiments/logs/container_build.out`, SLURM 17967832 | BUILD OK, 16 min |
-| `train_model.py` → `run_model.py` → `evaluate_model.py` inside the image, default config, 400 records | `experiments/logs/container_run.out`, SLURM 17967833 | 400/400 outputs, RUN OK |
+| Container build from the Dockerfile rendering (Apptainer, rootless; no Docker daemon on the cluster), hardened Dockerfile incl. checkpoint sha256 check | `experiments/logs/container_build.out`, SLURM 17969157 | BUILD OK, 15 min |
+| `train_model.py` → `run_model.py` → `evaluate_model.py` inside the image, default config, 400 records | `experiments/logs/container_run.out`, SLURM 17969158 | 400/400 outputs, RUN OK |
 | Default config on the full training split, then inference on 73,300 held-out records, 14.5 GiB allocator cap | `experiments/logs/entry_check.out`, SLURM 17902758 | train 14,896 s (3 members), infer 3,139 s for 2 × 73,300 |
 | Held-out scores of that entry (patient-grouped split, natural prevalence 2.27%) | `experiments/results/entry_final_r3/report.md` | pooled TPR@5% 0.454 / AUROC 0.845; 7.34 s records 0.416 / 0.808; 10 s format AUROC 0.854 |
-| Unit tests (174) | `experiments/logs/pytest_cpu.out`, SLURM 17967831 | passed |
+| Unit tests (175) | `experiments/logs/pytest_cpu.out`, SLURM 17969156 | passed |
 | Submission conformance and Docker audits (two independent read-only audits, no FAIL; WARNs fixed) | `SUBMISSION_AUDIT.md` | see file |
 
 Not exercised: the organisers' own `docker build` (no daemon reachable here). The Apptainer definition follows the

@@ -507,7 +507,7 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   indirect: it removed the residual length-cue gap (+0.08 → +0.01) and gave the best ensemble on both views. W1
   remains the fallback if the entry's time-budget check fails.
 - **Protocol effect:** B0 under the fixed protocol scored S7 0.386 / S10+ 0.781 vs 0.384 / 0.779 in round 2 — unchanged.
-- **Status:** active; time-budget check and container check pending.
+- **Status:** active; time-budget and container checks passed (D-2026-10-16-2).
 
 ## D-2026-10-16-2 — Entry checks pass: time budget, container, end-to-end
 - **Time budget (SLURM 17902758, Titan RTX, 14.5 GiB cap, `data_train_full` 292,885 records):** the unmodified
@@ -561,4 +561,6 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   stays in inference (`want_label=False` there as before). Test added (`test_training_scan_skips_unlabelled_headers`).
 - **Not changed:** numpy stays at 1.26.4 (the version every result and the container run used); `evaluate_model.py` stays
   at the earlier upstream version (the organisers score with their own code).
-- **Status:** active; re-verification chain (tests → container rebuild → in-container run) in R3_PROGRESS.md.
+- **Re-verification:** CPU tests 17969156 (175 passed); Apptainer rebuild 17969157 (BUILD OK, sha256 OK); in-container
+  entry run 17969158 (400/400, RUN OK). Tag `r3-submission` and `main` moved to this state.
+- **Status:** active.

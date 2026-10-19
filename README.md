@@ -3,8 +3,9 @@
 Fine-tuned ECG-FM foundation model (learnable aggregation over its 12 transformer layers → MLP head), 5 s input
 windows, hard-negative ranking loss, three-seed ensemble trained in one call. Layout follows the organisers'
 [python-example-2025](https://github.com/physionetchallenges/python-example-2025): `train_model.py`,
-`run_model.py`, `evaluate_model.py` and `helper_code.py` are the organisers' scripts; the team's code is
-`team_code.py` → the `chagas/` package.
+`run_model.py` are the organisers' scripts (byte-identical to their example), `helper_code.py` and
+`evaluate_model.py` are their earlier versions (see SUBMISSION.md); the team's code is `team_code.py` → the
+`chagas/` package.
 
 ```bash
 docker build -t chagas .
