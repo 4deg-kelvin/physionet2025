@@ -1,7 +1,7 @@
 ===== ENV =====
-jagupard27.stanford.edu
-Fri Oct 16 12:15:57 AM PDT 2026
-b5414ab7ddeef6d8fc664088ab387a9c6c281336
+jagupard35.stanford.edu
+Mon Oct 19 01:33:40 PM PDT 2026
+3213fa1b55a116e3bbb8d13e10f91291e307e1af
 torch 2.7.1+cu118 | numpy 1.26.4 | lightning 2.5.2 | cuda False
 ===== pytest =====
 ============================= test session starts ==============================
@@ -205,6 +205,6 @@ tests/test_training.py::test_time_limit_callback_stops_training_and_leaves_a_che
   /juice2/scr2/kelvinkn/conda_envs/physionet/lib/python3.9/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:425: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=9` in the `DataLoader` to improve performance.
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-================ 174 passed, 175 warnings in 130.28s (0:02:10) =================
+================ 174 passed, 175 warnings in 110.16s (0:01:50) =================
 PYTEST_RC=0
-Fri Oct 16 12:18:31 AM PDT 2026
+Mon Oct 19 01:35:56 PM PDT 2026

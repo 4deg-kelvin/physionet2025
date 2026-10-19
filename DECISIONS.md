@@ -535,3 +535,15 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   individually (validation 29,273 records) while the round-3 runs grouped them by patient (29,250). All PTB-XL records are
   negative; the paper states the difference. Not a defect; no re-run.
 - **Status:** active; `TODO(authors)` items remain (authors, funding, CRediT, AI disclosure, three literature numbers).
+
+## D-2026-10-19-1 — Submission package frozen: tag `r3-submission`
+- **Audits:** two independent read-only audits (runtime conformance, Dockerfile) found no FAIL (SUBMISSION_AUDIT.md). Their
+  WARNs were fixed in 3213fa1: checkpoint download falls back to the Hugging Face mirror and is sha256-checked, pytorch-
+  lightning pinned to 2.5.2 (the version every result used), pip cache off, `.dockerignore` patterns match at any depth,
+  offline env vars, `run_model -v` logs records that cannot be preprocessed. Left as is: unused `exclude_label_issues`
+  option, legacy modules and two unused CSVs in the tree (not imported).
+- **Re-verification after the edits:** CPU tests 17967831 (174 passed); Apptainer rebuild 17967832 (BUILD OK, sha256 check
+  executed); in-container entry run 17967833 (400/400, RUN OK).
+- **Decision:** the commit tagged `r3-submission` is what goes to the organisers; no further change to the judged path
+  without re-running the three checks above. Not exercised: the organisers' own `docker build` (no daemon reachable).
+- **Status:** active.

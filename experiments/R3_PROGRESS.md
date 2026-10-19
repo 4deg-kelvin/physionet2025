@@ -18,7 +18,7 @@ Updated at every milestone so the work can be resumed by reading this file.
 - README round-3 section, REPRODUCE §7, METHODS/PROVENANCE, paper (Methods 2.1/2.2, Results 3.6).
 
 ## Job ids
-- Submission hardening (2026-10-19): 17967831 CPU tests; 17967832 container rebuild; 17967833 in-container entry run (afterok chain)
+- Submission hardening (2026-10-19): 17967831 CPU tests (174 passed); 17967832 container rebuild (BUILD OK); 17967833 in-container entry run (RUN OK) -> tag r3-submission
 - 17902785 container rebuild from commit 3103ff9: BUILD OK (Dockerfile-equivalent, 22 min); 17902786 entry inside the SIF on the 400-record set: RUN OK (3 members, 400/400 outputs, 7m45); 17902758 entry time-budget check: COMPLETED 5h01 (train 4.1 h for 3 members, inference 52 min; T4 projection ~10 h), ENTRY CHECK OK
 - 17902698 CPU tests after the default flip: 11 failed (tests assumed the old defaults; now use tests/_legacy.legacy_config); 17902744 tests: collection error (import placed inside a parenthesised import); 17902757 tests re-run; 17902758 entry time-budget check (afterok)
 - 17885659 container build FAILED (buildkit needs docker.sock); 17885678 def build FAILED (host fakeroot lib needs glibc 2.38); 17885786 def build: SIF BUILT (11 GB, Dockerfile-equivalent: apt+pip in a root-mapped namespace); its verify step failed only because the exec mounted $HOME and picked up a broken user-site numpy (fixed: --containall --cleanenv PYTHONNOUSERSITE=1); 17886048 container run

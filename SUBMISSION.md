@@ -25,7 +25,7 @@ git push origin improve/robust-finetune:main         # origin/main is an ancesto
 Submission form text (adjust to the form's fields):
 
 > Repository: https://github.com/4deg-kelvin/physionet2025 — branch `improve/robust-finetune`, tag `r3-submission`
-> (commit <fill in `git rev-parse r3-submission`>). Entry point: unmodified `train_model.py` / `run_model.py`.
+> (the commit the tag points to: `git rev-parse r3-submission`). Entry point: unmodified `train_model.py` / `run_model.py`.
 > Training trains three models sequentially in one call; measured 4.1 h on an NVIDIA Titan RTX for the full public
 > training set (292,885 records), projected ~10 h on a T4; peak GPU memory 5.0 GiB reserved in training, 2.7 GiB at
 > inference. Inference over 73,300 records took 26 min. No internet access is needed after `docker build`
@@ -35,12 +35,12 @@ Submission form text (adjust to the form's fields):
 
 | Check | Where | Result |
 |---|---|---|
-| Container build from the Dockerfile rendering (Apptainer, rootless; no Docker daemon on the cluster) | `experiments/logs/container_build.out`, SLURM 17902785 | BUILD OK, 22 min |
-| `train_model.py` → `run_model.py` → `evaluate_model.py` inside the image, default config, 400 records | `experiments/logs/container_run.out`, SLURM 17902786 | 400/400 outputs, RUN OK |
+| Container build from the Dockerfile rendering (Apptainer, rootless; no Docker daemon on the cluster), hardened Dockerfile incl. checkpoint sha256 check | `experiments/logs/container_build.out`, SLURM 17967832 | BUILD OK, 16 min |
+| `train_model.py` → `run_model.py` → `evaluate_model.py` inside the image, default config, 400 records | `experiments/logs/container_run.out`, SLURM 17967833 | 400/400 outputs, RUN OK |
 | Default config on the full training split, then inference on 73,300 held-out records, 14.5 GiB allocator cap | `experiments/logs/entry_check.out`, SLURM 17902758 | train 14,896 s (3 members), infer 3,139 s for 2 × 73,300 |
 | Held-out scores of that entry (patient-grouped split, natural prevalence 2.27%) | `experiments/results/entry_final_r3/report.md` | pooled TPR@5% 0.454 / AUROC 0.845; 7.34 s records 0.416 / 0.808; 10 s format AUROC 0.854 |
-| Unit tests (174) | `experiments/logs/pytest_cpu.out`, SLURM 17902757 | passed |
-| Submission conformance and Docker audits | `SUBMISSION_AUDIT.md` | see file |
+| Unit tests (174) | `experiments/logs/pytest_cpu.out`, SLURM 17967831 | passed |
+| Submission conformance and Docker audits (two independent read-only audits, no FAIL; WARNs fixed) | `SUBMISSION_AUDIT.md` | see file |
 
 Not exercised: the organisers' own `docker build` (no daemon reachable here). The Apptainer definition follows the
 Dockerfile step for step, with the checkpoint copied from a local file instead of gdown.
