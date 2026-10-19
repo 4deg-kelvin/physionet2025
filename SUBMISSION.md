@@ -61,3 +61,19 @@ Dockerfile step for step, with the checkpoint copied from a local file instead o
 Our internal result is that record length is a label shortcut in CODE-15% (paper/main.pdf, section 3.1) and that the
 entry does not use it (length-cue gap +0.01). The hidden cohorts are all ~10 s recordings; whether removing the cue
 improves external performance is untested until the organisers score this entry (paper, Limitations).
+
+## Checked against the organisers' instructions (moody-challenge.physionet.org/2025/submissions, python-example-2025; 2026-10-19)
+
+| Requirement | Status |
+|---|---|
+| Code in the root directory of the `main` or `master` branch | `main` == tag `r3-submission` |
+| `train_model.py`, `run_model.py`, `helper_code.py` unmodified (the organisers substitute their originals) | `train_model.py` and `run_model.py` are byte-identical to python-example-2025 `main`; `helper_code.py` differs in one line of `compute_challenge_score` (`np.argsort(..., kind='stable')` here, `stable=True` upstream — the upstream form needs numpy ≥ 2, our image pins 1.26.4; same ordering). `team_code.py` signatures unchanged |
+| Dockerfile: keep the three "DO NOT EDIT" lines, pin versions, add system packages as needed | kept byte-for-byte; base `nvidia/cuda:12.1.0-devel-ubuntu22.04`; torch/torchvision/transformers/numpy/pandas/lightning pinned |
+| `requirements.txt` with versions, `scikit-learn` not `sklearn` | our Dockerfile installs `requirements_linux.txt` (same role); uses `scikit-learn` |
+| Environment: g4dn.4xlarge, 16 vCPU, 60 GB RAM usable, optional T4; 72 h training, 24 h validation (scaled for test) | measured 4.1 h training on a Titan RTX (~10 h T4 projection), 5.0 GiB GPU; `num_workers` 10 ≤ 16 vCPU; inference 0.4 h per 73k records |
+| Move repeated setup from `run_model` into `load_model` | done: `load_model` builds the three members once; `run_model` only preprocesses and predicts |
+| Build the image and test on at least one training file before submitting | Apptainer rendering built; the three scripts ran on 400 records (SUBMISSION_AUDIT.md) |
+| Leave out files not needed to create and run the code (e.g. training data) | no data in the repo; `code15_exams.csv` (34 MB) is needed for labels; two unused CSVs (7 MB) and legacy modules remain, harmless |
+| Private repository shared with `physionetchallengeshelper`, or public | the repository is public; if it is made private, share it with that user |
+| Robustness tests the organisers may run (altered/missing values, 15% or 150% training set, randomised labels) | signal NaNs are zeroed in preprocessing; training-set size is free (the prevalence cap keeps the negative ratio; the time budget scales); labels are read per record and a header without a label is skipped with a count, not fatal |
+| `evaluate_model.py` | the organisers' evaluation runs with their own code; ours is the earlier upstream version (same metric) |

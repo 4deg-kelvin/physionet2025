@@ -547,3 +547,18 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - **Decision:** the commit tagged `r3-submission` is what goes to the organisers; no further change to the judged path
   without re-running the three checks above. Not exercised: the organisers' own `docker build` (no daemon reachable).
 - **Status:** active.
+
+## D-2026-10-19-2 — Checked against the organisers' instructions; unlabelled training headers are skipped, not fatal
+- **Checked (moody-challenge.physionet.org/2025/submissions, python-example-2025 `main`):** code in the root of `main`
+  (done); `train_model.py` and `run_model.py` byte-identical to upstream; `helper_code.py` differs in one line
+  (`np.argsort(kind='stable')` vs upstream `stable=True`, which needs numpy ≥ 2 — our image pins 1.26.4; the organisers
+  substitute their own copies of these files anyway); Dockerfile "DO NOT EDIT" lines intact; versions pinned;
+  g4dn.4xlarge / 60 GB / optional T4 / 72 h training / 24 h validation all within our measurements; `load_model` does the
+  setup; image built and run on records before submitting. Added a root README.md. Table in SUBMISSION.md.
+- **Change:** the organisers say they stress-test with altered labels and data. A training header without a
+  `# Chagas label:` line used to abort the whole run (`chagas/dataset.py` re-raised the tripwire). It is now skipped and
+  counted (`[chagas] N of M records skipped`); a run with no labelled record still fails loudly. The held-out-label tripwire
+  stays in inference (`want_label=False` there as before). Test added (`test_training_scan_skips_unlabelled_headers`).
+- **Not changed:** numpy stays at 1.26.4 (the version every result and the container run used); `evaluate_model.py` stays
+  at the earlier upstream version (the organisers score with their own code).
+- **Status:** active; re-verification chain (tests → container rebuild → in-container run) in R3_PROGRESS.md.

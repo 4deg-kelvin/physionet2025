@@ -150,3 +150,24 @@ def test_split_keeps_every_source_and_both_classes():
     assert {e.source for e in val} == {"code15", "ptbxl", "samitrop"}
     assert any(e.label_hard == 1 for e in val)
     assert any(e.label_hard == 0 for e in val)
+
+
+
+def test_training_scan_skips_unlabelled_headers(tmp_path):
+    """A training header without a label is skipped and counted, never fatal (the
+    organisers' robustness tests alter labels); a header with a label is kept."""
+    from chagas.config import default_config
+    from chagas.dataset import scan_records
+    from chagas.labels import Code15Table
+
+    def write(stem: str, header: str) -> str:
+        (tmp_path / f"{stem}.hea").write_text(header)
+        return str(tmp_path / stem)
+
+    labelled = write("a", "a 12 400 2934\n" + "\n".join(f"a.mat 16 1000 0 0 0 0 0 l{i}" for i in range(12)) + "\n# Age: 50\n# Sex: Male\n# Source: CODE-15%\n# Chagas label: True\n")
+    unlabelled = write("b", "b 12 400 2934\n" + "\n".join(f"b.mat 16 1000 0 0 0 0 0 l{i}" for i in range(12)) + "\n# Age: 50\n# Sex: Male\n# Source: CODE-15%\n")
+    cfg = default_config()
+    cfg.labels.multi_report = False
+    table = Code15Table.empty(cfg.labels.aux_columns)
+    entries = scan_records([labelled, unlabelled], cfg, table=table, workers=1)
+    assert [e.record_id for e in entries] == ["a"]

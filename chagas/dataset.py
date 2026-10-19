@@ -80,9 +80,10 @@ def _read_header_meta(path: str) -> Optional[Tuple[str, str, int, str, float]]:
     try:
         with open(path + ".hea", "r") as fh:
             header = fh.read()
-        info = L.parse_patient_info(header, want_label=True)
-    except NotImplementedError:
-        raise
+        # want_label=False: a training header without a label line is a record to skip
+        # (the organisers alter labels in their robustness tests), not a reason to abort
+        # the whole run.  The tripwire for reading held-out labels lives in inference.
+        info = L.parse_patient_info(header, want_label=False)
     except Exception:
         return None
     if info.label is None:
@@ -111,7 +112,11 @@ def scan_records(
         table = L.Code15Table.from_csv(cfg.code15_exams_path, cfg.labels.aux_columns)
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        raw = [r for r in pool.map(_read_header_meta, paths) if r is not None]
+        metas = list(pool.map(_read_header_meta, paths))
+    raw = [r for r in metas if r is not None]
+    n_skipped = len(metas) - len(raw)
+    if n_skipped:
+        print(f"[chagas] {n_skipped} of {len(metas)} records skipped: unreadable header or no Chagas label", flush=True)
     excluded = set(cfg.data.exclude_sources)
     if excluded:
         raw = [r for r in raw if r[3] not in excluded]
