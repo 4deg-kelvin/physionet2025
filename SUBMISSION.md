@@ -25,6 +25,7 @@ git clone https://github.com/4deg-kelvin/physionet2025.git     # default branch 
 
 Submission form text (adjust to the form's fields):
 
+> Team: chagas_detector (official-phase Challenge Submission ID 2531, CinC abstract 416; test score 0.245, rank 8).
 > Repository: https://github.com/4deg-kelvin/physionet2025 — default branch `main`, tag `r3-submission`
 > (the commit the tag points to: `git rev-parse r3-submission`). Entry point: unmodified `train_model.py` / `run_model.py`.
 > Training trains three models sequentially in one call; measured 4.1 h on an NVIDIA Titan RTX for the full public
