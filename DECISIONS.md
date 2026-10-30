@@ -592,4 +592,5 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   3.2× more weight on layer 7 than on layer 12 (0.129 vs 0.040); every fine-tuned model stays within 0.067–0.095 of
   uniform, identically across seeds and 5 s/10 s inputs. Reported as an observation with the optimiser-step confound stated.
 - **Not changed:** results, numbers, attributions, decision-log framing, limitations (selection set; one external score).
-- **Status:** active; rewrite in progress.
+- **Outcome:** rewrite done in two passes (Opus) with an independent accuracy-and-voice review (Fable) in between; 15 pages, abstract 249 words, body + captions ≈ 7,700 words, hedge rate 1.5 → 4.5 per 1,000 words, no stock phrases. New title: "Fine-tuning the ECG-FM foundation model for Chagas screening: what transferred to the hidden cohorts of the PhysioNet Challenge 2025". New figure 5 (layer weights), new refs dong2025, nguyen2025mol, gow2023.
+- **Status:** active.

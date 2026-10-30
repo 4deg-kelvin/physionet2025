@@ -13,6 +13,7 @@ Inputs (all produced by committed scripts; see experiments/REPRODUCE.md):
   experiments/results/RESCORED_*.csv         rescore_all.py   (round 1, re-scored)
   experiments/results/R2_TABLE_{A,C}.csv     aggregate.py     (round 2)
   experiments/results/<run>/...              per-run predictions, summaries, manifests
+  experiments/results/entry_final_r3/layer_weights.csv   softmaxed layer-aggregation weights
 """
 from __future__ import annotations
 
@@ -294,6 +295,71 @@ def fig_round2(r2: pd.DataFrame, rescored: pd.DataFrame, out: Path) -> None:
     plt.close(fig)
 
 
+LAYER_CSV = RES / "entry_final_r3" / "layer_weights.csv"
+
+
+def layer_table() -> pd.DataFrame:
+    """Softmaxed layer-aggregation weights, one row per checkpoint, columns = layers 1..12."""
+    d = pd.read_csv(LAYER_CSV)
+    d["ckpt"] = d["run"] + ":" + d["member"].astype(str)
+    w = d.pivot_table(index="ckpt", columns="layer", values="weight")
+    meta = d.groupby("ckpt")[["run", "member", "two_stage", "window_seconds"]].first()
+    return w.join(meta)
+
+
+def fig_layers(out: Path) -> None:
+    """Learned softmax weights over the 12 ECG-FM layers: frozen encoder, round-3 B0, entry."""
+    t = layer_table()
+    layers = list(range(1, 13))
+    fig, ax = plt.subplots(figsize=(4.6, 2.7))
+    ax.axhline(1 / 12, color=MUTED, lw=0.7, zorder=1)
+    ax.text(12.35, 1 / 12, "uniform", fontsize=7, color=INK2, va="center", ha="left")
+    frozen = t.loc["row0_baseline:0", layers].to_numpy(dtype=float)
+    ax.plot(layers, frozen, color=ORANGE, lw=1.6, marker="s", markersize=5, markeredgecolor="white", markeredgewidth=1.0, zorder=3,
+            label="Step 0: frozen encoder, 10 s input")
+    b0 = t[t["run"].str.startswith("r3_B0_")][layers].to_numpy(dtype=float)
+    ax.plot(layers, b0.mean(0), color=BLUE, lw=1.6, marker="o", markersize=5, markeredgecolor="white", markeredgewidth=1.0, zorder=3,
+            label="Round-3 B0: fine-tuned, 10 s (mean of 3 seeds)")
+    entry = t[t["run"] == "entry_final_r3"][layers].to_numpy(dtype=float)
+    for row in entry:
+        ax.plot(layers, row, color=AQUA, lw=0.8, alpha=0.7, zorder=2)
+    ax.plot(layers, entry.mean(0), color=AQUA, lw=0, marker="^", markersize=5.5, markeredgecolor="white", markeredgewidth=1.0, zorder=4)
+    ax.plot([], [], color=AQUA, lw=0.8, marker="^", markersize=5.5, markeredgecolor="white", markeredgewidth=1.0,
+            label="Entry: fine-tuned, 5 s windows (3 members; markers = mean)")
+    ax.set_xticks(layers)
+    ax.set_xlim(0.6, 12.4)
+    ax.set_xlabel("Transformer layer of ECG-FM")
+    ax.set_ylabel("Softmax weight")
+    ax.grid(axis="x", visible=False)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=1)
+    fig.savefig(out)
+    plt.close(fig)
+
+
+def layer_macros() -> List[str]:
+    """In-text numbers for the layer-weight paragraph (empty if the CSV has not been written)."""
+    if not LAYER_CSV.is_file():
+        return []
+    t = layer_table()
+    layers = list(range(1, 13))
+    fz = t.loc["row0_baseline:0", layers].astype(float)
+    e0 = t.loc["entry_final_r3:0", layers].astype(float)
+    entry = t[t["run"] == "entry_final_r3"][layers].astype(float)
+    ft = t[t["two_stage"].astype(str) == "True"][layers].astype(float)
+    return [
+        macro("layerFrozenMax", f"{fz.max():.3f}"), macro("layerFrozenMaxIdx", f"{int(fz.idxmax())}"),
+        macro("layerFrozenMin", f"{fz[12]:.3f}"), macro("layerFrozenRatio", f"{fz.max() / fz[12]:.1f}"),
+        macro("layerEntryMax", f"{e0.max():.3f}"), macro("layerEntryMaxIdx", f"{int(e0.idxmax())}"),
+        macro("layerEntryMin", f"{e0.min():.3f}"),
+        macro("layerEntryRange", f"{float((entry.max() - entry.min()).max()):.3f}"),
+        macro("layerFtN", f"{len(ft)}"),
+        macro("layerFtMaxLo", f"{ft.max(axis=1).min():.3f}"), macro("layerFtMaxHi", f"{ft.max(axis=1).max():.3f}"),
+        macro("layerFtMinLo", f"{ft.min(axis=1).min():.3f}"), macro("layerFtMinHi", f"{ft.min(axis=1).max():.3f}"),
+        macro("layerFtArgminTwelve", f"{int((ft.idxmin(axis=1) == 12).sum())}"),
+        macro("layerFtArgmaxSixSeven", f"{int(ft.idxmax(axis=1).isin([6, 7]).sum())}"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # tables and numbers
 # ---------------------------------------------------------------------------
@@ -490,12 +556,15 @@ def numbers_r3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
             macro(nm + "VsWoneDStenPlusAuc", f"${W(key, 'S10+', 'd_auroc'):+.3f} \\pm {W(key, 'S10+', 'd_auroc_se'):.3f}$")
             macro(nm + "VsWoneDEnsStenPlusAuc", f"${W(key, 'S10+', 'd_ens_auroc'):+.3f} \\pm {W(key, 'S10+', 'd_ens_auroc_se'):.3f}$")
             macro(nm + "VsWoneDEnsSseven", f"${W(key, 'S7', 'd_ens_challenge'):+.3f} \\pm {W(key, 'S7', 'd_ens_challenge_se'):.3f}$")
+        # W1R's margin over W1 on S7 TPR@5%, in paired-bootstrap SEs (the second clause of the round-3 rule)
+        macro("rThreeWoneRVsWoneNse", f"{W('W1R', 'S7', 'd_challenge') / W('W1R', 'S7', 'd_challenge_se'):.1f}")
     # The entry trained as one train_model.py call (3 members) and its wall time (REPRODUCE section 9).
     entry = RES / "entry_final_r3"
     if (entry / "summary.csv").is_file():
         es = pd.read_csv(entry / "summary.csv").set_index("view")
         macro("entrySseven", f3(es.loc["S7", "challenge"])); macro("entrySsevenAuc", f3(es.loc["S7", "auroc"]))
         macro("entryStenPlusAuc", f3(es.loc["S10+", "auroc"])); macro("entryA", f3(es.loc["A", "challenge"]))
+        macro("entryStenAuc", f3(es.loc["S10", "auroc"]))
         log = (entry.parent.parent / "logs" / "entry_check.out").read_text() if (entry.parent.parent / "logs" / "entry_check.out").is_file() else ""
         m = re.search(r"TRAIN_SECONDS (\d+)", log)
         if m:
@@ -547,6 +616,11 @@ def numbers(split, dur, agg, r2, r2c, gaps, best_epoch, dur_only, out: Path) -> 
     A = lambda grp, view, col, t=agg: float(t[(t["group"] == grp) & (t["view"] == view)].iloc[0][col])  # noqa: E731
     R = lambda grp, view, col: A(grp, view, col, r2)  # noqa: E731
     B0g = "B0 shipped (lr 2e-5)"
+    runs = pd.read_csv(RES / "RESCORED_runs.csv")
+    ladder_single = [runs_[0] for group, runs_, _, _ in LADDER if len(runs_) == 1 and group.startswith("row")]
+    s7 = runs[(runs["view"] == "S7") & (runs["predictions"] == "A") & runs["run"].isin(ladder_single)]
+    se_s7 = float(s7["challenge_se"].mean())
+    demo_d = A("row5b_no_demographics", "S7", "challenge_mean") - A("row5_two_stage_ft", "S7", "challenge_mean")
     m = [
         macro("nAll", f"{len(split):,}"), macro("nTrain", f"{(split['split']=='train').sum():,}"), macro("nTest", f"{len(test):,}"),
         macro("nTestPos", f"{int(test['label'].sum()):,}"), macro("testPrev", f"{100*test['label'].mean():.2f}"),
@@ -579,8 +653,19 @@ def numbers(split, dur, agg, r2, r2c, gaps, best_epoch, dur_only, out: Path) -> 
         macro("rowZeroInflA", f"{A('row0_baseline','A','challenge_mean') - A('row0_baseline','S7','challenge_mean'):.3f}"),
         macro("rowZeroInflAuc", f"{A('row0_baseline','A','auroc_mean') - A('row0_baseline','S7','auroc_mean'):.3f}"),
         macro("ladderGainA", f"{A(B0g,'A','challenge_mean') - A('row0_baseline','A','challenge_mean'):.3f}"),
+        # the length cue alone in step 0's AUROC: pooled CODE-15 (view B, no source cue) minus within-short (S7)
+        macro("rowZeroInflBAuc", f"{A('row0_baseline','B','auroc_mean') - A('row0_baseline','S7','auroc_mean'):.3f}"),
+        macro("rowZeroStenAuc", f3(A("row0_baseline", "S10", "auroc_mean"))),
+        # bootstrap SE of TPR@5% within 7.34 s records, mean over the single-run ladder steps
+        macro("seSsevenTpr", f"{se_s7:.3f}"),
+        # removing age and sex (step 5 -> 5b): the largest single-step change of S7 TPR@5% in the ladder
+        macro("demoDropDSseven", f"${demo_d:+.3f}$"), macro("demoDropNse", f"{demo_d / se_s7:.1f}"),
         macro("ptbRowFour", f"{ptb_mean('row4_film'):.2f}"), macro("ptbRowFive", f"{ptb_mean('row5_two_stage_ft'):.2f}"),
         macro("ptbRowFiveB", f"{ptb_mean('row5b_no_demographics'):.2f}"),
+        macro("ptbRowZero", f"{ptb_mean('row0_baseline'):.2f}"), macro("ptbRowTwo", f"{ptb_mean('row2_soft_labels'):.2f}"),
+        macro("ptbRowThree", f"{ptb_mean('row3_augmentation'):.2f}"),
+        macro("rowOneGap", f"${gaps['ladder:row1_defect_fixes']['gap']:+.2f}$"),
+        macro("rowTwoGap", f"${gaps['ladder:row2_soft_labels']['gap']:+.2f}$"),
         # learning-rate sweep
         macro("lrMidSseven", f3(A("lr 5e-6", "S7", "challenge_mean"))), macro("lrLowSseven", f3(A("lr 1e-6", "S7", "challenge_mean"))),
         macro("lrMidA", f3(A("lr 5e-6", "A", "challenge_mean"))), macro("lrLowA", f3(A("lr 1e-6", "A", "challenge_mean"))),
@@ -607,7 +692,7 @@ def numbers(split, dur, agg, r2, r2c, gaps, best_epoch, dur_only, out: Path) -> 
         macro("wOneDStenPlusAuc", f"${R('W1','S10+','d_auroc'):+.3f}$"), macro("wOneDStenPlusAucSe", f3(R("W1", "S10+", "d_auroc_se"))),
         macro("mOneDStenPlusAuc", f"${R('M1','S10+','d_auroc'):+.3f}$"), macro("mOneDStenPlusAucSe", f3(R("M1", "S10+", "d_auroc_se"))),
         macro("mwEnsSseven", f3(R("MW_a1.00", "S7", "ens_challenge"))), macro("mwEnsStenPlusAuc", f3(R("MW_a1.00", "S10+", "ens_auroc"))),
-        macro("bzEnsStenPlusAuc", f3(R("B0", "S10+", "ens_auroc"))),
+        macro("bzEnsStenPlusAuc", f3(R("B0", "S10+", "ens_auroc"))), macro("wOneEnsStenPlusAuc", f3(R("W1", "S10+", "ens_auroc"))),
         macro("frozenSseven", f3(R("MW_a0.00", "S7", "challenge_mean"))), macro("frozenSsevenAuc", f3(R("MW_a0.00", "S7", "auroc_mean"))),
         macro("frozenStenPlusAuc", f3(R("MW_a0.00", "S10+", "auroc_mean"))),
         macro("halfSseven", f3(R("MW_a0.50", "S7", "challenge_mean"))), macro("halfSsevenAuc", f3(R("MW_a0.50", "S7", "auroc_mean"))),
@@ -616,6 +701,7 @@ def numbers(split, dur, agg, r2, r2c, gaps, best_epoch, dur_only, out: Path) -> 
         macro("bzSsevenC", f3(A(B0g, "S7", "challenge_mean", pd.read_csv(RES / "RESCORED_aggregate_C.csv")))),
         macro("mwSsevenC", f3(float(r2c[(r2c["group"] == "MW_a1.00") & (r2c["view"] == "S7")].iloc[0]["challenge_mean"]))),
     ]
+    m += layer_macros()
     out.write_text("% generated by paper/make_assets.py -- do not edit\n" + "\n".join(m) + "\n")
 
 
@@ -647,6 +733,8 @@ def main() -> None:
     fig_inflation(agg, rescored, dur_only["B"], PAPER / "figures" / "fig_inflation.pdf")
     best_epoch = fig_stage2(PAPER / "figures" / "fig_stage2.pdf")
     fig_round2(r2, rescored, PAPER / "figures" / "fig_round2.pdf")
+    if LAYER_CSV.is_file():
+        fig_layers(PAPER / "figures" / "fig_layers.pdf")
 
     tab_data(split, PAPER / "tables" / "tab_data.tex")
     tab_ladder(agg, gaps, PAPER / "tables" / "tab_ladder.tex")
