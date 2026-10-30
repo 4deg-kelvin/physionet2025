@@ -1,7 +1,5 @@
 __pycache__/
-# copied next to main.tex by build.sh
-/iopjournal.cls
-/orcid.pdf
+# iopjournal.cls and orcid.pdf are committed next to main.tex so a GitHub-linked Overleaf project compiles
 # template bundle as downloaded; only the class and the ORCID logo are needed to build
 iop/ioplatextemplate.zip
 iop/iopjournal-template.pdf
