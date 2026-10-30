@@ -578,3 +578,18 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   tested; 5-seed W1 gained +0.003 ± 0.003). Decision deferred to the user; recommendation: hold it until a change shows a
   within-format gain beyond one SE, or use it on a diversity ensemble (W1R + W1S) only after an internal run.
 - **Status:** active.
+
+## D-2026-10-30-2 — Manuscript reframed around the adaptation of the pretrained ECG-FM encoder
+- **Request:** make the pretrained foundation model and the team's modifications (layer aggregation, two-stage fine-tuning
+  with layer-wise decay, demographic encoder, 5 s windows, loss, ensembles, validation protocol) the main story; the
+  record-length shortcut becomes the evaluation lesson rather than the headline; prose must read as written by a person.
+- **Method:** an independent planning pass (Fable, read-only) mapped every candidate claim to its evidence and listed the
+  claims the data do not support (no non-foundation-model baseline; no single change can be credited with the external
+  gain; FiLM gave no within-length gain; 5 s windows confounded with cue removal); a rewrite pass (Opus) executes the plan;
+  `paper/prose_check.py` measures paragraph/sentence profile, stock phrases and hedges before and after.
+- **New evidence gathered for the reframing:** learned layer-aggregation weights of 48 checkpoints
+  (`experiments/layer_weights.py`, SLURM 18197159, `results/entry_final_r3/layer_weights.csv`): frozen-encoder models put
+  3.2× more weight on layer 7 than on layer 12 (0.129 vs 0.040); every fine-tuned model stays within 0.067–0.095 of
+  uniform, identically across seeds and 5 s/10 s inputs. Reported as an observation with the optimiser-step confound stated.
+- **Not changed:** results, numbers, attributions, decision-log framing, limitations (selection set; one external score).
+- **Status:** active; rewrite in progress.
