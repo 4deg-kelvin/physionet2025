@@ -1,5 +1,9 @@
 # Submission package — PhysioNet Challenge 2025 (post-Challenge evaluation)
 
+**Scored by the organisers on 2026-10-19 (focus-issue submission F28, commit 355ff92):** validation 0.477; test REDS-II 0.371,
+SaMi-Trop 3 0.371, ELSA-Brasil 0.125; test mean **0.289** (original entry 0.245). Details: `experiments/results/EXTERNAL_SCORES.md`.
+One focus-issue entry remains.
+
 **Entry:** `final_r3` (DECISIONS.md D-2026-10-16-1/2): ECG-FM backbone → learnable 12-layer aggregation → MLP head, fine-tuned in
 two stages; fixed 5 s input windows (mean of window logits at inference); hard-negative margin-ranking loss (Hong et al.,
 CinC 2025); three-seed ensemble trained inside one `train_model.py` call; negatives capped to 6.5% training prevalence;

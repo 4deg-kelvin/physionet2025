@@ -537,3 +537,17 @@ config. B0 under the fixed protocol matches round-2 B0 (S7 0.386 vs 0.384), so t
 | Container: Apptainer rendering of the Dockerfile, built rootless from commit 3103ff9 | 17902785 | BUILD OK (22 min) |
 | Entry scripts inside the container on the 400-record set | 17902786 | RUN OK, 400/400 outputs |
 | CPU test suite after the default flip | 17902757 | 174 passed |
+
+### External scores (organisers, 2026-10-19; `results/EXTERNAL_SCORES.md`)
+
+Focus-issue submission F28 (commit 355ff92) vs the original 2025 entry (CinC 2025-416):
+
+| Cohort | Original | final_r3 | Δ |
+|---|---|---|---|
+| Hidden validation | 0.323 | 0.477 (AUROC 0.794) | +0.154 |
+| Test REDS-II | 0.329 | 0.371 (0.745) | +0.042 |
+| Test SaMi-Trop 3 | 0.281 | 0.371 (0.780) | +0.090 |
+| Test ELSA-Brasil | 0.125 | 0.125 (0.582) | 0 |
+| **Test mean** | **0.245** (rank 8/40) | **0.289** | **+0.044** |
+
+Official 2025 leaderboard for context: 1st 0.323, 2nd 0.283, median 0.217. One focus-issue entry remains (D-2026-10-30-1).

@@ -564,3 +564,17 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - **Re-verification:** CPU tests 17969156 (175 passed); Apptainer rebuild 17969157 (BUILD OK, sha256 OK); in-container
   entry run 17969158 (400/400, RUN OK). Tag `r3-submission` and `main` moved to this state.
 - **Status:** active.
+
+## D-2026-10-30-1 — External scores received for the post-Challenge entry (focus-issue submission F28)
+- **Organisers' scores (commit 355ff92, scored 2026-10-19):** validation 0.477 (AUROC 0.794); test REDS-II 0.371 (0.745),
+  SaMi-Trop 3 0.371 (0.780), ELSA-Brasil 0.125 (0.582); test mean 0.289. Original entry (CinC 2025-416): 0.323 / 0.329 /
+  0.281 / 0.125, mean 0.245, rank 8/40. Gain +0.044 on the ranking metric (+0.042 REDS-II, +0.090 SaMi-Trop 3, 0 ELSA).
+  0.289 lies between the official first (0.323) and second (0.283) places. `experiments/results/EXTERNAL_SCORES.{md,csv}`.
+- **Reading:** the within-format internal gains transferred to REDS-II and SaMi-Trop 3; ELSA-Brasil is 0.125 for the
+  winner and both of our entries, so that cohort does not separate entries at TPR@5%. The hidden AUROCs (0.745 / 0.780)
+  are below our internal 10 s-format AUROC (0.854), as expected for a selection set and for cohorts of a different
+  population. The paper's "untested" statements are now replaced by these numbers (section 3.7).
+- **Second focus-issue entry (one remains):** not spent. Candidates with internal evidence are weak (5-seed W1R was not
+  tested; 5-seed W1 gained +0.003 ± 0.003). Decision deferred to the user; recommendation: hold it until a change shows a
+  within-format gain beyond one SE, or use it on a diversity ensemble (W1R + W1S) only after an internal run.
+- **Status:** active.

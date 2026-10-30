@@ -1,0 +1,11 @@
+entry,phase,submission_id,commit,cohort,challenge_score,auroc,auprc,accuracy,f_measure,source
+original,official,2531,,validation,0.323,,,,,"CinC2025-416 Table 2 / sec. 3"
+original,official,2531,,test-reds-ii,0.329,,,,,"CinC2025-416 sec. 3"
+original,official,2531,,test-samitrop-iii,0.281,,,,,"CinC2025-416 sec. 3"
+original,official,2531,,test-elsa-brasil,0.125,,,,,"CinC2025-416 sec. 3"
+original,official,2531,,test-mean,0.245,,,,,"CinC2025-416 Table 2; leaderboard rank 8/40"
+final_r3,focus-issue,F28,355ff922974ea6a3d1fcfdf3008e878d7c6fd33d,validation,0.477,0.794,0.384,0.982,0.416,"organisers' e-mail 2026-10-19 18:19:56 ET"
+final_r3,focus-issue,F28,355ff922974ea6a3d1fcfdf3008e878d7c6fd33d,test-reds-ii,0.371,0.745,0.232,0.970,0.296,"organisers' e-mail 2026-10-19"
+final_r3,focus-issue,F28,355ff922974ea6a3d1fcfdf3008e878d7c6fd33d,test-samitrop-iii,0.371,0.780,0.187,0.944,0.215,"organisers' e-mail 2026-10-19"
+final_r3,focus-issue,F28,355ff922974ea6a3d1fcfdf3008e878d7c6fd33d,test-elsa-brasil,0.125,0.582,0.079,0.952,0.076,"organisers' e-mail 2026-10-19"
+final_r3,focus-issue,F28,355ff922974ea6a3d1fcfdf3008e878d7c6fd33d,test-mean,0.289,,,,,"mean of the three test cohorts, as the leaderboard ranks"
