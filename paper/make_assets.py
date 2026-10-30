@@ -522,7 +522,8 @@ def numbers_external(out: Path) -> None:
     for cohort, suffix in names.items():
         a = float(ext[(ext["entry"] == "original") & (ext["cohort"] == cohort)].iloc[0]["challenge_score"])
         b = float(ext[(ext["entry"] == "final_r3") & (ext["cohort"] == cohort)].iloc[0]["challenge_score"])
-        lines.append(f"\\newcommand{{\\extDelta{suffix}}}{{${b - a:+.3f}$}}")
+        d = b - a
+        lines.append(f"\\newcommand{{\\extDelta{suffix}}}{{${d:+.3f}$}}" if abs(d) >= 5e-4 else f"\\newcommand{{\\extDelta{suffix}}}{{0.000}}")
     out.write_text("\n".join(lines) + "\n")
 
 
