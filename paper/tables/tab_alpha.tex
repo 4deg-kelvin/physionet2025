@@ -1,0 +1,11 @@
+\begin{tabular}{l c c c c c c c c}
+\hline
+ & Pooled & \multicolumn{4}{c}{Within 7.34 s records (S7)} & \multicolumn{2}{c}{10 s format (S10+)} & Length- \\
+Configuration & TPR@5\% & TPR@5\% & $\Delta$ & AUROC & $\Delta$ & AUROC & $\Delta$ & cue gap \\
+\hline
+Baseline (B0), fine-tuned & 0.436 & 0.384 & -- & 0.787 & -- & 0.779 & -- & $+0.17$ \\
+Both remedies, stage 1 only ($\alpha=0$) & 0.354 & 0.343 & $-0.041 \pm 0.009$ & 0.775 & $-0.012 \pm 0.006$ & 0.797 & $+0.017 \pm 0.017$ & $+0.00$ \\
+Both remedies, halfway ($\alpha=0.5$) & 0.383 & 0.370 & $-0.014 \pm 0.007$ & 0.798 & $+0.011 \pm 0.004$ & 0.833 & $+0.054 \pm 0.012$ & $+0.01$ \\
+Both remedies, stage 2 ($\alpha=1$) & 0.403 & 0.375 & $-0.009 \pm 0.005$ & 0.795 & $+0.008 \pm 0.003$ & 0.841 & $+0.062 \pm 0.011$ & $+0.01$ \\
+\hline
+\end{tabular}

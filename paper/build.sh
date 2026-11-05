@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the manuscript PDF: regenerate figures/tables/numbers from saved results, then compile.
+# Build the manuscript and supplement PDFs: regenerate figures/tables/numbers from saved results, then compile both.
 #   bash paper/build.sh            (no model is run; needs experiments/results/R2_TABLE_{A,C}.csv)
 # LaTeX: tectonic, a self-contained engine (https://tectonic-typesetting.github.io); set TECTONIC to
 # its path.  The IOP class (iop/iopjournal.cls) is IOP Publishing's author template, downloaded from
@@ -14,3 +14,6 @@ cd "$HERE"
 cp -f iop/iopjournal.cls iop/orcid.pdf .
 "$TECTONIC" -X compile main.tex
 echo "wrote $HERE/main.pdf"
+# Supplementary material: same class, same macros, figures and tables (the class file was copied above).
+"$TECTONIC" -X compile supplement.tex
+echo "wrote $HERE/supplement.pdf"

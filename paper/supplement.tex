@@ -1,0 +1,130 @@
+% Supplementary material for the Physiological Measurement manuscript (main.tex).
+% Same rule as the main text: every number comes from numbers.tex, numbers_r3.tex or numbers_ext.tex,
+% every table from tables/ and every figure from figures/, all written by paper/make_assets.py.
+% Build: bash paper/build.sh (compiles main.tex and this file).
+\documentclass{iopjournal}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage[round,authoryear]{natbib}
+\input{numbers}
+\input{numbers_r3}
+\input{numbers_ext}
+\newcommand{\tpr}{TPR@5\%}
+\newcommand{\Bp}{B0$'$}
+\newcommand{\Wp}{W1$'$}
+\fancyhead[L]{{\small \sf IOP Publishing}\hspace{5mm} {\it Physiol.\ Meas.}\ (supplementary material)}
+\fancyhead[R]{Nguyen {\it et al}\ }
+\renewcommand{\articletype}[1]{{\vspace*{-8mm}\noindent \Large \sf Physiological Measurement}
+
+\vspace{4mm}\noindent{\scriptsize \sf{\bfseries \MakeUppercase{#1}}}}
+\renewcommand{\thesection}{S\arabic{section}}
+\renewcommand{\thefigure}{S\arabic{figure}}
+\renewcommand{\thetable}{S\arabic{table}}
+
+\begin{document}
+\articletype{Supplementary material}
+
+\title{Supplementary material for: Fine-tuning ECG-FM for Chagas screening once a recording-length shortcut is controlled: internal evidence and one hidden-cohort score}
+
+% TODO(authors): keep the author list identical to main.tex.
+\author{Kelvin Nguyen$^{1,*}$, Andy Smithwick$^1$, Maxwell Loetscher$^1$, Shadi Manafi$^1$, Zaniar Adarlan$^1$ and Saman Parvaneh$^1$}
+
+\affil{$^1$Edwards Lifesciences, Irvine, CA, United States of America}
+
+\affil{$^*$Author to whom any correspondence should be addressed.}
+
+\email{kelvindinhnguyen@gmail.com}
+
+\vspace{6mm}
+\noindent Section, figure and table numbers carry the prefix S. Run names follow the main text: B0 is the end of the round-1 ladder, M1, W1 and MW the round-2 configurations, and \Bp{} and \Wp{} the baseline and fixed-window configuration re-trained under the fixed validation protocol of round 3.
+
+\section{Decision rules in full}
+Each rule below was written into the repository's decision log, with a date, before the runs it governed. SE is the standard error of a paired bootstrap difference over held-out records; three-seed means are compared unless stated.
+
+\textit{Round 1, band-pass cut-off (step 5c).} Candidates: step 5b (0.5--100 Hz), step 5c (0.5--45 Hz) and step 5b with the original signal cleaner. Take the highest \tpr{} on view C among the candidates whose view-A \tpr{} is within 0.005 of the best; differences within 0.012, the noise of one seed, go to the vectorised Butterworth filter over the slower original cleaner. Outcome: step 5c.
+
+\textit{Round 1, negative cap.} Candidates: the configuration of step 5c with negatives capped inside the training script (100,000 records in total), and the same configuration on every negative, validated every 500 optimiser steps with stage 2 limited to 6,000 steps. The second replaces the first only if its view-A AUROC is no more than 0.005 below the capped run's and its \tpr{} on views A and C is within 0.012 of the capped run's or better. Outcome: the capped configuration, B0; the step-validated run failed the AUROC condition.
+
+\textit{Round 1, stage-2 learning rate.} Candidates: $2\times10^{-5}$ (B0), $5\times10^{-6}$ and $10^{-6}$. A lower rate is adopted only if its mean view-A \tpr{} beats that of $2\times10^{-5}$ by more than the SE of the difference, its mean view-A AUROC is no more than 0.005 lower, and its mean difference between views C and A is not worse by more than 0.012; if both qualify, the higher mean \tpr{} wins. Outcome: $2\times10^{-5}$ kept.
+
+\textit{Round 2.} Primary: the mean S7 \tpr; co-primary: the S7 AUROC. A configuration replaces B0 if its S7 \tpr{} is higher by more than the SE of the difference, or its S7 AUROC is higher by more than 0.010 with its S7 \tpr{} not lower by more than one SE; in either case its S10+ AUROC must not be lower by more than that view's SE. If several qualify, the highest S7 \tpr{} wins, and the same rule picks among the interpolation weights of MW. The length-cue gap must shrink for M1, W1 and MW, or the change is not doing what it claims. Views A, B and C are reported and expected to fall. Outcome: none adopted.
+
+\textit{Round 3.} Primary: the mean S10+ AUROC, against \Bp; guard: the S7 \tpr{} not lower than that of \Bp{} by more than one SE. \Wp{} is the candidate carried in. A variant (W1R, W1S) replaces it if it beats \Wp{} on S10+ AUROC by more than one SE while passing the guard, or beats \Wp{} on S7 \tpr{} by more than one SE without losing more than one SE of S10+ AUROC. Ties go to the simpler configuration; if \Wp{} fails the guard, the candidate is \Bp{} and the 10 s result is reported as unconfirmed. Five members replace three if the five-seed ensemble of \Wp{} beats the three-seed ensemble on S10+ AUROC by more than one SE and the projected training time stays under 48 h. Overlapping windows are adopted if they lose on none of S7 \tpr, S7 AUROC and S10+ AUROC and gain on at least one by more than one SE. The length-cue gap must stay near zero for every fixed-window variant, and for W1S the source gap must not grow. Views A, B, C and S10 are reported, not decided on. Outcome: W1R as a three-seed ensemble (configurations that passed against \Bp: \rThreeQualifies).
+
+The round-3 rule moved the primary view from S7 to the 10 s format after round 2 had shown the fixed-window gain there. We recorded the change as a decision before any round-3 run and applied it to a re-trained baseline under a new validation protocol, leaving the round-2 verdict as it was.
+
+\section{Stage-2 learning rate}
+At the base rate of $2\times10^{-5}$ the validation AUROC of stage 2 peaked at epoch \bestEpHigh{} on average and then declined (figure \ref{fig:stage2}). At $5\times10^{-6}$ the peak came at epoch \bestEpMid{} and at $10^{-6}$ at epoch \bestEpLow, without rising higher. Within 7.34 s records the three rates scored \bzSseven, \lrMidSseven{} and \lrLowSseven{} in \tpr{} (table \ref{tab:lr}).
+
+\begin{figure}
+\centering
+\includegraphics[width=0.62\textwidth]{figures/fig_stage2}
+\caption{Validation AUROC during stage-2 fine-tuning for three learning rates. Thin lines are seeds, thick lines their mean over the epochs all three completed.}
+\label{fig:stage2}
+\end{figure}
+
+\begin{table}
+\caption{Effect of the stage-2 learning rate on configuration B0 (three seeds, mean $\pm$ standard deviation). The ensemble column is the score of the average of the three models. Epochs are counted from one.}
+\centering
+\small
+\input{tables/tab_lr}
+\label{tab:lr}
+\end{table}
+
+\section{Learned layer weights}
+With ECG-FM frozen, the head put most of its weight on layers 5 to 9 and least on the last layer (figure \ref{fig:layers}). In step 0, layer \layerFrozenMaxIdx{} received \layerFrozenMax{} of the weight and layer 12 only \layerFrozenMin, a ratio of \layerFrozenRatio. \citet{nguyen2025mol} found middle layers better than the last in a different ECG transformer, and the checkpoint we used had been fine-tuned end to end on the MIMIC-IV-ECG labels, which may bend the last layer towards those labels. Across all \layerFtN{} two-stage checkpoints the largest weight lay between \layerFtMaxLo{} and \layerFtMaxHi{} and the smallest, on layer 12 in \layerFtArgminTwelve{} of them, between \layerFtMinLo{} and \layerFtMinHi. The shape was the same for 10 s inputs and 5 s windows, and the three members of the entry differed by at most \layerEntryRange{} on any layer. The weights start from uniform and received far fewer optimiser steps in two-stage training than in step 0, and the runs that spent longest in stage 2 moved furthest from uniform, so the flat profile may be an artefact of a short stage 2.
+
+\begin{figure}
+\centering
+\includegraphics[width=0.62\textwidth]{figures/fig_layers}
+\caption{Learned softmax weights over the 12 transformer layers of ECG-FM. Step 0 uses a frozen encoder; the re-trained baseline \Bp{} (mean of three seeds) and the entry's three members are fine-tuned. The horizontal line is the uniform weight, 1/12.}
+\label{fig:layers}
+\end{figure}
+
+\section{Rounds 2 and 3 in full}
+Table \ref{tab:round2} and figure \ref{fig:round2} give every configuration of round 2; the main text keeps the rows of the interpolation comparison. The Challenge score on S10+ did not change significantly (\bzStenPlus{} for B0, \mwStenPlus{} with both remedies). The remedies may also have made the seeds agree: the standard deviation of the S7 \tpr{} across seeds was \bzSsevenSd{} for B0, \mOneSsevenSd{} with matched negatives and \wOneSsevenSd{} with fixed windows, although three seeds give a poor estimate of spread. Figure \ref{fig:round3} shows round 3 seed by seed, laid out as figure \ref{fig:round2}.
+
+\begin{table}
+\caption{Round 2 (three seeds each). Differences from the B0 mean, with the SE of a paired bootstrap over test records. The pooled score is \tpr{} on view A.}
+\centering
+\resizebox{\textwidth}{!}{\input{tables/tab_round2}}
+\label{tab:round2}
+\end{table}
+
+\begin{figure}
+\centering
+\includegraphics[width=\textwidth]{figures/fig_round2}
+\caption{Removing the length cue (round 2; three seeds per row). The vertical line marks the B0 mean. (a) and (b) use held-out CODE-15\% records of 7.34 s; (c) uses the 10 s format (S10+).}
+\label{fig:round2}
+\end{figure}
+
+\begin{figure}
+\centering
+\includegraphics[width=\textwidth]{figures/fig_round3}
+\caption{Round 3 under the fixed validation protocol, laid out as figure \ref{fig:round2}; the vertical line marks the \Bp{} mean, and one row has five seeds.}
+\label{fig:round3}
+\end{figure}
+
+\section{The ablation by length group}
+Scoring within one length group lowered the AUROC of every ladder step by a similar amount (figure \ref{fig:inflation}). For B0 it was \bzBauc{} on view B, \bzSsevenAuc{} within 7.34 s records and \bzStenAuc{} within 10.24 s records; with \nStenPos{} positives the last interval is too wide to rank models. For step 0 the pooled AUROC on CODE-15\% records exceeded the within-short AUROC by \rowZeroInflBAuc; the main text uses this difference as the size of what the length cue added.
+
+\begin{figure}
+\centering
+\includegraphics[width=0.95\textwidth]{figures/fig_inflation}
+\caption{AUROC of each ablation step on held-out CODE-15\% records: pooled (view B), within 7.34 s records (S7) and within 10.24 s records (S10, with 95\% bootstrap intervals). The vertical line is the AUROC of record length alone on view B.}
+\label{fig:inflation}
+\end{figure}
+
+\section{Reconstruction and timing}
+\textit{Step 0 and the shipped entry.} Step 0 re-creates our Challenge entry in the new code, but it is not the shipped model, and its scores may differ somewhat from those of the entry we submitted in 2025. It resamples with a polyphase filter instead of in the frequency domain (all our runs do), and it trains on 90\% of the training patients, where the shipped model was trained on all of them and saved after the 16th epoch.
+
+\textit{The entry's validation set.} The PTB-XL metadata table that groups records by patient is not part of the Challenge data, so the entry, run as the organisers run it, groups PTB-XL records individually; its validation set has \entryValN{} records instead of the \rThreeValN{} of the round-3 runs. This changes which negatives are held out but no label.
+
+\textit{Time and memory.} The three members of the entry trained in \entryTrainHours{} h on a Titan RTX with a 14.5 GiB memory cap, a projected \entryTfourHours{} h on the organisers' T4 if it is 2.5 times slower, against the 72 h limit. Inference over 2 $\times$ \nTest{} records (the unperturbed and perturbed held-out sets) took \entryInferHours{} h. Fixed 5 s windows cut the peak stage-2 memory from \memTenGiB{} to \memFiveGiB{} GiB.
+
+\section{Views B and C}
+\textit{View B} is the held-out CODE-15\% records of every length. It removes the source cue but not the length cue: record length alone reaches an AUROC of \durOnlyB{} there, and \durOnlyA{} on view A. \textit{View C} is view A after perturbations of the kind the organisers applied to the hidden data \citep{reyna2025}: resampling to and from 300--1000 Hz, device-like filtering, noise, baseline wander and mains interference. Once the comparison was made within length groups the perturbations had little effect: \tpr{} within short records was \bzSsevenC{} for B0 and \mwSsevenC{} for the combined configuration on the perturbed records, close to the unperturbed values.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+\end{document}

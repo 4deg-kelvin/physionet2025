@@ -117,21 +117,31 @@ R3_RUNS: Dict[str, List[str]] = {
     "W1S": [f"r3_W1S_s{s}" for s in R3_SEEDS],
     "W1tta": [f"r3_W1_s{s}:tta" for s in R3_SEEDS],
 }
+# Round 3 re-trained the baseline and the windows configuration under the fixed validation
+# protocol; they are different models from the round-2 runs, so they carry a prime (B0', W1').
 R3_LABEL = {
-    "B0": "Baseline (B0)",
-    "W1": "+ 5 s windows (W1)",
-    "W1x5": "W1, 5 seeds",
-    "W1R": "W1 + ranking loss (W1R)",
-    "W1S": "W1 without PTB-XL (W1S)",
-    "W1tta": "W1, overlapping windows",
+    "B0": "Re-trained baseline (B0\u2032)",
+    "W1": "+ 5 s windows (W1\u2032)",
+    "W1x5": "W1\u2032, 5 seeds",
+    "W1R": "W1\u2032 + ranking loss (W1R)",
+    "W1S": "W1\u2032 without PTB-XL (W1S)",
+    "W1tta": "W1\u2032, overlapping windows",
 }
 R3_TEX = {
-    "B0": "Baseline (B0)",
-    "W1": "+ 5 s windows (W1)",
-    "W1x5": "\\quad W1 with 5 seeds",
-    "W1R": "W1 + ranking loss (W1R)",
-    "W1S": "W1 without PTB-XL (W1S)",
-    "W1tta": "\\quad W1, windows every 2.5 s",
+    "B0": "Re-trained baseline (B0$'$)",
+    "W1": "+ 5 s windows (W1$'$)",
+    "W1x5": "\\quad W1$'$ with 5 seeds",
+    "W1R": "W1$'$ + ranking loss (W1R)",
+    "W1S": "W1$'$ without PTB-XL (W1S)",
+    "W1tta": "\\quad W1$'$, windows every 2.5 s",
+}
+# The four rows of the main-text fine-tuning table (round 2): the baseline and the three
+# interpolation weights of the configuration with both remedies.
+ALPHA_TEX = {
+    "B0": "Baseline (B0), fine-tuned",
+    "MW_a0.00": "Both remedies, stage 1 only ($\\alpha=0$)",
+    "MW_a0.50": "Both remedies, halfway ($\\alpha=0.5$)",
+    "MW_a1.00": "Both remedies, stage 2 ($\\alpha=1$)",
 }
 
 
@@ -319,7 +329,7 @@ def fig_layers(out: Path) -> None:
             label="Step 0: frozen encoder, 10 s input")
     b0 = t[t["run"].str.startswith("r3_B0_")][layers].to_numpy(dtype=float)
     ax.plot(layers, b0.mean(0), color=BLUE, lw=1.6, marker="o", markersize=5, markeredgecolor="white", markeredgewidth=1.0, zorder=3,
-            label="Round-3 B0: fine-tuned, 10 s (mean of 3 seeds)")
+            label="Re-trained baseline B0\u2032: fine-tuned, 10 s (mean of 3 seeds)")
     entry = t[t["run"] == "entry_final_r3"][layers].to_numpy(dtype=float)
     for row in entry:
         ax.plot(layers, row, color=AQUA, lw=0.8, alpha=0.7, zorder=2)
@@ -422,16 +432,17 @@ def tab_lr(agg: pd.DataFrame, best_epoch: Dict[str, float], out: Path) -> None:
         "learning rate & TPR@5\\% & AUROC & TPR@5\\% & AUROC & Ensemble TPR@5\\% & epoch \\\\\n\\hline\n" + "\n".join(rows) + "\n\\hline\n\\end{tabular}\n")
 
 
-def tab_round2(r2: pd.DataFrame, gaps: Dict[str, Dict[str, float]], out: Path) -> None:
+def tab_round2(r2: pd.DataFrame, gaps: Dict[str, Dict[str, float]], out: Path, labels: Dict[str, str] = R2_TEX) -> None:
+    """Round-2 table; with ``labels=ALPHA_TEX`` only the baseline and the three alpha rows."""
     rows = []
-    for key in R2_RUNS:
+    for key in labels:
         v = r2[r2["group"] == key].set_index("view")
         s7, sp, a = v.loc["S7"], v.loc["S10+"], v.loc["A"]
         if key == "B0":
             d1, d2, d3 = "--", "--", "--"
         else:
             d1, d2, d3 = pm(s7["d_challenge"], s7["d_challenge_se"]), pm(s7["d_auroc"], s7["d_auroc_se"]), pm(sp["d_auroc"], sp["d_auroc_se"])
-        rows.append(f"{R2_TEX[key]} & {f3(a['challenge_mean'])} & {f3(s7['challenge_mean'])} & {d1} & {f3(s7['auroc_mean'])} & {d2} & {f3(sp['auroc_mean'])} & {d3} & ${gaps[key]['gap']:+.2f}$ \\\\")
+        rows.append(f"{labels[key]} & {f3(a['challenge_mean'])} & {f3(s7['challenge_mean'])} & {d1} & {f3(s7['auroc_mean'])} & {d2} & {f3(sp['auroc_mean'])} & {d3} & ${gaps[key]['gap']:+.2f}$ \\\\")
     out.write_text(
         "\\begin{tabular}{l c c c c c c c c}\n\\hline\n"
         " & Pooled & \\multicolumn{4}{c}{Within 7.34 s records (S7)} & \\multicolumn{2}{c}{10 s format (S10+)} & Length- \\\\\n"
@@ -527,7 +538,8 @@ def numbers_r3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
             macro(nm + "DStenAuc", f"${R(key, 'S10', 'd_auroc'):+.3f} \\pm {R(key, 'S10', 'd_auroc_se'):.3f}$")
     if rule is not None and "qualifies" in rule.columns:
         q = [g for g, ok in zip(rule["group"], rule["qualifies"]) if bool(ok)]
-        macro("rThreeQualifies", ", ".join(q) if q else "none")
+        short = {"B0": "B0$'$", "W1": "W1$'$", "W1x5": "W1$'$ with 5 seeds", "W1tta": "overlapping windows"}
+        macro("rThreeQualifies", ", ".join(short.get(g, g) for g in q) if q else "none")
     # Validation-set size under the fixed protocol, from the first B0 manifest (identical across seeds).
     import json
     man = json.load(open(RES / R3_RUNS["B0"][0] / "model" / "chagas_manifest.json"))
@@ -565,6 +577,10 @@ def numbers_r3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
         macro("entrySseven", f3(es.loc["S7", "challenge"])); macro("entrySsevenAuc", f3(es.loc["S7", "auroc"]))
         macro("entryStenPlusAuc", f3(es.loc["S10+", "auroc"])); macro("entryA", f3(es.loc["A", "challenge"]))
         macro("entryStenAuc", f3(es.loc["S10", "auroc"]))
+        # The entry groups PTB-XL by record (no metadata table in the organisers' folder), so its
+        # validation set differs slightly in size from the round-3 runs' (rThreeValN).
+        eman = json.load(open(entry / "model" / "chagas_manifest.json"))
+        macro("entryValN", f"{sum(r['n'] for r in eman['data_summary'] if r['split'] == 'val'):,}")
         log = (entry.parent.parent / "logs" / "entry_check.out").read_text() if (entry.parent.parent / "logs" / "entry_check.out").is_file() else ""
         m = re.search(r"TRAIN_SECONDS (\d+)", log)
         if m:
@@ -605,6 +621,21 @@ def ptb_mean(run: str) -> float:
 def macro(name: str, value: str) -> str:
     assert name.isalpha(), name
     return f"\\newcommand{{\\{name}}}{{{value}}}"
+
+
+def memory_macros() -> List[str]:
+    """Peak stage-2 GPU memory with 5 s windows (round-2 smoke log) and with the padded 10 s
+    window (the comparison line recorded with it in experiments/README.md, round-2 notes)."""
+    out = []
+    log = WT / "experiments" / "logs" / "r2_smoke.out"
+    m = re.search(r"PEAK ALLOCATED : ([0-9.]+) GiB", log.read_text()) if log.is_file() else None
+    if m:
+        out.append(macro("memFiveGiB", m.group(1)))
+    readme = WT / "experiments" / "README.md"
+    m = re.search(r"Stage-2 memory with 5 s windows.*?\(10 s: ([0-9.]+) GiB\)", readme.read_text()) if readme.is_file() else None
+    if m:
+        out.append(macro("memTenGiB", m.group(1)))
+    return out
 
 
 def numbers(split, dur, agg, r2, r2c, gaps, best_epoch, dur_only, out: Path) -> None:
@@ -702,6 +733,7 @@ def numbers(split, dur, agg, r2, r2c, gaps, best_epoch, dur_only, out: Path) -> 
         macro("mwSsevenC", f3(float(r2c[(r2c["group"] == "MW_a1.00") & (r2c["view"] == "S7")].iloc[0]["challenge_mean"]))),
     ]
     m += layer_macros()
+    m += memory_macros()
     out.write_text("% generated by paper/make_assets.py -- do not edit\n" + "\n".join(m) + "\n")
 
 
@@ -740,6 +772,7 @@ def main() -> None:
     tab_ladder(agg, gaps, PAPER / "tables" / "tab_ladder.tex")
     tab_lr(agg, best_epoch, PAPER / "tables" / "tab_lr.tex")
     tab_round2(r2, gaps, PAPER / "tables" / "tab_round2.tex")
+    tab_round2(r2, gaps, PAPER / "tables" / "tab_alpha.tex", labels=ALPHA_TEX)
     numbers(split, durations, agg, r2, r2c, gaps, best_epoch, dur_only, PAPER / "numbers.tex")
 
     # Round 3 (PLAN_R3.md) is optional until its table job has run.

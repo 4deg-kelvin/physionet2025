@@ -594,3 +594,21 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
 - **Not changed:** results, numbers, attributions, decision-log framing, limitations (selection set; one external score).
 - **Outcome:** rewrite done in two passes (Opus) with an independent accuracy-and-voice review (Fable) in between; 15 pages, abstract 249 words, body + captions ≈ 7,700 words, hedge rate 1.5 → 4.5 per 1,000 words, no stock phrases. New title: "Fine-tuning the ECG-FM foundation model for Chagas screening: what transferred to the hidden cohorts of the PhysioNet Challenge 2025". New figure 5 (layer weights), new refs dong2025, nguyen2025mol, gow2023.
 - **Status:** active.
+
+## D-2026-11-05-1 — Manuscript restructured after a referee-style read; round 4 opened for the last hidden-test entry
+- **Review (Fable, fresh eyes):** the shortcut was in Table 1 on page 2 and "discovered" on page 5; Methods read as a lab
+  notebook (three rounds, ~15 run labels, rules unreadable as prose); eleven Results subsections for five findings; the
+  fine-tuning caveat four times; prose "sanded to one grain" (aphoristic opener → numbers → verdict clause, "from A to
+  B" ×18, no asides); the subtitle promised an attribution that 4.3 disclaimed.
+- **Rewrite (Opus):** title "Fine-tuning ECG-FM for Chagas screening once a recording-length shortcut is controlled:
+  internal evidence and one hidden-cohort score"; the length–label association stated in 2.1 as a property of the data;
+  Methods = Data and evaluation / Model and training / Experimental design with one rules table (Table 2); Results in six
+  subsections; round-3 re-trained runs renamed B0′/W1′; Discussion cut ~40%; new 5-page supplement (S1 full rules, S2
+  learning rate, S3 layer weights, S4 round-2/3 tables and figures, S5 ladder AUROC figure, S6 reconstruction/timing, S7
+  views B and C). Body + captions 7,445 → 5,853 words; abstract 246; 12 + 5 pages. Five authors'-voice sentences added
+  only where DECISIONS entries support them (D-2026-09-30-2, D-2026-09-21-5, D-2026-09-29-1/3, D-2026-10-15-4).
+- **Round 4 (PLAN_R4.md):** cross-configuration ensembles from saved predictions do not beat the scored W1R ensemble
+  (job 18319010); eight training runs queued (W1R seeds 45/46, MWR ×3, W1RS ×3; array 18319086). Rule written first:
+  a candidate must beat the scored ensemble on S10 AUROC by > 1 SE without losing on S10+ or S7; otherwise the
+  recommendation is to spend the last entry on attribution (W1′ without the ranking loss). The user decides.
+- **Status:** active; round-4 runs in progress.
