@@ -551,3 +551,19 @@ Focus-issue submission F28 (commit 355ff92) vs the original 2025 entry (CinC 202
 | **Test mean** | **0.245** (rank 8/40) | **0.289** | **+0.044** |
 
 Official 2025 leaderboard for context: 1st 0.323, 2nd 0.283, median 0.217. One focus-issue entry remains (D-2026-10-30-1).
+
+### Round 4 (PLAN_R4.md; 2026-11-05; array 18319086, table 18321983) — candidates for the second focus-issue entry
+
+Ensembles against the externally scored W1R three-seed ensemble (paired bootstrap SE):
+
+| Candidate | members | S10 AUROC Δ | S10+ AUROC Δ | S7 TPR@5% Δ | pooled A Δ | length gap | source gap |
+|---|---|---|---|---|---|---|---|
+| W1R ×5 seeds | 5 | +0.007 ± 0.005 | +0.003 ± 0.003 | +0.011 ± 0.004 | +0.013 ± 0.005 | 0.008 | −0.003 |
+| MWR (matched negatives + ranking loss) | 3 | +0.001 ± 0.013 | +0.017 ± 0.007 | −0.016 ± 0.007 | −0.020 ± 0.007 | 0.001 | +0.018 |
+| MWR + W1R mix | 6 | +0.002 ± 0.006 | +0.013 ± 0.004 | −0.006 ± 0.005 | −0.004 ± 0.005 | 0.005 | — |
+| W1RS (ranking loss, no PTB-XL) | 3 | −0.019 ± 0.018 | −0.004 ± 0.008 | −0.014 ± 0.007 | −0.004 ± 0.007 | 0.007 | −0.004 |
+| W1′ (no ranking loss; attribution candidate) | 3 | −0.007 ± 0.012 | −0.008 ± 0.007 | −0.021 ± 0.007 | −0.011 ± 0.006 | 0.085 | — |
+| mixes of saved W1R/W1/W1S members (job 18319010) | 6–9 | ≤ +0.009 ± 0.016 | ≤ +0.003 | −0.007 to −0.013 | — | 0.04–0.06 | — |
+
+**Verdict (D-2026-11-05-2):** by the rule written in PLAN_R4 §3, W1R ×5 qualifies (S10 +1.4 SE, no loss elsewhere, S7 +2.5 SE);
+`configs/final_r4.yaml` is that entry. The user decides between it and the attribution alternative (W1′).

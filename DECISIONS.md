@@ -612,3 +612,20 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   a candidate must beat the scored ensemble on S10 AUROC by > 1 SE without losing on S10+ or S7; otherwise the
   recommendation is to spend the last entry on attribution (W1′ without the ranking loss). The user decides.
 - **Status:** active; round-4 runs in progress.
+
+## D-2026-11-05-2 — Round-4 verdict: by the rule, a five-member W1R ensemble is the candidate for the last entry
+- **Result (array 18319086, table 18321983; ensembles vs the scored W1R three-seed ensemble, paired bootstrap):**
+  W1R×5 — S10 AUROC +0.007 ± 0.005 (1.4 SE), S10+ AUROC +0.003 ± 0.003, S7 TPR@5% +0.011 ± 0.004, pooled A +0.013 ± 0.005;
+  length-cue gap 0.008, source gap −0.003 (unchanged). MWR — S10+ +0.017 ± 0.007 but S10 +0.001 ± 0.013 and S7 −0.016 ± 0.007
+  (fails the guard); MWR+W1R six-member mix — S10+ +0.013 ± 0.004, S10 +0.002 ± 0.006, S7 −0.006 ± 0.005 (fails the S10
+  primary). W1RS — worse on every view. W1′ (the attribution candidate) — S10 −0.007 ± 0.012, S10+ −0.008 ± 0.007, S7
+  −0.021 ± 0.007, gap 0.085.
+- **Rule (PLAN_R4 §3) applied as written:** W1R×5 is the only candidate that gains on S10 by more than one SE without
+  losing on S10+ or S7. The S10 margin is 1.4 SE; the S7 and pooled gains are 2.5 SE. Expected external effect: small and
+  non-negative (an ensemble-size change only). `experiments/configs/final_r4.yaml` = final_r3 with `ensemble_members: 5`.
+  Projected training 5 × 1.4 h ≈ 7 h on a Titan RTX (~17 h on a T4); inference about 1.6× the three-member time.
+- **Alternative, not chosen by the rule:** spend the entry on attribution with W1′ (no ranking loss), which the paper's
+  Discussion 4.3 says is the only way to learn which change moved the hidden score. It scores lower internally on every
+  view, so it buys knowledge, not score.
+- **Decision:** the user's. Nothing is re-shipped; the package default stays final_r3 until the user chooses.
+- **Status:** open.

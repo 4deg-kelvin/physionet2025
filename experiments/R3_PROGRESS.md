@@ -30,4 +30,4 @@ Updated at every milestone so the work can be resumed by reading this file.
 - Mix table 18319010 (ensembles across saved W1R / W1 / W1S members, vs the W1R ensemble): no mix beats W1R on S10 AUROC
   by more than one SE (best: all nine members +0.009 ± 0.016), all lose on S7 TPR@5% (−0.007 to −0.021) and widen the
   length-cue gap (0.04–0.09 vs 0.009). Mixes do not qualify.
-- Array 18319086 (W1R seeds 45/46; MWR ×3; W1RS ×3) queued behind tests 18319085.
+- Array 18319086 (8/8 COMPLETED, 1.8–2.8 h each) and table 18321983: W1R×5 qualifies by the PLAN_R4 rule; MWR fails the S7 guard; W1RS and W1′ worse (D-2026-11-05-2). Decision open: W1R×5 (score) vs W1′ (attribution).

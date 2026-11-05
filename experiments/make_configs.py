@@ -255,6 +255,15 @@ def final_r3(cfg: ExperimentCfg) -> None:
                        "5 s multi-window, hard-negative ranking loss, 3-seed ensemble.")
 
 
+def final_r4(cfg: ExperimentCfg) -> None:
+    """Candidate for the second focus-issue entry (PLAN_R4.md, D-2026-11-05-2): final_r3 with five
+    ensemble members instead of three.  Not the package default unless the user adopts it."""
+    final_r3(cfg)
+    cfg.train.ensemble_members = 5
+    cfg.name = "final_r4"
+    cfg.description = "Round-4 candidate: final_r3 with a five-seed ensemble."
+
+
 def final_b(cfg: ExperimentCfg) -> None:
     """Final candidate B: the 5c config on all data, stage 2 validated every 500 optimiser steps.
 
@@ -286,6 +295,7 @@ ROWS: List[Tuple[str, Callable[[ExperimentCfg], None]]] = [
     ("final_full", row_final),
     ("finalA_negcap", final_a),
     ("final_r3", final_r3),
+    ("final_r4", final_r4),
     ("finalB_stepval", final_b),
 ]
 
