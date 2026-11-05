@@ -1,0 +1,7 @@
+group,S10+_auroc_gain_gt_se,S7_tpr_not_lower,S7_tpr_gain_gt_se,S10+_auroc_not_lower,gap_shrinks,primary,secondary,qualifies,S10+_d_auroc,S7_d_challenge
+W1,False,False,False,True,False,False,False,False,-0.003320834492584912,-0.006089489012443772
+W1S,False,True,False,True,False,False,False,False,-0.00835103826795136,-0.005030447445062258
+W1RxW1S,False,True,False,True,False,False,False,False,-0.004175519133975847,-0.0025152237225311014
+W1RxW1,False,False,False,True,False,False,False,False,-0.0016604172462924005,-0.003044744506221886
+W1RxW1xW1S,False,False,False,True,False,False,False,False,-0.003890624253512165,-0.003706645485835325
+W1x5,False,False,False,True,False,False,False,False,-0.0032287372166156514,-0.014244109081281486
