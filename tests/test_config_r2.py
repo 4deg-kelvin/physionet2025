@@ -84,6 +84,7 @@ def test_committed_configs_are_exactly_what_make_configs_generates(tmp_path):
         assert committed.read_text() == (tmp_path / rel).read_text(), f"{rel} is stale"
     assert len([g for g in generated if str(g).startswith("r2/")]) == 9
     assert len([g for g in generated if str(g).startswith("r3/")]) == 14
+    assert len([g for g in generated if str(g).startswith("r4/")]) == 8
     assert (tmp_path / "r3_smoke.yaml").is_file()
 
 

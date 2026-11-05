@@ -394,6 +394,34 @@ R3_VARIANTS: List[Tuple[str, str, Sequence[Callable[[ExperimentCfg], None]], Tup
 ]
 
 
+# Round 4 (PLAN_R4.md): candidates for the second focus-issue entry, each W1R (the scored entry)
+# plus one change, under the round-3 protocol.  Seeds 45/46 of W1R allow a five-member W1R.
+R4_VARIANTS: List[Tuple[str, str, Sequence[Callable[[ExperimentCfg], None]], Tuple[int, ...]]] = [
+    ("W1R", "5 s windows + hard-negative ranking loss (extra seeds)", (r2_windows, r3_ranking), (45, 46)),
+    ("MWR", "5 s windows + length-matched negatives + ranking loss", (r2_windows, r2_matched, r3_ranking), R3_SEEDS),
+    ("W1RS", "5 s windows + ranking loss, PTB-XL excluded", (r2_windows, r3_ranking, r3_no_ptbxl), R3_SEEDS),
+]
+
+
+def r4_configs() -> List[Tuple[str, ExperimentCfg]]:
+    """The 8 round-4 runs: ``r4_<variant>_s<seed>`` (W1R seeds keep the r3 name so the five
+    W1R seeds aggregate as one group: ``r3_W1R_s45``, ``r3_W1R_s46``)."""
+    out: List[Tuple[str, ExperimentCfg]] = []
+    for variant, what, steps, seeds in R4_VARIANTS:
+        for seed in seeds:
+            cfg = _base()
+            final_a(cfg)
+            r3_base(cfg)
+            for step in steps:
+                step(cfg)
+            cfg.train.seed = seed
+            prefix = "r3" if variant == "W1R" else "r4"
+            cfg.name = f"{prefix}_{variant}_s{seed}"
+            cfg.description = f"Round 4 {variant}: {what}; seed {seed}."
+            out.append((cfg.name, cfg))
+    return out
+
+
 def r3_configs() -> List[Tuple[str, ExperimentCfg]]:
     """The 14 round-3 runs: ``r3_<variant>_s<seed>``, each finalA_negcap + r3_base + the variant."""
     out: List[Tuple[str, ExperimentCfg]] = []
@@ -469,6 +497,7 @@ def all_configs() -> List[Tuple[str, ExperimentCfg]]:
         out.append((name, cfg))
     out.extend((f"r2/{name}", cfg) for name, cfg in r2_configs())
     out.extend((f"r3/{name}", cfg) for name, cfg in r3_configs())
+    out.extend((f"r4/{name}", cfg) for name, cfg in r4_configs())
     return out
 
 
