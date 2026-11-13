@@ -157,12 +157,12 @@ R3_TEX = {
     "W1tta": "\\quad W1$'$, windows every 2.5 s",
 }
 # The four rows of the main-text fine-tuning table (round 2): the baseline and the three
-# interpolation weights of the configuration with both remedies.
+# interpolation weights of the configuration with both interventions.
 ALPHA_TEX = {
     "B0": "Baseline (B0), fine-tuned",
-    "MW_a0.00": "Both remedies, stage 1 only ($\\alpha=0$)",
-    "MW_a0.50": "Both remedies, halfway ($\\alpha=0.5$)",
-    "MW_a1.00": "Both remedies, stage 2 ($\\alpha=1$)",
+    "MW_a0.00": "Both interventions, stage 1 only ($\\alpha=0$)",
+    "MW_a0.50": "Both interventions, halfway ($\\alpha=0.5$)",
+    "MW_a1.00": "Both interventions, stage 2 ($\\alpha=1$)",
 }
 
 
@@ -276,13 +276,19 @@ def fig_stage2(out: Path) -> Dict[str, float]:
     best_epoch: Dict[str, float] = {}
     for key, _, runs, _ in LR_GROUPS:
         color, marker = styles[key]
-        hs, bests = [], []
+        hs, bests, auc_peaks = [], [], []
         for r in runs:
             h, best = stage2_history(r)
             hs.append(h)
+            # the checkpoint kept is the one with the best monitored validation TPR@5% (val_challenge);
+            # the figure plots validation AUROC, whose own peak is recorded separately
             bests.append(best["stage2"]["epoch"] + 1)
+            auc_peaks.append(int(h["val_auroc"].to_numpy().argmax()) + 1)
             ax.plot(h["k"], h["val_auroc"], color=color, lw=0.8, alpha=0.45, zorder=2)
         best_epoch[key] = float(np.mean(bests))
+        best_epoch["auc:" + key] = float(np.mean(auc_peaks))
+        best_epoch["maxsel:" + key] = float(max(bests))
+        best_epoch["maxauc:" + key] = float(max(auc_peaks))
         n_common = min(len(h) for h in hs)
         mean = np.mean([h["val_auroc"].to_numpy()[:n_common] for h in hs], axis=0)
         mantissa, exponent = key.split("e-")
@@ -299,7 +305,7 @@ def fig_stage2(out: Path) -> Dict[str, float]:
 
 
 def fig_round2(r2: pd.DataFrame, rescored: pd.DataFrame, out: Path) -> None:
-    panels = [("S7", "challenge", "(a) TPR@5%\n7.34 s records"), ("S7", "auroc", "(b) AUROC\n7.34 s records"), ("S10+", "auroc", "(c) AUROC\n10 s format")]
+    panels = [("S7", "challenge", "(a) TPR@5%\n7.34 s records"), ("S7", "auroc", "(b) AUROC\n7.34 s records"), ("S10+", "auroc", "(c) AUROC, mixed-\nsource 10 s (S10+)")]
     keys = list(R2_RUNS)
     ys = np.arange(len(keys))[::-1]
     fig, axes = plt.subplots(1, 3, figsize=(5.6, 2.7), sharey=True, gridspec_kw={"wspace": 0.12})
@@ -449,7 +455,7 @@ def tab_lr(agg: pd.DataFrame, best_epoch: Dict[str, float], out: Path) -> None:
                     f"${a.loc['S7','challenge_mean']:.3f} \\pm {a.loc['S7','challenge_sd']:.3f}$ & {f3(a.loc['S7','auroc_mean'])} & {f3(a.loc['S7','ens_challenge'])} & {best_epoch[key]:.1f} \\\\")
     out.write_text(
         "\\begin{tabular}{l c c c c c c}\n\\hline\n"
-        "Stage-2 & \\multicolumn{2}{c}{Pooled (A)} & \\multicolumn{3}{c}{Within 7.34 s (S7)} & Best stage-2 \\\\\n"
+        "Stage-2 & \\multicolumn{2}{c}{Pooled (A)} & \\multicolumn{3}{c}{Within 7.34 s (S7)} & Selected stage-2 \\\\\n"
         "learning rate & TPR@5\\% & AUROC & TPR@5\\% & AUROC & Ensemble TPR@5\\% & epoch \\\\\n\\hline\n" + "\n".join(rows) + "\n\\hline\n\\end{tabular}\n")
 
 
@@ -466,14 +472,14 @@ def tab_round2(r2: pd.DataFrame, gaps: Dict[str, Dict[str, float]], out: Path, l
         rows.append(f"{labels[key]} & {f3(a['challenge_mean'])} & {f3(s7['challenge_mean'])} & {d1} & {f3(s7['auroc_mean'])} & {d2} & {f3(sp['auroc_mean'])} & {d3} & ${gaps[key]['gap']:+.2f}$ \\\\")
     out.write_text(
         "\\begin{tabular}{l c c c c c c c c}\n\\hline\n"
-        " & Pooled & \\multicolumn{4}{c}{Within 7.34 s records (S7)} & \\multicolumn{2}{c}{10 s format (S10+)} & Length- \\\\\n"
+        " & Pooled & \\multicolumn{4}{c}{Within 7.34 s records (S7)} & \\multicolumn{2}{c}{Mixed-source 10 s set (S10+)} & Length- \\\\\n"
         "Configuration & TPR@5\\% & TPR@5\\% & $\\Delta$ & AUROC & $\\Delta$ & AUROC & $\\Delta$ & cue gap \\\\\n\\hline\n"
         + "\n".join(rows) + "\n\\hline\n\\end{tabular}\n")
 
 
 def fig_round3(r3: pd.DataFrame, rescored: pd.DataFrame, out: Path) -> None:
     """Round 3, same layout as figure 5: seeds, seed mean, ensemble with CI; vertical line = B0 mean."""
-    panels = [("S7", "challenge", "(a) TPR@5%\n7.34 s records"), ("S7", "auroc", "(b) AUROC\n7.34 s records"), ("S10+", "auroc", "(c) AUROC\n10 s format")]
+    panels = [("S7", "challenge", "(a) TPR@5%\n7.34 s records"), ("S7", "auroc", "(b) AUROC\n7.34 s records"), ("S10+", "auroc", "(c) AUROC, mixed-\nsource 10 s (S10+)")]
     keys = list(R3_RUNS)
     ys = np.arange(len(keys))[::-1]
     fig, axes = plt.subplots(1, 3, figsize=(5.6, 2.7), sharey=True, gridspec_kw={"wspace": 0.12})
@@ -517,16 +523,17 @@ def tab_round3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
     rows = []
     for key in R3_RUNS:
         v = r3[r3["group"] == key].set_index("view")
-        s7, sp, a = v.loc["S7"], v.loc["S10+"], v.loc["A"]
+        s7, sp, s10, a = v.loc["S7"], v.loc["S10+"], v.loc["S10"], v.loc["A"]
         if key == "B0":
-            d1, d2, d3 = "--", "--", "--"
+            d1, d2, d3, d4 = "--", "--", "--", "--"
         else:
             d1, d2, d3 = pm(s7["d_challenge"], s7["d_challenge_se"]), pm(s7["d_auroc"], s7["d_auroc_se"]), pm(sp["d_auroc"], sp["d_auroc_se"])
-        rows.append(f"{R3_TEX[key]} & {f3(a['challenge_mean'])} & {f3(s7['challenge_mean'])} & {d1} & {f3(s7['auroc_mean'])} & {d2} & {f3(sp['auroc_mean'])} & {d3} & {f3(sp['ens_auroc'])} & ${gaps[key]['gap']:+.2f}$ & ${sgaps[key]:+.2f}$ \\\\")
+            d4 = pm(s10["d_auroc"], s10["d_auroc_se"])
+        rows.append(f"{R3_TEX[key]} & {f3(a['challenge_mean'])} & {f3(s7['challenge_mean'])} & {d1} & {f3(s7['auroc_mean'])} & {d2} & {f3(sp['auroc_mean'])} & {d3} & {f3(sp['ens_auroc'])} & {f3(s10['auroc_mean'])} & {d4} & ${gaps[key]['gap']:+.2f}$ & ${sgaps[key]:+.2f}$ \\\\")
     out.write_text(
-        "\\begin{tabular}{l c c c c c c c c c c}\n\\hline\n"
-        " & Pooled & \\multicolumn{4}{c}{Within 7.34 s records (S7)} & \\multicolumn{3}{c}{10 s format (S10+) AUROC} & Length- & Source \\\\\n"
-        "Configuration & TPR@5\\% & TPR@5\\% & $\\Delta$ & AUROC & $\\Delta$ & mean & $\\Delta$ & ensemble & cue gap & gap \\\\\n\\hline\n"
+        "\\begin{tabular}{l c c c c c c c c c c c c}\n\\hline\n"
+        " & Pooled & \\multicolumn{4}{c}{Within 7.34 s records (S7)} & \\multicolumn{3}{c}{Mixed-source 10 s set (S10+) AUROC} & \\multicolumn{2}{c}{CODE-15\\% 10 s (S10) AUROC} & Length- & Source \\\\\n"
+        "Configuration & TPR@5\\% & TPR@5\\% & $\\Delta$ & AUROC & $\\Delta$ & mean & $\\Delta$ & ensemble & mean & $\\Delta$ & cue gap & gap \\\\\n\\hline\n"
         + "\n".join(rows) + "\n\\hline\n\\end{tabular}\n")
 
 
@@ -707,6 +714,9 @@ def numbers(split, dur, agg, r2, r2c, gaps, best_epoch, dur_only, out: Path) -> 
         macro("nCodeShort", f"{int(g.loc['short','size']):,}"), macro("nCodeLong", f"{int(g.loc['long','size']):,}"),
         macro("nCodeShortPos", f"{int(g.loc['short','sum']):,}"), macro("nCodeLongPos", f"{int(g.loc['long','sum']):,}"),
         macro("nCodePos", f"{int(c15['label'].sum()):,}"),
+        macro("nCodeMid", f"{int(g.loc['mid','size']):,}"), macro("nCodeMidPos", f"{int(g.loc['mid','sum']):,}"),
+        macro("nCodeUnderFive", f"{int((c15['duration_s'] < 5.0).sum()):,}"),
+        macro("examsPerPatient", f"{len(c15) / c15['group'].nunique():.2f}"),
         macro("prevShort", f"{100*ps:.2f}"), macro("prevLong", f"{100*pl:.2f}"), macro("prevRatio", f"{ps/pl:.1f}"),
         macro("shareCodePosShort", f"{100*g.loc['short','sum']/c15['label'].sum():.1f}"),
         macro("shareAllShort", f"{100*(split['length_group']=='short').mean():.0f}"),
@@ -750,6 +760,9 @@ def numbers(split, dur, agg, r2, r2c, gaps, best_epoch, dur_only, out: Path) -> 
         macro("lrMidSseven", f3(A("lr 5e-6", "S7", "challenge_mean"))), macro("lrLowSseven", f3(A("lr 1e-6", "S7", "challenge_mean"))),
         macro("lrMidA", f3(A("lr 5e-6", "A", "challenge_mean"))), macro("lrLowA", f3(A("lr 1e-6", "A", "challenge_mean"))),
         macro("bestEpHigh", f"{best_epoch['2e-5']:.1f}"), macro("bestEpMid", f"{best_epoch['5e-6']:.1f}"), macro("bestEpLow", f"{best_epoch['1e-6']:.1f}"),
+        # epoch of the validation-AUROC peak (figure S1), mean over seeds, and the latest selected / AUROC-peak epoch at the base rate
+        macro("aucPeakEpHigh", f"{best_epoch['auc:2e-5']:.1f}"), macro("aucPeakEpMid", f"{best_epoch['auc:5e-6']:.1f}"), macro("aucPeakEpLow", f"{best_epoch['auc:1e-6']:.1f}"),
+        macro("bestEpHighMax", f"{best_epoch['maxsel:2e-5']:.0f}"), macro("aucPeakEpHighMax", f"{best_epoch['maxauc:2e-5']:.0f}"),
         # round 2
         macro("mOneA", f3(R("M1", "A", "challenge_mean"))), macro("mOneSseven", f3(R("M1", "S7", "challenge_mean"))), macro("mOneGap", f"${gaps['M1']['gap']:+.2f}$"),
         macro("mOneStenPlusAuc", f3(R("M1", "S10+", "auroc_mean"))),
