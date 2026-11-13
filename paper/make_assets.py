@@ -14,6 +14,7 @@ Inputs (all produced by committed scripts; see experiments/REPRODUCE.md):
   experiments/results/R2_TABLE_{A,C}.csv     aggregate.py     (round 2)
   experiments/results/<run>/...              per-run predictions, summaries, manifests
   experiments/results/entry_final_r3/layer_weights.csv   softmaxed layer-aggregation weights
+  code15_exams.csv, ptbxl_database.csv, SaMi-Trop *.hea  sex by source (sex_macros)
 """
 from __future__ import annotations
 
@@ -40,6 +41,14 @@ sys.path.insert(0, str(WT))
 import scoring  # noqa: E402  (experiments/scoring.py)
 
 DEFAULT_SPLIT = "/juice2/scr2/kelvinkn/other_work/edwards/fixbranch_test/split/split.csv"
+# Sex of each record, by source: the CODE-15% exam table (column is_male), the PTB-XL metadata
+# table used by the fixed protocol (data.ptbxl_database_csv in experiments/configs/r3/*.yaml;
+# sex 0 = male, 1 = female) and the "# Sex:" line of each SaMi-Trop header.
+CODE15_EXAMS = WT / "code15_exams.csv"
+PTBXL_DATABASE = Path("/juice2/scr2/kelvinkn/other_work/edwards/physionet2025/training_data/"
+                      "ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3/ptbxl_database.csv")
+# IOP asks for a Helvetica-like sans serif; take the first one installed (fc-list), else DejaVu Sans.
+SANS_CANDIDATES = ("Helvetica", "Arial", "Liberation Sans", "Nimbus Sans")
 
 # -- palette: the validated reference palette, first three categorical slots only (the set
 # that passes the colour-vision-deficiency checks for all pairs); marker shape is always a
@@ -91,15 +100,27 @@ LR_GROUPS = [("2e-5", "B0 shipped (lr 2e-5)", B0_RUNS, "$2\\times10^{-5}$"),
              ("1e-6", "lr 1e-6", [f"lrsweep_lr1e6_s{s}" for s in SEEDS], "$1\\times10^{-6}$")]
 
 
+def sans_font() -> tuple:
+    """(family, pdf.fonttype): the first installed Helvetica-like family.  An OpenType font with
+    CFF outlines (e.g. Nimbus Sans) cannot be embedded as Type 42 by matplotlib's PDF backend
+    without producing an invalid font dictionary, so it is embedded as Type 3 instead."""
+    from matplotlib import font_manager
+    files = {f.name: f.fname for f in font_manager.fontManager.ttflist}
+    family = next((name for name in SANS_CANDIDATES if name in files), "DejaVu Sans")
+    return family, 42 if files.get(family, ".ttf").lower().endswith(".ttf") else 3
+
+
 def style() -> None:
+    family, fonttype = sans_font()
     plt.rcParams.update({
-        "font.family": "sans-serif", "font.sans-serif": ["DejaVu Sans"], "font.size": 8,
-        "axes.titlesize": 8.5, "axes.labelsize": 8, "xtick.labelsize": 7.5, "ytick.labelsize": 7.5,
-        "legend.fontsize": 7.5, "axes.spines.top": False, "axes.spines.right": False,
+        "font.family": family, "font.size": 8, "mathtext.fontset": "custom", "mathtext.rm": family,
+        "mathtext.it": f"{family}:italic", "mathtext.bf": f"{family}:bold",
+        "axes.titlesize": 8.5, "axes.labelsize": 8, "xtick.labelsize": 8, "ytick.labelsize": 8,
+        "legend.fontsize": 8, "axes.spines.top": False, "axes.spines.right": False,
         "axes.edgecolor": AXIS, "axes.linewidth": 0.6, "axes.labelcolor": INK2, "text.color": INK,
         "xtick.color": MUTED, "ytick.color": MUTED, "xtick.labelcolor": INK2, "ytick.labelcolor": INK,
         "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.5, "grid.linestyle": "-",
-        "axes.axisbelow": True, "legend.frameon": False, "pdf.fonttype": 42, "savefig.bbox": "tight",
+        "axes.axisbelow": True, "legend.frameon": False, "pdf.fonttype": fonttype, "savefig.bbox": "tight",
         "savefig.pad_inches": 0.03, "figure.facecolor": "white", "axes.facecolor": "white",
         "axes.titlelocation": "left", "axes.titlepad": 6,
     })
@@ -192,7 +213,7 @@ def fig_shortcut(split: pd.DataFrame, gaps: Dict[str, Dict[str, float]], out: Pa
     prev = [100.0 * g.loc[k, "sum"] / g.loc[k, "size"] for k, _ in names]
     ax1.barh(ys, prev, height=0.42, color=BLUE, zorder=3)
     for y, p, (k, _) in zip(ys, prev, names):
-        ax1.text(p + 0.08, y, f"{p:.2f}%\n{int(g.loc[k, 'sum']):,} of {int(g.loc[k, 'size']):,}", va="center", ha="left", fontsize=7, color=INK, linespacing=1.25)
+        ax1.text(p + 0.08, y, f"{p:.2f}%\n{int(g.loc[k, 'sum']):,} of {int(g.loc[k, 'size']):,}", va="center", ha="left", fontsize=8, color=INK, linespacing=1.25)
     ax1.set_yticks(ys, [n for _, n in names])
     ax1.set_xlim(0, max(prev) * 1.75)
     ax1.set_xlabel("Chagas-positive records (%)")
@@ -207,7 +228,7 @@ def fig_shortcut(split: pd.DataFrame, gaps: Dict[str, Dict[str, float]], out: Pa
         ax2.plot([d["neg_mean_long"], d["neg_mean_short"]], [y, y], color=AXIS, lw=1.4, zorder=2, solid_capstyle="round")
         ax2.scatter(d["neg_mean_long"], y, s=74, color=BLUE_LIGHT, marker="s", zorder=3, edgecolor="white", linewidth=1.2)
         ax2.scatter(d["neg_mean_short"], y, s=26, color=BLUE_DARK, marker="o", zorder=4, edgecolor="white", linewidth=0.9)
-        ax2.text(0.99, y, f"gap {d['gap']:+.2f}", va="center", ha="right", fontsize=7, color=INK2, transform=ax2.get_yaxis_transform())
+        ax2.text(0.99, y, f"gap {d['gap']:+.2f}", va="center", ha="right", fontsize=8, color=INK2, transform=ax2.get_yaxis_transform())
     ax2.set_yticks(ys, [n for _, n in order])
     ax2.set_xlim(0.0, 1.0)
     ax2.set_ylim(-0.6, len(order) - 0.4)
@@ -223,7 +244,7 @@ def fig_shortcut(split: pd.DataFrame, gaps: Dict[str, Dict[str, float]], out: Pa
 
 
 def fig_inflation(agg: pd.DataFrame, rescored: pd.DataFrame, dur_only_b: float, out: Path) -> None:
-    fig, ax = plt.subplots(figsize=(6.0, 3.5))
+    fig, ax = plt.subplots(figsize=(4.6, 3.5))
     ys = np.arange(len(LADDER))[::-1]
     series = [("B", "o", BLUE, "Pooled CODE-15% (length cue available)"),
               ("S7", "s", ORANGE, "Within 7.34 s records"),
@@ -237,14 +258,14 @@ def fig_inflation(agg: pd.DataFrame, rescored: pd.DataFrame, dur_only_b: float, 
         for view, marker, color, _ in series:
             ax.scatter(a.loc[view, "auroc_mean"], y, s=40, marker=marker, color=color, zorder=3, edgecolor="white", linewidth=1.1)
     ax.axvline(dur_only_b, color=MUTED, lw=0.9, zorder=1)
-    ax.text(dur_only_b + 0.003, len(LADDER) - 0.42, "record length alone", fontsize=7, color=INK2, va="center", ha="left")
+    ax.text(dur_only_b + 0.003, len(LADDER) - 0.42, "record length alone", fontsize=8, color=INK2, va="center", ha="left")
     ax.set_yticks(ys, [lab for _, _, lab, _ in LADDER])
     ax.set_ylim(-0.6, len(LADDER) - 0.05)
     ax.set_xlabel("AUROC on held-out CODE-15% records")
     ax.grid(axis="y", visible=False)
     ax.tick_params(axis="y", length=0)
     handles = [Line2D([], [], marker=m, color="none", markerfacecolor=c, markeredgecolor="white", markersize=7, label=lab) for _, m, c, lab in series]
-    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.36, -0.14), ncol=3, handletextpad=0.2, columnspacing=1.2)
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.3, -0.14), ncol=2, handletextpad=0.2, columnspacing=1.2)
     fig.savefig(out)
     plt.close(fig)
 
@@ -281,7 +302,7 @@ def fig_round2(r2: pd.DataFrame, rescored: pd.DataFrame, out: Path) -> None:
     panels = [("S7", "challenge", "(a) TPR@5%\n7.34 s records"), ("S7", "auroc", "(b) AUROC\n7.34 s records"), ("S10+", "auroc", "(c) AUROC\n10 s format")]
     keys = list(R2_RUNS)
     ys = np.arange(len(keys))[::-1]
-    fig, axes = plt.subplots(1, 3, figsize=(6.1, 2.7), sharey=True, gridspec_kw={"wspace": 0.12})
+    fig, axes = plt.subplots(1, 3, figsize=(5.6, 2.7), sharey=True, gridspec_kw={"wspace": 0.12})
     for ax, (view, metric, title) in zip(axes, panels):
         base = r2[(r2["group"] == "B0") & (r2["view"] == view)].iloc[0]
         ax.axvline(base[f"{metric}_mean"], color=AXIS, lw=0.9, zorder=1)
@@ -323,7 +344,7 @@ def fig_layers(out: Path) -> None:
     layers = list(range(1, 13))
     fig, ax = plt.subplots(figsize=(4.6, 2.7))
     ax.axhline(1 / 12, color=MUTED, lw=0.7, zorder=1)
-    ax.text(12.35, 1 / 12, "uniform", fontsize=7, color=INK2, va="center", ha="left")
+    ax.text(12.35, 1 / 12, "uniform", fontsize=8, color=INK2, va="center", ha="left")
     frozen = t.loc["row0_baseline:0", layers].to_numpy(dtype=float)
     ax.plot(layers, frozen, color=ORANGE, lw=1.6, marker="s", markersize=5, markeredgecolor="white", markeredgewidth=1.0, zorder=3,
             label="Step 0: frozen encoder, 10 s input")
@@ -455,7 +476,7 @@ def fig_round3(r3: pd.DataFrame, rescored: pd.DataFrame, out: Path) -> None:
     panels = [("S7", "challenge", "(a) TPR@5%\n7.34 s records"), ("S7", "auroc", "(b) AUROC\n7.34 s records"), ("S10+", "auroc", "(c) AUROC\n10 s format")]
     keys = list(R3_RUNS)
     ys = np.arange(len(keys))[::-1]
-    fig, axes = plt.subplots(1, 3, figsize=(6.1, 2.7), sharey=True, gridspec_kw={"wspace": 0.12})
+    fig, axes = plt.subplots(1, 3, figsize=(5.6, 2.7), sharey=True, gridspec_kw={"wspace": 0.12})
     for ax, (view, metric, title) in zip(axes, panels):
         base = r3[(r3["group"] == "B0") & (r3["view"] == view)].iloc[0]
         ax.axvline(base[f"{metric}_mean"], color=AXIS, lw=0.9, zorder=1)
@@ -623,6 +644,32 @@ def macro(name: str, value: str) -> str:
     return f"\\newcommand{{\\{name}}}{{{value}}}"
 
 
+def sex_macros(split: pd.DataFrame) -> List[str]:
+    """Percentage of female records per source, over every record of the split (training and
+    held-out).  Fails loudly if any record has no recorded sex, since the text says all do."""
+    src = split["source"].astype(str)
+    code = split[src.str.startswith("CODE")][["stem"]]
+    exams = pd.read_csv(CODE15_EXAMS, usecols=["exam_id", "is_male"], dtype={"exam_id": str})
+    code = code.merge(exams, left_on="stem", right_on="exam_id", how="left")
+    assert code["is_male"].notna().all(), "CODE-15% records without sex"
+    female_code = 100.0 * (~code["is_male"].astype(bool)).mean()
+
+    ptb = split[src.str.startswith("PTB")][["stem"]].copy()
+    ptb["ecg_id"] = ptb["stem"].str.replace("_hr", "", regex=False).astype(int)
+    ptb = ptb.merge(pd.read_csv(PTBXL_DATABASE, usecols=["ecg_id", "sex"]), on="ecg_id", how="left")
+    assert ptb["sex"].notna().all(), "PTB-XL records without sex"
+    female_ptb = 100.0 * (ptb["sex"] == 1).mean()
+
+    sami = []
+    for path in split[src.str.upper().str.startswith("SAMI")]["path"]:
+        m = re.search(r"^# Sex: *(\S+)", Path(str(path) + ".hea").read_text(), re.M)
+        assert m and m.group(1) in ("Female", "Male"), path
+        sami.append(m.group(1) == "Female")
+    female_sami = 100.0 * float(np.mean(sami))
+    return [macro("sexFemaleCode", f"{female_code:.1f}"), macro("sexFemaleSami", f"{female_sami:.1f}"),
+            macro("sexFemalePtb", f"{female_ptb:.1f}")]
+
+
 def memory_macros() -> List[str]:
     """Peak stage-2 GPU memory with 5 s windows (round-2 smoke log) and with the padded 10 s
     window (the comparison line recorded with it in experiments/README.md, round-2 notes)."""
@@ -732,6 +779,7 @@ def numbers(split, dur, agg, r2, r2c, gaps, best_epoch, dur_only, out: Path) -> 
         macro("bzSsevenC", f3(A(B0g, "S7", "challenge_mean", pd.read_csv(RES / "RESCORED_aggregate_C.csv")))),
         macro("mwSsevenC", f3(float(r2c[(r2c["group"] == "MW_a1.00") & (r2c["view"] == "S7")].iloc[0]["challenge_mean"]))),
     ]
+    m += sex_macros(split)
     m += layer_macros()
     m += memory_macros()
     out.write_text("% generated by paper/make_assets.py -- do not edit\n" + "\n".join(m) + "\n")
