@@ -647,3 +647,10 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   FiLM-style demographics, hard labels; 11 epochs), led by the augmentation as the user remembers it, cites the hackathon table, and uses it as a second externally scored point; it also corrects the ELSA-Brasil
   sentence (H29 scored 0.132 there). `EXTERNAL_SCORES.csv` row updated.
 - **Status:** active.
+
+## D-2026-11-13-2 — The second focus-issue entry is not used (user decision)
+- **Decision (user, 2026-11-13):** no further hidden-test submission. The round-4 candidates (D-2026-11-05-2) stay as
+  internal evidence; `final_r4.yaml` is kept but is not the package default; the paper reports the external scores it has
+  (official entry, hackathon entry, revised entry) and keeps the statement that the revised entry's gain is not attributable
+  to a single change.
+- **Status:** closed.
