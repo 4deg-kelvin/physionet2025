@@ -638,11 +638,12 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   history for filter words):** the submitted pipeline's cleaning call `nk.ecg_clean(lead, sampling_rate=500)` is identical at
   every commit; no low-pass, high-pass, band-pass, notch, neurokit-parameter or package-version change exists before the 2026
   ablation (0.5–45 Hz, 989f080 / 462cfde). The only filter-adjacent change on hackathon day is the powerline-interference
-  augmentation; the hackathon-day commits (8ec1ec9 … fa155fb, last at 21:02 BRT before the 23:59 deadline) add FiLM
-  demographics, soft labels, pos-weight 5 with 5× oversampling, powerline/crop/shift augmentation, entire-recording windowing
-  and set 11 epochs, encoder frozen. The one commented-out `bandpass_filter_func(... lowcut=0.5, highcut=45)` of that day is in
+  augmentation; the hackathon-day commits (8ec1ec9 … fa155fb, last at 21:02 BRT before the 23:59 deadline) add the powerline-interference
+  and crop/shift augmentations (switched on), pos-weight 5 with 5× oversampling, age/sex through a FiLM-style encoder
+  (`include_wide_feats=True`), entire-recording windowing and 11 epochs, encoder frozen; the soft-label code is present but
+  off (`do_multitask` unset), so labels were hard. The one commented-out `bandpass_filter_func(... lowcut=0.5, highcut=45)` of that day is in
   the cardioformer loader (55d8601), a different model, never enabled.
-- **Decision:** the paper describes H29 from the record (frozen entry + FiLM, soft labels, class weighting, augmentation;
-  11 epochs), cites the hackathon table, and uses it as a second externally scored point; it also corrects the ELSA-Brasil
+- **Decision:** the paper describes H29 from the record (frozen entry + powerline/crop-shift augmentation, class weighting,
+  FiLM-style demographics, hard labels; 11 epochs), led by the augmentation as the user remembers it, cites the hackathon table, and uses it as a second externally scored point; it also corrects the ELSA-Brasil
   sentence (H29 scored 0.132 there). `EXTERNAL_SCORES.csv` row updated.
 - **Status:** active.
