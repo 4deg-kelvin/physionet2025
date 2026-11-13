@@ -629,3 +629,20 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   view, so it buys knowledge, not score.
 - **Decision:** the user's. Nothing is re-shipped; the package default stays final_r3 until the user chooses.
 - **Status:** open.
+
+## D-2026-11-13-1 — Hackathon entry H29 identified from the repository: not a filter change
+- **User recollection:** the CinC 2025 hackathon entry (team Chagas_detector, H29, test mean 0.227, rank 3 of 11 scored;
+  validation 0.222 / REDS-II 0.293 / SaMi-Trop 3 0.257 / ELSA-Brasil 0.132) was "the original entry with only the band-pass
+  (or some filter) changed".
+- **Record (every branch, all 33 commits from the official entry 73b1f95 of 2025-08-10 through 2025-09-30, plus the whole
+  history for filter words):** the submitted pipeline's cleaning call `nk.ecg_clean(lead, sampling_rate=500)` is identical at
+  every commit; no low-pass, high-pass, band-pass, notch, neurokit-parameter or package-version change exists before the 2026
+  ablation (0.5–45 Hz, 989f080 / 462cfde). The only filter-adjacent change on hackathon day is the powerline-interference
+  augmentation; the hackathon-day commits (8ec1ec9 … fa155fb, last at 21:02 BRT before the 23:59 deadline) add FiLM
+  demographics, soft labels, pos-weight 5 with 5× oversampling, powerline/crop/shift augmentation, entire-recording windowing
+  and set 11 epochs, encoder frozen. The one commented-out `bandpass_filter_func(... lowcut=0.5, highcut=45)` of that day is in
+  the cardioformer loader (55d8601), a different model, never enabled.
+- **Decision:** the paper describes H29 from the record (frozen entry + FiLM, soft labels, class weighting, augmentation;
+  11 epochs), cites the hackathon table, and uses it as a second externally scored point; it also corrects the ELSA-Brasil
+  sentence (H29 scored 0.132 there). `EXTERNAL_SCORES.csv` row updated.
+- **Status:** active.
