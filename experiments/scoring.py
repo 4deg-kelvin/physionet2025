@@ -26,8 +26,22 @@ here treat ties exactly (the challenge score through the closed form in
 resampled array equals the same metric computed from the *original* sorted scores with
 weights ``w``.  That needs one sort per model instead of one per resample.
 ``tests/test_eval_r2.py`` checks the weighted path against explicit resampling.  Because
-the weights depend only on ``(seed, n)``, every model scored on the same records with
-the same seed sees the same resamples -- the paired bootstrap of ``aggregate.py``.
+the weights depend only on ``(seed, n)`` (and the patient groups, below), every model
+scored on the same records with the same seed sees the same resamples -- the paired
+bootstrap of ``aggregate.py``.
+
+Patient-level (cluster) resampling
+----------------------------------
+CODE-15% has about 1.47 examinations per patient, so held-out records are not
+independent.  By default (``bootstrap_unit="patient"``) the bootstrap resamples
+**patients**: each resample draws ``G`` patient groups with replacement (``G`` = the
+number of distinct groups among the view's records) and every record inherits the count
+of its group -- the cluster bootstrap (Davison & Hinkley 1997, *Bootstrap Methods and
+their Application*, section 3.8; Field & Welsh 2007, JRSS-B 69:369).  Groups are the
+``group`` column of the split CSV (``load_groups``): ``c15_<patient>`` for CODE-15%,
+``ptb_<patient>`` for PTB-XL, ``smt_<stem>`` for SaMi-Trop.  ``"record"`` reproduces the
+earlier record-level numbers; with every group a single record the two are bit-for-bit
+equal (tested), since group codes follow the records' order of first appearance.
 """
 
 from __future__ import annotations
@@ -35,8 +49,9 @@ from __future__ import annotations
 import sys
 import zlib
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -51,6 +66,11 @@ from chagas.metrics import challenge_score, compute_auc  # noqa: E402
 DEFAULT_DURATIONS = REPO_ROOT / "experiments" / "data" / "record_durations.csv"
 DEFAULT_N_BOOT = 1000
 DEFAULT_SEED = 20260930
+#: Patient groups of every record (``stem -> group``), from the held-out split.
+DEFAULT_SPLIT = Path("/juice2/scr2/kelvinkn/other_work/edwards/fixbranch_test/split/split.csv")
+#: ``"patient"`` (cluster bootstrap over patient groups) or ``"record"`` (the original).
+BOOTSTRAP_UNITS: Tuple[str, ...] = ("patient", "record")
+DEFAULT_BOOTSTRAP_UNIT = "patient"
 
 __all__ = [
     "VIEW_ORDER",
@@ -59,6 +79,8 @@ __all__ = [
     "attach_durations",
     "view_mask",
     "RankedScores",
+    "load_groups",
+    "group_codes",
     "bootstrap_weights",
     "bootstrap_metrics",
     "view_seed",
@@ -181,35 +203,103 @@ def view_seed(view: str, base_seed: int = DEFAULT_SEED) -> int:
     return (int(base_seed) + zlib.crc32(view.encode())) % (2 ** 32)
 
 
-def bootstrap_weights(n: int, n_boot: int, seed: int, chunk: int = 50) -> Iterator[np.ndarray]:
+# ---------------------------------------------------------------------------
+# patient groups
+# ---------------------------------------------------------------------------
+@lru_cache(maxsize=4)
+def _load_groups_cached(path: str) -> Dict[str, str]:
+    df = pd.read_csv(path, usecols=["stem", "group"], dtype={"stem": str, "group": str})
+    if df["stem"].duplicated().any():
+        raise ValueError(f"{path}: duplicated stems; cannot map records to patient groups")
+    return dict(zip(df["stem"], df["group"]))
+
+
+def load_groups(path: Optional[str] = None) -> Dict[str, str]:
+    """``stem -> patient group`` from the split CSV (cached per path).
+
+    The ``group`` column is ``c15_<patient>`` (CODE-15%), ``ptb_<patient>`` (PTB-XL) or
+    ``smt_<stem>`` (SaMi-Trop, one record per patient).
+    """
+    return _load_groups_cached(str(path or DEFAULT_SPLIT))
+
+
+def group_codes(
+    stems: Sequence[str],
+    unit: str = DEFAULT_BOOTSTRAP_UNIT,
+    groups: Optional[Mapping[str, str]] = None,
+) -> Optional[np.ndarray]:
+    """Integer resampling-unit code of each record, or ``None`` for record-level resampling.
+
+    Codes number the groups in order of first appearance among ``stems`` (not sorted),
+    so that when every group holds one record the codes are ``0..n-1`` and the patient
+    bootstrap draws exactly the record bootstrap's weights.  ``groups`` defaults to
+    :func:`load_groups`; a stem missing from it raises ``KeyError``.
+    """
+    if unit not in BOOTSTRAP_UNITS:
+        raise ValueError(f"unknown bootstrap unit {unit!r}; choose from {BOOTSTRAP_UNITS}")
+    if unit == "record":
+        return None
+    mapping = load_groups() if groups is None else groups
+    stems = [str(s) for s in stems]
+    missing = [s for s in stems if s not in mapping]
+    if missing:
+        raise KeyError(
+            f"{len(missing)} of {len(stems)} records have no patient group in the split map "
+            f"(first: {missing[:5]}); pass the split CSV that produced these predictions, or "
+            f"use bootstrap_unit='record'"
+        )
+    codes, _ = pd.factorize(pd.Series([mapping[s] for s in stems], dtype=object), sort=False)
+    return codes.astype(np.int64)
+
+
+def bootstrap_weights(
+    n: int, n_boot: int, seed: int, chunk: int = 50, groups: Optional[np.ndarray] = None
+) -> Iterator[np.ndarray]:
     """Yield ``(<= chunk, n)`` integer weight matrices; ``n_boot`` rows in total.
 
-    Row ``r`` is ``bincount`` of ``n`` indices drawn with replacement -- one ordinary
-    bootstrap resample of the ``n`` records.  Depends only on ``(n, n_boot, seed,
-    chunk)``, which is what makes the bootstrap *paired* across models.
+    Record level (``groups=None``): row ``r`` is ``bincount`` of ``n`` indices drawn with
+    replacement -- one ordinary bootstrap resample of the ``n`` records.
+
+    Patient level (``groups`` = :func:`group_codes`, values ``0..G-1``): row ``r`` is the
+    ``bincount`` of ``G`` group indices drawn with replacement, expanded so that each
+    record carries its group's count -- one cluster-bootstrap resample.
+
+    Depends only on ``(n, n_boot, seed, chunk, groups)``, which is what makes the
+    bootstrap *paired* across models.
     """
+    if groups is not None:
+        groups = np.asarray(groups, dtype=np.int64)
+        if groups.shape != (n,):
+            raise ValueError(f"groups has shape {groups.shape}, expected ({n},)")
+    n_units = n if groups is None else (int(groups.max()) + 1 if n else 0)
     rng = np.random.default_rng(seed)
     done = 0
     while done < n_boot:
         b = min(chunk, n_boot - done)
-        idx = rng.integers(0, n, size=(b, n))
-        flat = (idx + (np.arange(b, dtype=np.int64) * n)[:, None]).ravel()
-        yield np.bincount(flat, minlength=b * n).reshape(b, n).astype(np.float64)
+        idx = rng.integers(0, n_units, size=(b, n_units))
+        flat = (idx + (np.arange(b, dtype=np.int64) * n_units)[:, None]).ravel()
+        counts = np.bincount(flat, minlength=b * n_units).reshape(b, n_units).astype(np.float64)
+        yield counts if groups is None else counts[:, groups]
         done += b
 
 
 def bootstrap_metrics(
-    y: np.ndarray, probs: Sequence[np.ndarray], n_boot: int = DEFAULT_N_BOOT, seed: int = DEFAULT_SEED
+    y: np.ndarray,
+    probs: Sequence[np.ndarray],
+    n_boot: int = DEFAULT_N_BOOT,
+    seed: int = DEFAULT_SEED,
+    groups: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Paired bootstrap of ``(challenge, auroc)`` for several models on the same records.
 
-    Returns two arrays of shape ``(n_models, n_boot)``.
+    ``groups`` (:func:`group_codes`) switches to patient-level resampling.  Returns two
+    arrays of shape ``(n_models, n_boot)``.
     """
     ranked = [RankedScores.build(y, p) for p in probs]
     ch = np.empty((len(ranked), n_boot))
     au = np.empty((len(ranked), n_boot))
     start = 0
-    for w in bootstrap_weights(len(y), n_boot, seed):
+    for w in bootstrap_weights(len(y), n_boot, seed, groups=groups):
         stop = start + w.shape[0]
         for i, r in enumerate(ranked):
             ch[i, start:stop], au[i, start:stop] = r.metrics(w)
@@ -239,8 +329,13 @@ def score_view(
     n_boot: int = DEFAULT_N_BOOT,
     seed: int = DEFAULT_SEED,
     prob_col: str = "prob_filled",
+    unit: str = DEFAULT_BOOTSTRAP_UNIT,
+    groups: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, object]:
-    """Point estimates and bootstrap 95% CIs for one view of one prediction set."""
+    """Point estimates and bootstrap 95% CIs for one view of one prediction set.
+
+    ``unit`` / ``groups``: resampling unit and ``stem -> group`` map (:func:`group_codes`).
+    """
     sub = df[view_mask(df, view)]
     name = label or view
     if len(sub) == 0 or sub["label"].nunique() < 2:
@@ -262,7 +357,8 @@ def score_view(
         "n_failed": int(sub["prob"].isna().sum()) if "prob" in sub.columns else 0,
     }
     if n_boot > 0:
-        ch, au = bootstrap_metrics(y, [p], n_boot, view_seed(view, seed))
+        codes = group_codes(sub["stem"].astype(str).tolist(), unit, groups)
+        ch, au = bootstrap_metrics(y, [p], n_boot, view_seed(view, seed), groups=codes)
         row["challenge_lo"], row["challenge_hi"], row["challenge_se"] = ci(ch[0])
         row["auroc_lo"], row["auroc_hi"], row["auroc_se"] = ci(au[0])
     return row
@@ -306,7 +402,10 @@ def score_all_views(
     views: Sequence[str] = VIEW_ORDER,
     n_boot: int = DEFAULT_N_BOOT,
     seed: int = DEFAULT_SEED,
+    unit: str = DEFAULT_BOOTSTRAP_UNIT,
+    groups: Optional[Mapping[str, str]] = None,
 ) -> List[Dict[str, object]]:
     """:func:`score_view` for every view; ``suffix`` tags the rows (e.g. ``"·C"``)."""
-    return [score_view(df, v, label=f"{v}{suffix}", n_boot=n_boot, seed=seed) for v in views]
+    return [score_view(df, v, label=f"{v}{suffix}", n_boot=n_boot, seed=seed, unit=unit, groups=groups)
+            for v in views]
 

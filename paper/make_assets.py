@@ -236,8 +236,8 @@ def fig_shortcut(split: pd.DataFrame, gaps: Dict[str, Dict[str, float]], out: Pa
     ax2.set_title("(b) Models score negatives by their length")
     ax2.grid(axis="y", visible=False)
     ax2.tick_params(axis="y", length=0)
-    handles = [Line2D([], [], marker="o", color="none", markerfacecolor=BLUE_DARK, markeredgecolor="white", markersize=7, label="7.34 s records"),
-               Line2D([], [], marker="s", color="none", markerfacecolor=BLUE_LIGHT, markeredgecolor="white", markersize=7, label="10.24 s records")]
+    handles = [Line2D([], [], marker="o", color="none", markerfacecolor=BLUE_DARK, markeredgecolor="white", markersize=7, label="Short records (S7, < 7.5 s)"),
+               Line2D([], [], marker="s", color="none", markerfacecolor=BLUE_LIGHT, markeredgecolor="white", markersize=7, label="Long records (S10, \u2265 9.9 s)")]
     ax2.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.45, -0.3), ncol=2, handletextpad=0.2, columnspacing=1.4)
     fig.savefig(out)
     plt.close(fig)
@@ -247,8 +247,8 @@ def fig_inflation(agg: pd.DataFrame, rescored: pd.DataFrame, dur_only_b: float, 
     fig, ax = plt.subplots(figsize=(4.6, 3.5))
     ys = np.arange(len(LADDER))[::-1]
     series = [("B", "o", BLUE, "Pooled CODE-15% (length cue available)"),
-              ("S7", "s", ORANGE, "Within 7.34 s records"),
-              ("S10", "^", AQUA, "Within 10.24 s records (95% CI)")]
+              ("S7", "s", ORANGE, "Short records (S7, < 7.5 s)"),
+              ("S10", "^", AQUA, "Long records (S10, \u2265 9.9 s; 95% CI)")]
     for y, (group, runs, _, _) in zip(ys, LADDER):
         a = agg[agg["group"] == group].set_index("view")
         per = pd.concat([rescored[(rescored["run"] == r) & (rescored["predictions"] == "A")] for r in runs])
@@ -305,7 +305,7 @@ def fig_stage2(out: Path) -> Dict[str, float]:
 
 
 def fig_round2(r2: pd.DataFrame, rescored: pd.DataFrame, out: Path) -> None:
-    panels = [("S7", "challenge", "(a) TPR@5%\n7.34 s records"), ("S7", "auroc", "(b) AUROC\n7.34 s records"), ("S10+", "auroc", "(c) AUROC, mixed-\nsource 10 s (S10+)")]
+    panels = [("S7", "challenge", "(a) TPR@5%\nshort records (S7)"), ("S7", "auroc", "(b) AUROC\nshort records (S7)"), ("S10+", "auroc", "(c) AUROC, mixed-\nsource 10 s (S10+)")]
     keys = list(R2_RUNS)
     ys = np.arange(len(keys))[::-1]
     fig, axes = plt.subplots(1, 3, figsize=(5.6, 2.7), sharey=True, gridspec_kw={"wspace": 0.12})
@@ -443,7 +443,7 @@ def tab_ladder(agg: pd.DataFrame, gaps: Dict[str, Dict[str, float]], out: Path) 
                     f"{f3(a.loc['S7','challenge_mean'])} & {f3(a.loc['S7','auroc_mean'])} & {f3(a.loc['S10','auroc_mean'])} & ${g['gap']:+.2f}$ \\\\")
     out.write_text(
         "\\begin{tabular}{l c c c c c c c}\n\\hline\n"
-        " & \\multicolumn{2}{c}{Pooled (A)} & Pooled (B) & \\multicolumn{2}{c}{Within 7.34 s (S7)} & 10.24 s (S10) & Length-cue \\\\\n"
+        " & \\multicolumn{2}{c}{Pooled (A)} & Pooled (B) & \\multicolumn{2}{c}{Short records (S7, $<$ 7.5 s)} & Long records (S10, $\\geq$ 9.9 s) & Length-cue \\\\\n"
         "Configuration & TPR@5\\% & AUROC & AUROC & TPR@5\\% & AUROC & AUROC & gap \\\\\n\\hline\n" + "\n".join(rows) + "\n\\hline\n\\end{tabular}\n")
 
 
@@ -455,7 +455,7 @@ def tab_lr(agg: pd.DataFrame, best_epoch: Dict[str, float], out: Path) -> None:
                     f"${a.loc['S7','challenge_mean']:.3f} \\pm {a.loc['S7','challenge_sd']:.3f}$ & {f3(a.loc['S7','auroc_mean'])} & {f3(a.loc['S7','ens_challenge'])} & {best_epoch[key]:.1f} \\\\")
     out.write_text(
         "\\begin{tabular}{l c c c c c c}\n\\hline\n"
-        "Stage-2 & \\multicolumn{2}{c}{Pooled (A)} & \\multicolumn{3}{c}{Within 7.34 s (S7)} & Selected stage-2 \\\\\n"
+        "Stage-2 & \\multicolumn{2}{c}{Pooled (A)} & \\multicolumn{3}{c}{Short records (S7, $<$ 7.5 s)} & Selected stage-2 \\\\\n"
         "learning rate & TPR@5\\% & AUROC & TPR@5\\% & AUROC & Ensemble TPR@5\\% & epoch \\\\\n\\hline\n" + "\n".join(rows) + "\n\\hline\n\\end{tabular}\n")
 
 
@@ -472,14 +472,14 @@ def tab_round2(r2: pd.DataFrame, gaps: Dict[str, Dict[str, float]], out: Path, l
         rows.append(f"{labels[key]} & {f3(a['challenge_mean'])} & {f3(s7['challenge_mean'])} & {d1} & {f3(s7['auroc_mean'])} & {d2} & {f3(sp['auroc_mean'])} & {d3} & ${gaps[key]['gap']:+.2f}$ \\\\")
     out.write_text(
         "\\begin{tabular}{l c c c c c c c c}\n\\hline\n"
-        " & Pooled & \\multicolumn{4}{c}{Within 7.34 s records (S7)} & \\multicolumn{2}{c}{Mixed-source 10 s set (S10+)} & Length- \\\\\n"
+        " & Pooled & \\multicolumn{4}{c}{Short records (S7, $<$ 7.5 s)} & \\multicolumn{2}{c}{Mixed-source 10 s set (S10+)} & Length- \\\\\n"
         "Configuration & TPR@5\\% & TPR@5\\% & $\\Delta$ & AUROC & $\\Delta$ & AUROC & $\\Delta$ & cue gap \\\\\n\\hline\n"
         + "\n".join(rows) + "\n\\hline\n\\end{tabular}\n")
 
 
 def fig_round3(r3: pd.DataFrame, rescored: pd.DataFrame, out: Path) -> None:
     """Round 3, same layout as figure 5: seeds, seed mean, ensemble with CI; vertical line = B0 mean."""
-    panels = [("S7", "challenge", "(a) TPR@5%\n7.34 s records"), ("S7", "auroc", "(b) AUROC\n7.34 s records"), ("S10+", "auroc", "(c) AUROC, mixed-\nsource 10 s (S10+)")]
+    panels = [("S7", "challenge", "(a) TPR@5%\nshort records (S7)"), ("S7", "auroc", "(b) AUROC\nshort records (S7)"), ("S10+", "auroc", "(c) AUROC, mixed-\nsource 10 s (S10+)")]
     keys = list(R3_RUNS)
     ys = np.arange(len(keys))[::-1]
     fig, axes = plt.subplots(1, 3, figsize=(5.6, 2.7), sharey=True, gridspec_kw={"wspace": 0.12})
@@ -532,7 +532,7 @@ def tab_round3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
         rows.append(f"{R3_TEX[key]} & {f3(a['challenge_mean'])} & {f3(s7['challenge_mean'])} & {d1} & {f3(s7['auroc_mean'])} & {d2} & {f3(sp['auroc_mean'])} & {d3} & {f3(sp['ens_auroc'])} & {f3(s10['auroc_mean'])} & {d4} & ${gaps[key]['gap']:+.2f}$ & ${sgaps[key]:+.2f}$ \\\\")
     out.write_text(
         "\\begin{tabular}{l c c c c c c c c c c c c}\n\\hline\n"
-        " & Pooled & \\multicolumn{4}{c}{Within 7.34 s records (S7)} & \\multicolumn{3}{c}{Mixed-source 10 s set (S10+) AUROC} & \\multicolumn{2}{c}{CODE-15\\% 10 s (S10) AUROC} & Length- & Source \\\\\n"
+        " & Pooled & \\multicolumn{4}{c}{Short records (S7, $<$ 7.5 s)} & \\multicolumn{3}{c}{Mixed-source 10 s set (S10+) AUROC} & \\multicolumn{2}{c}{CODE-15\\% 10 s (S10) AUROC} & Length- & Source \\\\\n"
         "Configuration & TPR@5\\% & TPR@5\\% & $\\Delta$ & AUROC & $\\Delta$ & mean & $\\Delta$ & ensemble & mean & $\\Delta$ & cue gap & gap \\\\\n\\hline\n"
         + "\n".join(rows) + "\n\\hline\n\\end{tabular}\n")
 
@@ -617,6 +617,24 @@ def numbers_r3(r3: pd.DataFrame, gaps: Dict[str, Dict[str, float]], sgaps: Dict[
         m = re.search(r"INFER_SECONDS (\d+)", log)
         if m:
             macro("entryInferHours", f"{int(m.group(1)) / 3600:.1f}")
+    out.write_text("\n".join(lines) + "\n")
+
+
+def numbers_filter(agg_a: pd.DataFrame, agg_c: pd.DataFrame, out: Path) -> None:
+    """Macros for the cleaner (band-pass) ablation: view-A and view-C Challenge scores of ladder
+    steps 1, 1b, 5b, 5c, 5d (experiments/README.md 'Batch 1: cleaner ablation')."""
+    lines = ["% generated by paper/make_assets.py -- do not edit"]
+    names = {"row1_defect_fixes": "FiltRowOne", "row1b_neurokit": "FiltRowOneB", "row5b_no_demographics": "FiltRowFiveB",
+             "row5c_bandpass45": "FiltRowFiveC", "row5d_neurokit": "FiltRowFiveD", "row0_baseline": "FiltRowZero"}
+    for group, nm in names.items():
+        a = agg_a[(agg_a["group"] == group) & (agg_a["view"] == "A")]
+        c = agg_c[(agg_c["group"] == group) & (agg_c["view"] == "A")]
+        if a.empty or c.empty:
+            continue
+        va, vc = float(a.iloc[0]["challenge_mean"]), float(c.iloc[0]["challenge_mean"])
+        lines.append(f"\\newcommand{{\\{nm}A}}{{{va:.3f}}}")
+        lines.append(f"\\newcommand{{\\{nm}C}}{{{vc:.3f}}}")
+        lines.append(f"\\newcommand{{\\{nm}CminusA}}{{${vc - va:+.3f}$}}")
     out.write_text("\n".join(lines) + "\n")
 
 
@@ -851,6 +869,7 @@ def main() -> None:
         print("wrote round-3 assets")
     else:
         (PAPER / "numbers_r3.tex").write_text("% round 3 not available yet: no experiments/results/R3_TABLE_A.csv\n")
+    numbers_filter(agg, pd.read_csv(RES / "RESCORED_aggregate_C.csv"), PAPER / "numbers_filter.tex")
     if (RES / "EXTERNAL_SCORES.csv").is_file():
         numbers_external(PAPER / "numbers_ext.tex")
     else:

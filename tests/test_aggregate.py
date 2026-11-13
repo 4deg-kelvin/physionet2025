@@ -48,7 +48,7 @@ def test_ensemble_of_identical_models_equals_the_single_model(toy_results):
     ens = AG.mean_ensemble(frames)
     assert np.array_equal(ens["prob"].to_numpy(), frames[0]["prob"].to_numpy())
     table, _gaps, _rule, _md = AG.run(["single=a", "triple=a,a_copy,a"], "single",
-                                      results_dir=results, durations_path=str(dur), n_boot=100)
+                                      results_dir=results, durations_path=str(dur), n_boot=100, unit="record")
     for view in ("A", "B", "S7"):
         rows = table[table["view"] == view].set_index("group")
         assert rows.loc["triple", "ens_challenge"] == rows.loc["single", "ens_challenge"]
@@ -59,7 +59,7 @@ def test_ensemble_of_identical_models_equals_the_single_model(toy_results):
 def test_paired_difference_of_a_model_with_itself_is_exactly_zero(toy_results):
     results, dur = toy_results
     table, gaps, _rule, md = AG.run(["base=a", "same=a_copy", "other=b"], "base",
-                                    results_dir=results, durations_path=str(dur), n_boot=200)
+                                    results_dir=results, durations_path=str(dur), n_boot=200, unit="record")
     same = table[table["group"] == "same"]
     for col in ("d_challenge", "d_auroc", "d_ens_challenge", "d_ens_auroc",
                 "d_challenge_se", "d_auroc_se", "d_challenge_lo", "d_challenge_hi"):
@@ -76,7 +76,7 @@ def test_unaligned_runs_are_refused(toy_results, tmp_path):
     (results / "short").mkdir()
     frame.to_csv(results / "short" / "predictions_A.csv", index=False)
     with pytest.raises(ValueError):
-        AG.run(["base=a", "x=short"], "base", results_dir=results, durations_path=str(dur), n_boot=10)
+        AG.run(["base=a", "x=short"], "base", results_dir=results, durations_path=str(dur), n_boot=10, unit="record")
 
 
 def test_group_spec_parsing():
@@ -92,7 +92,7 @@ def test_run_suffix_reads_the_tta_predictions(toy_results):
     assert AG.predictions_file(results, "a:tta", "C") == results / "a" / "predictions_C_tta.csv"
     assert AG.predictions_file(results, "a", "A") == results / "a" / "predictions_A.csv"
     table, _gaps, _rule, _md = AG.run(["b=b", "a_tta=a:tta", "a=a"], "b",
-                                      results_dir=results, durations_path=str(dur), n_boot=50)
+                                      results_dir=results, durations_path=str(dur), n_boot=50, unit="record")
     rows = table[table["view"] == "A"].set_index("group")
     assert rows.loc["a_tta", "d_challenge"] == 0.0 and rows.loc["a_tta", "d_auroc"] == 0.0
     assert rows.loc["a", "auroc_mean"] != rows.loc["a_tta", "auroc_mean"]
@@ -130,9 +130,9 @@ def test_round_three_rule(s7_d, s10_d, primary, secondary):
 
 def test_rule_option_defaults_to_round_two(toy_results):
     results, dur = toy_results
-    _t, _g, r2, md2 = AG.run(["a=a", "b=b"], "a", results_dir=results, durations_path=str(dur), n_boot=20)
+    _t, _g, r2, md2 = AG.run(["a=a", "b=b"], "a", results_dir=results, durations_path=str(dur), n_boot=20, unit="record")
     _t, _g, r3, md3 = AG.run(["a=a", "b=b"], "a", results_dir=results, durations_path=str(dur), n_boot=20,
-                             rule="r3")
+                             rule="r3", unit="record")
     assert "S7_auroc_gain_gt_0.010_tpr_not_lower" in r2.columns and "primary" in r3.columns
     assert "PLAN_R2.md §5" in md2 and "Round-3 decision rule" in md3
     with pytest.raises(ValueError):

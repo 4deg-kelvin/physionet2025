@@ -11,12 +11,16 @@
 #SBATCH --cpus-per-task=8
 
 # Build the round-2 comparison table (PLAN_R2.md section 5) from saved predictions.
-# CPU-only: bootstrap resampling over the test records, no model is run.
+# CPU-only: bootstrap resampling over the test patients, no model is run.
 #   sbatch --dependency=afterany:<array id> experiments/batch_r2_table.sh
 set -euo pipefail
 WT=/juice2/scr2/kelvinkn/other_work/edwards/improve_wt
 PY=/juice2/scr2/kelvinkn/conda_envs/physionet/bin/python
 cd "$WT"
+# Bootstrap resampling unit: patient groups (cluster bootstrap, default) or records (the
+# numbers before 2026-11-13):  sbatch --export=ALL,BOOTSTRAP_UNIT=record <this script>
+UNIT=${BOOTSTRAP_UNIT:-patient}
+echo "bootstrap unit: $UNIT"
 for W in A C; do
   $PY experiments/aggregate.py \
     --group B0=finalA_negcap,lrsweep_lr2e5_s43,lrsweep_lr2e5_s44 \
@@ -26,6 +30,6 @@ for W in A C; do
     --group MW_a0.00=r2_MW_s42/alpha0.00,r2_MW_s43/alpha0.00,r2_MW_s44/alpha0.00 \
     --group MW_a0.50=r2_MW_s42/alpha0.50,r2_MW_s43/alpha0.50,r2_MW_s44/alpha0.50 \
     --group MW_a1.00=r2_MW_s42/alpha1.00,r2_MW_s43/alpha1.00,r2_MW_s44/alpha1.00 \
-    --baseline B0 --which $W --out experiments/results/R2_TABLE_$W
+    --baseline B0 --bootstrap-unit "$UNIT" --which $W --out experiments/results/R2_TABLE_$W
 done
 echo "===== DONE ====="

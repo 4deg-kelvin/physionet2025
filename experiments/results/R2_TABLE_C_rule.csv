@@ -1,0 +1,7 @@
+group,S7_tpr_gain_gt_se,S7_auroc_gain_gt_0.010_tpr_not_lower,S10+_auroc_not_lower,gap_shrinks,qualifies,S7_d_challenge
+M1,False,False,True,True,False,0.0018533227429176624
+W1,False,False,True,True,False,-0.004500926661371418
+MW,False,False,True,True,False,-0.005824728620598352
+MW_a0.00,False,False,True,True,False,-0.04024357956049779
+MW_a0.50,False,False,True,True,False,-0.012178978024887488
+MW_a1.00,False,False,True,True,False,-0.005559968228752987

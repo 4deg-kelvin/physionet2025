@@ -9,7 +9,8 @@ C below are all inflated by a length cue.  The decision views are now:
     S10   CODE-15, duration >= 9.9 s  (closest to the hidden cohorts' format, 77 positives)
     S10+  CODE-15 >= 9.9 s negatives + all >= 9.9 s positives (secondary)
 
-each with a bootstrap 95% CI (1,000 resamples), plus the duration-only baseline (a score
+each with a bootstrap 95% CI (1,000 resamples of patients; ``--bootstrap-unit record``
+resamples records instead), plus the duration-only baseline (a score
 that is 1 for short records) and the **length-cue gap** (mean predicted probability of
 CODE-15 negatives, short minus long).  Definitions live in ``experiments/scoring.py``.
 
@@ -50,6 +51,11 @@ Usage
         --preds-a experiments/results/r2_W1_s42/raw_predictions_A.csv \
         --preds-c experiments/results/r2_W1_s42/raw_predictions_C.csv \
         --out-dir experiments/results/r2_W1_s42
+
+    # re-score an existing results folder from its saved predictions_{A,C}.csv, in place
+    # (report.md and the tables; the predictions files are not rewritten):
+    python experiments/eval_report.py --from-saved experiments/results/r2_W1_s42
+    python experiments/eval_report.py --from-saved experiments/results/r3_W1_s42 --saved-suffix tta
 """
 
 from __future__ import annotations
@@ -61,7 +67,7 @@ import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -256,17 +262,21 @@ def build_report(
     *,
     n_boot: int = S.DEFAULT_N_BOOT,
     seed: int = S.DEFAULT_SEED,
+    unit: str = S.DEFAULT_BOOTSTRAP_UNIT,
+    groups: Optional[Mapping[str, str]] = None,
 ) -> Tuple[str, Dict[str, pd.DataFrame]]:
     """Markdown report and its tables for one run (A predictions, optional C predictions).
 
     Both frames carry ``stem, label, source, prob, prob_filled`` and, for the round-2
     views, ``duration_s`` / ``length_group`` (:func:`scoring.attach_durations`).
+    ``unit`` / ``groups``: bootstrap resampling unit and ``stem -> patient group`` map.
     """
     has_dur = "duration_s" in view_a.columns
     views = S.VIEW_ORDER if has_dur else ("A", "B")
-    summary = S.score_all_views(view_a, views=views, n_boot=n_boot, seed=seed)
+    kw = dict(n_boot=n_boot, seed=seed, unit=unit, groups=groups)
+    summary = S.score_all_views(view_a, views=views, **kw)
     if view_c is not None:
-        summary += S.score_all_views(view_c, suffix="·C", views=views, n_boot=n_boot, seed=seed)
+        summary += S.score_all_views(view_c, suffix="·C", views=views, **kw)
 
     diagnostics: List[Dict[str, object]] = []
     if has_dur:
@@ -283,7 +293,7 @@ def build_report(
 
     lines: List[str] = [f"# Evaluation report -- {name}", ""]
     lines += ["## Views (TPR@5% = `challenge`; 95% bootstrap CIs, "
-              f"{n_boot} resamples)", ""]
+              f"{n_boot} {unit}-level resamples)", ""]
     for v in views:
         lines.append(f"* `{v}`: {S.VIEW_DESCRIPTIONS[v]}")
     lines += ["* `·C`: the same view on Test C (organiser-style perturbations)", ""]
@@ -327,9 +337,60 @@ def build_report(
     return "\n".join(lines), tables
 
 
+def _saved_name(folder: Path, report: str) -> str:
+    """The run name from the header of an existing report (``# Evaluation report -- NAME``)."""
+    path = folder / report
+    if path.is_file():
+        first = path.read_text().split("\n", 1)[0]
+        if first.startswith("# Evaluation report -- "):
+            return first[len("# Evaluation report -- "):].strip()
+    return folder.name
+
+
+def load_saved(folder: Path, which: str, suffix: str, durations: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    """``predictions_<which>[_<suffix>].csv`` that :func:`main` wrote earlier, in its row order."""
+    path = folder / (f"predictions_{which}_{suffix}.csv" if suffix else f"predictions_{which}.csv")
+    if not path.is_file():
+        return None
+    df = pd.read_csv(path, dtype={"stem": str}, low_memory=False)
+    if "prob_filled" not in df.columns:
+        df["prob_filled"] = df["prob"].fillna(-1.0)
+    if durations is not None:
+        df = S.attach_durations(df, durations)
+    return df
+
+
+def rescore_saved(args: argparse.Namespace) -> int:
+    """``--from-saved``: rebuild report and tables from saved predictions, in place.
+
+    Writes ``report.md`` and ``<table>.csv`` (or ``report_<suffix>.md`` and
+    ``report_<suffix>_<table>.csv``, the names ``run_r3.sh`` gives the test-time-window
+    pass); never rewrites the predictions files.
+    """
+    folder = Path(args.from_saved)
+    suffix = args.saved_suffix
+    durations = S.load_durations(args.durations) if args.durations else None
+    view_a = load_saved(folder, "A", suffix, durations)
+    if view_a is None:
+        raise FileNotFoundError(f"no saved Test-A predictions in {folder} (suffix {suffix!r})")
+    view_c = load_saved(folder, "C", suffix, durations)
+    report_name = f"report_{suffix}.md" if suffix else "report.md"
+    name = args.name or _saved_name(folder, report_name)
+    groups = S.load_groups(args.split) if args.bootstrap_unit == "patient" else None
+    report, tables = build_report(name, view_a, view_c, n_boot=args.n_boot, seed=args.seed,
+                                  unit=args.bootstrap_unit, groups=groups)
+    print(report)
+    (folder / report_name).write_text(report + "\n")
+    for key, table in tables.items():
+        if not table.empty:
+            table.to_csv(folder / (f"report_{suffix}_{key}.csv" if suffix else f"{key}.csv"), index=False)
+    print(f"\nrewrote {folder / report_name} and the accompanying CSVs")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--name", required=True, help="run name, used in the report header")
+    ap.add_argument("--name", default="", help="run name, used in the report header")
     ap.add_argument("--outputs-a", default="", help="run_model.py outputs on data_test")
     ap.add_argument("--outputs-c", default="", help="run_model.py outputs on data_test_C")
     ap.add_argument("--preds-a", default="", help="predict_batched.py CSV on data_test")
@@ -340,8 +401,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="experiments/data/record_durations.csv ('' to skip the S-views)")
     ap.add_argument("--n-boot", type=int, default=S.DEFAULT_N_BOOT)
     ap.add_argument("--seed", type=int, default=S.DEFAULT_SEED)
+    ap.add_argument("--bootstrap-unit", default=S.DEFAULT_BOOTSTRAP_UNIT, choices=S.BOOTSTRAP_UNITS,
+                    help="resample patients (default; cluster bootstrap) or records")
     ap.add_argument("--out-dir", default="")
+    ap.add_argument("--from-saved", default="",
+                    help="results folder: re-score its saved predictions in place (no --preds/--outputs)")
+    ap.add_argument("--saved-suffix", default="", help="with --from-saved: e.g. 'tta' -> predictions_A_tta.csv")
     args = ap.parse_args(argv)
+    if args.from_saved:
+        return rescore_saved(args)
+    if not args.name:
+        ap.error("--name is required")
 
     source_a = args.preds_a or args.outputs_a
     if not source_a:
@@ -357,7 +427,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if source_c and os.path.exists(source_c):
         view_c = build_view(source_c, truth, ages, durations)
 
-    report, tables = build_report(args.name, view_a, view_c, n_boot=args.n_boot, seed=args.seed)
+    groups = S.load_groups(args.split) if args.bootstrap_unit == "patient" else None
+    report, tables = build_report(args.name, view_a, view_c, n_boot=args.n_boot, seed=args.seed,
+                                  unit=args.bootstrap_unit, groups=groups)
     print(report)
 
     if args.out_dir:

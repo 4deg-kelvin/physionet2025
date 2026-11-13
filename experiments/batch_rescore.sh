@@ -27,6 +27,9 @@ export CUDA_VISIBLE_DEVICES=
 echo "===== ENV ====="; hostname; date; git -C "$WT" rev-parse HEAD
 echo "===== acceptance checks ====="
 $PY experiments/acceptance_r2.py || echo "ACCEPTANCE: at least one check differs (see above)"
-echo "===== rescore every run ====="
-$PY experiments/rescore_all.py
+# Bootstrap resampling unit: patient groups (cluster bootstrap, default) or records (the
+# numbers before 2026-11-13):  sbatch --export=ALL,BOOTSTRAP_UNIT=record experiments/batch_rescore.sh
+UNIT=${BOOTSTRAP_UNIT:-patient}
+echo "===== rescore every run (bootstrap unit: $UNIT) ====="
+$PY experiments/rescore_all.py --bootstrap-unit "$UNIT"
 echo "===== DONE ====="; date

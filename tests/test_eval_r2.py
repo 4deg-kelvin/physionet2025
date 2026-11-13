@@ -49,11 +49,12 @@ def test_view_membership():
 
 def test_known_within_group_scores_and_cis_contain_the_point():
     df = _toy()
-    s7 = S.score_view(df, "S7", n_boot=200)
+    s7 = S.score_view(df, "S7", n_boot=200, unit="record")
     assert s7["auroc"] == pytest.approx(1.0) and s7["challenge"] == pytest.approx(0.5)
-    s10 = S.score_view(df, "S10", n_boot=200)
+    s10 = S.score_view(df, "S10", n_boot=200, unit="record")
     assert s10["auroc"] == pytest.approx(0.0) and s10["challenge"] == pytest.approx(0.0)
-    for row in (s7, s10, S.score_view(df, "B", n_boot=200), S.score_view(df, "S10+", n_boot=200)):
+    for row in (s7, s10, S.score_view(df, "B", n_boot=200, unit="record"),
+                S.score_view(df, "S10+", n_boot=200, unit="record")):
         assert row["challenge_lo"] <= row["challenge"] <= row["challenge_hi"], row
         assert row["auroc_lo"] <= row["auroc"] <= row["auroc_hi"], row
 
@@ -105,7 +106,7 @@ def test_eval_report_builds_every_view(tmp_path):
     import eval_report as ER
 
     df = _toy()
-    report, tables = ER.build_report("toy", df, df, n_boot=50)
+    report, tables = ER.build_report("toy", df, df, n_boot=50, unit="record")
     views = tables["summary"]["view"].tolist()
     assert views == ["A", "B", "S7", "S10", "S10+", "A·C", "B·C", "S7·C", "S10·C", "S10+·C"]
     assert "Length-cue gap" in report and "Duration-only" in report

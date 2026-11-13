@@ -14,12 +14,16 @@
 # (aggregate.py --rule r3: primary S10+ AUROC, secondary S7 TPR@5%).  W1x5 is W1 over all
 # five seeds; W1tta is W1's first three seeds re-scored with 2.5 s test-time windows
 # ("<run>:tta" -> predictions_<A|C>_tta.csv).
-# CPU-only: bootstrap resampling over the test records, no model is run.
+# CPU-only: bootstrap resampling over the test patients, no model is run.
 #   sbatch --dependency=afterany:<array id> experiments/batch_r3_table.sh
 set -euo pipefail
 WT=/juice2/scr2/kelvinkn/other_work/edwards/improve_wt
 PY=/juice2/scr2/kelvinkn/conda_envs/physionet/bin/python
 cd "$WT"
+# Bootstrap resampling unit: patient groups (cluster bootstrap, default) or records (the
+# numbers before 2026-11-13):  sbatch --export=ALL,BOOTSTRAP_UNIT=record <this script>
+UNIT=${BOOTSTRAP_UNIT:-patient}
+echo "bootstrap unit: $UNIT"
 for W in A C; do
   $PY experiments/aggregate.py \
     --group B0=r3_B0_s42,r3_B0_s43,r3_B0_s44 \
@@ -28,6 +32,6 @@ for W in A C; do
     --group W1R=r3_W1R_s42,r3_W1R_s43,r3_W1R_s44 \
     --group W1S=r3_W1S_s42,r3_W1S_s43,r3_W1S_s44 \
     --group W1tta=r3_W1_s42:tta,r3_W1_s43:tta,r3_W1_s44:tta \
-    --baseline B0 --rule r3 --which $W --out experiments/results/R3_TABLE_$W
+    --baseline B0 --rule r3 --bootstrap-unit "$UNIT" --which $W --out experiments/results/R3_TABLE_$W
 done
 echo "===== DONE ====="

@@ -7,10 +7,10 @@ view (``S7``, ``S10``, ``S10+``, ``A``, ``B``; see ``experiments/scoring.py``):
 * per-configuration **mean +/- sd** of TPR@5% (the challenge score) and AUROC over seeds;
 * the **seed-ensemble** score (mean of the members' probabilities; deep ensembles,
   Lakshminarayanan et al., NeurIPS 2017) with a bootstrap 95% CI;
-* **paired-bootstrap differences** against a named baseline: test records are resampled
-  (1,000 times by default) and every model is scored on the *same* resamples, so the SE
-  of a difference reflects only model-to-model variation.  Reported for the seed means
-  and for the ensembles;
+* **paired-bootstrap differences** against a named baseline: test patients are resampled
+  (1,000 times by default; ``--bootstrap-unit record`` resamples records, as before) and
+  every model is scored on the *same* resamples, so the SE of a difference reflects only
+  model-to-model variation.  Reported for the seed means and for the ensembles;
 * the **length-cue gap** (CODE-15 negatives, short minus long mean probability), mean +/- sd;
 * a pre-registered decision rule, when ``S7`` and ``S10+`` are among the views:
   ``--rule r2`` (default) is PLAN_R2.md section 5, ``--rule r3`` the round-3 rule
@@ -34,7 +34,7 @@ import argparse
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -140,8 +140,14 @@ def aggregate_view(
     *,
     n_boot: int = S.DEFAULT_N_BOOT,
     seed: int = S.DEFAULT_SEED,
+    unit: str = S.DEFAULT_BOOTSTRAP_UNIT,
+    stem_groups: Optional[Mapping[str, str]] = None,
 ) -> List[Dict[str, object]]:
-    """One row per group for ``view``: seed mean/sd, ensemble, paired differences."""
+    """One row per group for ``view``: seed mean/sd, ensemble, paired differences.
+
+    ``unit`` / ``stem_groups``: bootstrap resampling unit and ``stem -> patient group``
+    map (:func:`scoring.group_codes`).
+    """
     ref = groups[0].frames[0]
     mask = S.view_mask(ref, view)
     y = ref.loc[mask, "label"].to_numpy(dtype=float)
@@ -159,7 +165,8 @@ def aggregate_view(
         index[g.name] = (member_rows, len(probs))
         probs.append(ens.loc[mask, "prob_filled"].to_numpy(dtype=float))
 
-    boot_ch, boot_au = S.bootstrap_metrics(y, probs, n_boot, S.view_seed(view, seed))
+    codes = S.group_codes(ref.loc[mask, "stem"].astype(str).tolist(), unit, stem_groups)
+    boot_ch, boot_au = S.bootstrap_metrics(y, probs, n_boot, S.view_seed(view, seed), groups=codes)
     if baseline not in index:
         raise KeyError(f"baseline {baseline!r} is not one of the groups")
     base_members, base_ens = index[baseline]
@@ -315,8 +322,10 @@ def _d(point: float, se: float) -> str:
 
 
 def to_markdown(rows: pd.DataFrame, gaps: pd.DataFrame, rule: pd.DataFrame, baseline: str,
-                which: str, n_boot: int, rule_name: str = "r2") -> str:
-    lines = [f"# Aggregate ({which} predictions; baseline `{baseline}`; {n_boot} paired resamples)", ""]
+                which: str, n_boot: int, rule_name: str = "r2",
+                unit: str = S.DEFAULT_BOOTSTRAP_UNIT) -> str:
+    lines = [f"# Aggregate ({which} predictions; baseline `{baseline}`; {n_boot} paired "
+             f"{unit}-level resamples)", ""]
     lines.append("TPR@5% = challenge score.  `mean ± sd` over seeds; ensemble = mean of probabilities "
                  "with a 95% bootstrap CI; Δ = difference vs the baseline ± paired-bootstrap SE.")
     for view in rows["view"].unique():
@@ -358,8 +367,15 @@ def run(
     n_boot: int = S.DEFAULT_N_BOOT,
     seed: int = S.DEFAULT_SEED,
     rule: str = "r2",
+    unit: str = S.DEFAULT_BOOTSTRAP_UNIT,
+    split_path: Optional[str] = None,
+    stem_groups: Optional[Mapping[str, str]] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, str]:
-    """Load, aggregate and format; returns ``(rows, gaps, rule, markdown)``."""
+    """Load, aggregate and format; returns ``(rows, gaps, rule, markdown)``.
+
+    Patient groups come from ``stem_groups`` if given, else from ``split_path``
+    (default :data:`scoring.DEFAULT_SPLIT`); unused when ``unit == "record"``.
+    """
     if rule not in RULES:
         raise ValueError(f"unknown rule {rule!r}; choose from {sorted(RULES)}")
     durations = S.load_durations(durations_path)
@@ -368,13 +384,16 @@ def run(
         name, runs = parse_group(spec)
         groups.append(Group(name, runs, [load_run(results_dir, r, which, durations) for r in runs]))
     check_aligned([f for g in groups for f in g.frames])
+    if unit == "patient" and stem_groups is None:
+        stem_groups = S.load_groups(split_path)
     rows: List[Dict[str, object]] = []
     for view in views:
-        rows.extend(aggregate_view(groups, baseline, view, n_boot=n_boot, seed=seed))
+        rows.extend(aggregate_view(groups, baseline, view, n_boot=n_boot, seed=seed,
+                                   unit=unit, stem_groups=stem_groups))
     table = pd.DataFrame(rows)
     gaps = pd.DataFrame(length_gap_rows(groups))
     decided = RULES[rule][0](table, gaps, baseline) if {"S7", "S10+"} <= set(views) else pd.DataFrame()
-    return table, gaps, decided, to_markdown(table, gaps, decided, baseline, which, n_boot, rule)
+    return table, gaps, decided, to_markdown(table, gaps, decided, baseline, which, n_boot, rule, unit)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -389,6 +408,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--n-boot", type=int, default=S.DEFAULT_N_BOOT)
     ap.add_argument("--seed", type=int, default=S.DEFAULT_SEED)
     ap.add_argument("--rule", default="r2", choices=sorted(RULES), help="decision rule (default r2)")
+    ap.add_argument("--bootstrap-unit", default=S.DEFAULT_BOOTSTRAP_UNIT, choices=S.BOOTSTRAP_UNITS,
+                    help="resample patients (default; cluster bootstrap) or records")
+    ap.add_argument("--split", default=str(S.DEFAULT_SPLIT), help="split CSV with the patient groups")
     ap.add_argument("--out", default="", help="output prefix: writes <out>.md, <out>.csv, <out>_gap.csv")
     args = ap.parse_args(argv)
 
@@ -397,6 +419,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args.group, args.baseline, which=args.which, views=views,
         results_dir=Path(args.results_dir), durations_path=args.durations,
         n_boot=args.n_boot, seed=args.seed, rule=args.rule,
+        unit=args.bootstrap_unit, split_path=args.split,
     )
     print(md)
     if args.out:

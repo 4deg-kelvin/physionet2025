@@ -654,3 +654,17 @@ Format: **D-<date>-<n>**. Status: `active` | `superseded by D-…` | `open`.
   (official entry, hackathon entry, revised entry) and keeps the statement that the revised entry's gain is not attributable
   to a single change.
 - **Status:** closed.
+
+## D-2026-11-13-3 — Uncertainty is now a patient-level (cluster) bootstrap; every table regenerated
+- **Why:** a referee-style read (Codex, gpt-6.1-sol) pointed out that the bootstrap resampled held-out records although
+  CODE-15% has 1.47 examinations per patient, so SEs and CIs were optimistic.
+- **Change:** `experiments/scoring.py` `bootstrap_unit="patient"` (default; `"record"` kept): each resample draws patient
+  groups from the split CSV (`c15_<patient>`, `ptb_<patient>`, one group per SaMi-Trop record) with the same seed convention,
+  so draws stay paired across models and views; tests in `tests/test_bootstrap_patient.py` (CPU suite 18489585 passed).
+  Regenerated on SLURM: RESCORED (18489670), R2 (18489671), R3 (18489672), R3_W1 (18489673), R4 (18489674), mixes
+  (18489675), per-run reports (18489676). Record-level tables kept in `experiments/results/_record_level_backup/`.
+- **Effect:** SEs of paired differences grow by about 5–25% (e.g. round-2 W1 S10+ AUROC +0.056: SE 0.0102 → 0.0106; W1R vs
+  W1 on S7 TPR@5% +0.006: SE 0.0049 → 0.0055, i.e. 1.3 → 1.1 SE). Rule outcomes of rounds 2 and 3 are unchanged
+  (`*_rule.csv` identical). Round 4's margin (W1R×5 on S10) becomes ≈1 SE; moot, since the second entry is not used
+  (D-2026-11-13-2). Paper macros regenerate from the new tables; the Methods text describes the patient-level bootstrap.
+- **Status:** active.
